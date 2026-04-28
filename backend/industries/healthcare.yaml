@@ -1,0 +1,189 @@
+id: healthcare
+name: "Healthcare & Pharmaceuticals"
+sector: Public
+detection_keywords:
+  company: [health, healthcare, hospital, pharma, pharmaceutical, "life sciences",
+            biotech, biotechnology, medical, clinical, nhs, "health system",
+            pfizer, novartis, roche, astrazeneca, "johnson & johnson", merck,
+            "ge healthcare", medtronic, abbott, "boston scientific", "becton dickinson",
+            "stryker", "zimmer biomet", "edwards lifesciences", "danaher",
+            "cvs health", "unitedhealth", anthem, cigna, "humana", "elevance",
+            "quest diagnostics", "labcorp", "mckesson", "cardinal health", "amerisourcebergen",
+            "mayo clinic", "cleveland clinic", "kaiser", "tenet healthcare", "hca"]
+  industry_hint: [healthcare, pharma, "life sciences", biotech, medical, clinical,
+                  hospital, "drug discovery", "medical device", diagnostics,
+                  "health insurance", payer, provider, "health system",
+                  genomics, "medical technology", medtech, biologics]
+  designation: ["chief medical officer", "clinical director", "consultant physician",
+                "head of clinical", "pharmacist", "nurse manager", "medical director",
+                "physician", "surgeon", "radiologist", "cardiologist", "oncologist",
+                "clinical research", "regulatory affairs", "medical affairs",
+                "pharmacovigilance", "health economics", "market access"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Chairman"
+    canonical:
+      - "Chairman"
+      - "Board Member"
+      - "Non-Executive Director"
+      - "Independent Director"
+    patterns: ["chairman", "non.?exec", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite / Executive"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Medical Officer"
+      - "Chief Operating Officer"
+      - "Chief Financial Officer"
+      - "Chief Scientific Officer"
+      - "Chief Nursing Officer"
+      - "President"
+    patterns: ["chief \\w+ officer", "chief medical", "chief scientific", "chief nursing"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CMO: "Chief Medical Officer"
+      CSO: "Chief Scientific Officer"
+      CNO: "Chief Nursing Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+
+  - layer: 2
+    label: "Medical Director / VP"
+    canonical:
+      - "Medical Director"
+      - "Clinical Director"
+      - "Vice President"
+      - "Director of Medicine"
+    patterns: ["medical director", "clinical director", "vice president"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 3
+    label: "Consultant / Director"
+    canonical:
+      - "Consultant Physician"
+      - "Consultant Surgeon"
+      - "Director of Nursing"
+      - "Head of Department"
+    patterns: ["consultant physician", "consultant surgeon", "director of nursing", "head of"]
+    abbreviations: {}
+
+  - layer: 4
+    label: "Senior Doctor / Department Head"
+    canonical:
+      - "Senior Consultant"
+      - "Head of Oncology"
+      - "Head of Cardiology"
+      - "Clinical Lead"
+      - "Ward Manager"
+    patterns: ["senior consultant", "head of \\w+", "clinical lead", "ward manager"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Doctor / Specialist Nurse"
+    canonical:
+      - "General Practitioner"
+      - "GP"
+      - "Registrar"
+      - "Specialist Nurse"
+      - "Pharmacist"
+    patterns: ["\\bdoctor\\b", "\\bgp\\b", "registrar", "specialist nurse", "pharmacist"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Specialist / Charge Nurse"
+    canonical:
+      - "Senior Specialist"
+      - "Charge Nurse"
+      - "Senior Pharmacist"
+      - "Senior Physiotherapist"
+      - "Senior Radiographer"
+      - "Senior Nurse Practitioner"
+    patterns: ["senior specialist", "charge nurse", "senior pharmacist", "senior \\w+therapist",
+               "senior radiographer"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Junior Doctor / Registered Nurse"
+    canonical:
+      - "Junior Doctor"
+      - "Foundation Year 1"
+      - "Foundation Year 2"
+      - "Staff Nurse"
+      - "Registered Nurse"
+      - "Nurse Practitioner"
+    patterns: ["junior doctor", "foundation year", "staff nurse", "registered nurse",
+               "nurse practitioner"]
+    abbreviations:
+      RN: "Registered Nurse"
+
+  - layer: 8
+    label: "Allied Health Professional"
+    canonical:
+      - "Physiotherapist"
+      - "Occupational Therapist"
+      - "Radiographer"
+      - "Sonographer"
+      - "Dietitian"
+      - "Speech Therapist"
+      - "Clinical Coordinator"
+      - "Research Coordinator"
+    patterns: ["physiotherapist", "occupational therapist", "radiographer", "sonographer",
+               "dietitian", "speech therapist", "clinical coordinator"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Healthcare Assistant / Technician"
+    canonical:
+      - "Healthcare Assistant"
+      - "Nursing Assistant"
+      - "Medical Technician"
+      - "Lab Technician"
+      - "Pharmacy Technician"
+      - "Patient Coordinator"
+    patterns: ["healthcare assistant", "nursing assistant", "\\btechnician\\b",
+               "patient coordinator"]
+    abbreviations:
+      HCA: "Healthcare Assistant"
+
+  - layer: 10
+    label: "Student / Intern"
+    canonical:
+      - "Medical Student"
+      - "Nursing Student"
+      - "Intern"
+      - "Trainee"
+    patterns: ["medical student", "nursing student", "\\bintern\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Clinical Services"
+    keywords: [clinical, medical, nursing, surgery, pharmacy, oncology, cardiology]
+    secondaries:
+      - name: "Medicine"
+        keywords: [medicine, physician, internal medicine, cardiology, oncology, neurology]
+      - name: "Surgery"
+        keywords: [surgery, surgical, orthopaedics, neurosurgery]
+      - name: "Nursing"
+        keywords: [nursing, nurse, "nursing management"]
+      - name: "Pharmacy"
+        keywords: [pharmacy, pharmacist, "clinical pharmacy", medicines]
+
+  - primary: "Research & Development"
+    keywords: [research, "r&d", "clinical trials", "drug discovery", "life sciences"]
+    secondaries:
+      - name: "Drug Discovery"
+        keywords: ["drug discovery", "research", "early stage research", biotech]
+      - name: "Clinical Trials"
+        keywords: ["clinical trials", "clinical research", regulatory, "phase 1", "phase 2"]
+
+  - primary: "Operations"
+    keywords: [operations, administration, facilities, "hr operations", "people operations"]
+    secondaries:
+      - name: "Hospital Administration"
+        keywords: ["hospital administration", "healthcare management", operations]
+      - name: "Finance & HR"
+        keywords: [finance, accounting, hr, "human resources", payroll]

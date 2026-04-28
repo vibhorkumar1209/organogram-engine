@@ -1,0 +1,258 @@
+id: energy
+name: "Energy, Oil & Gas, Utilities"
+sector: Public
+detection_keywords:
+  company: [energy, oil, gas, petroleum, power, utilities, electricity, renewable,
+            solar, wind, nuclear, mining, coal, lng, upstream, downstream,
+            exxon, shell, bp, chevron, total, aramco, equinor, engie, eon,
+            "national grid", "duke energy", "nextera", reliance, "ongc",
+            "bhp", rio, glencore, torrent, tata power]
+  industry_hint: [energy, oil gas, petroleum, utilities, power, electricity, renewables,
+                  mining, nuclear, lng, upstream, downstream, midstream]
+  designation: ["petroleum engineer", "reservoir engineer", "drilling engineer",
+                "process engineer", "plant manager", "well site", "subsurface",
+                "geologist", "geophysicist", "refinery", "turbine", "commissioning"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+      - "Vice Chairman"
+    patterns: ["\\bchairman\\b", "non.?exec", "independent director"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Technology Officer"
+      - "Chief Commercial Officer"
+      - "Chief Sustainability Officer"
+      - "Chief Digital Officer"
+      - "Chief Safety Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief \\w+ officer", "\\bfounder\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      CTO: "Chief Technology Officer"
+      CSO: "Chief Sustainability Officer"
+
+  - layer: 2
+    label: "EVP / Senior VP / Head of Business"
+    canonical:
+      - "Executive Vice President"
+      - "Senior Vice President"
+      - "EVP Upstream"
+      - "EVP Downstream"
+      - "SVP Operations"
+      - "Country Manager"
+      - "Country President"
+    patterns: ["executive vice president", "evp \\w+", "svp \\w+", "global head", "country manager"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical:
+      - "Vice President"
+      - "General Manager"
+      - "VP Exploration"
+      - "VP Production"
+      - "VP Refining"
+      - "VP Engineering"
+      - "VP HSE"
+      - "VP Commercial"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / Head"
+    canonical:
+      - "Senior Director"
+      - "Head of Operations"
+      - "Head of Engineering"
+      - "Head of HSE"
+      - "Head of Projects"
+      - "Regional Director"
+      - "Head of Subsurface"
+    patterns: ["senior director", "head of \\w+", "regional director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Plant Manager"
+    canonical:
+      - "Director"
+      - "Plant Manager"
+      - "Refinery Manager"
+      - "Asset Manager"
+    patterns: ["\\bdirector\\b", "plant manager", "asset manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Principal Engineer"
+    canonical:
+      - "Senior Manager"
+      - "Principal Engineer"
+      - "Principal Geologist"
+      - "Principal Reservoir Engineer"
+      - "Drilling Superintendent"
+    patterns: ["senior manager", "principal engineer", "principal \\w+", "superintendent"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Senior Engineer"
+    canonical:
+      - "Manager"
+      - "Senior Engineer"
+      - "Senior Geologist"
+      - "Senior Reservoir Engineer"
+      - "Operations Manager"
+      - "Project Manager"
+      - "Shift Manager"
+    patterns: ["\\bmanager\\b", "senior engineer", "senior \\w+"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Engineer / Geologist / Specialist"
+    canonical:
+      - "Petroleum Engineer"
+      - "Reservoir Engineer"
+      - "Drilling Engineer"
+      - "Process Engineer"
+      - "Geologist"
+      - "Geophysicist"
+      - "Electrical Engineer"
+      - "Mechanical Engineer"
+      - "Instrument Engineer"
+      - "Project Engineer"
+    patterns: ["\\bengineer\\b", "\\bgeologist\\b", "\\bgeophysicist\\b"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Technician"
+    canonical:
+      - "Analyst"
+      - "Technician"
+      - "Operator"
+      - "Specialist"
+      - "Field Operator"
+    patterns: ["\\banalyst\\b", "\\btechnician\\b", "\\boperator\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical:
+      - "Graduate Engineer"
+      - "Trainee"
+      - "Intern"
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Executive Leadership"
+    keywords: [board, chairman, "non-executive", "independent director", "board member",
+               "executive committee", "group executive", "managing director",
+               "chief executive", "executive leadership"]
+    secondaries:
+      - name: "Board of Directors"
+        keywords: [board, chairman, "non-executive director", "independent director", trustee]
+      - name: "Executive Leadership"
+        keywords: ["chief executive", "managing director", "executive committee", "group executive"]
+
+  - primary: "Exploration & Production"
+    keywords: [upstream, exploration, production, reservoir, drilling, subsurface,
+               geology, geophysics, well, "e&p", seismic, petroleum,
+               "petroleum engineer", "reservoir engineer", "drilling engineer",
+               geologist, geophysicist, petrophysicist]
+    secondaries:
+      - name: "Reservoir Engineering"
+        keywords: [reservoir, reservoir engineer, simulation, petrophysics]
+      - name: "Drilling"
+        keywords: [drilling, well, rig, completion, workover, drillsite]
+      - name: "Geoscience"
+        keywords: [geology, geologist, geophysics, geophysicist, seismic, petrophysics]
+      - name: "Production Operations"
+        keywords: [production, field operations, well operations, flow assurance]
+
+  - primary: "Refining"
+    keywords: [downstream, refining, refinery, trading, crude, petrochemical,
+               commercial, supply, product marketing, lng]
+    secondaries:
+      - name: "Refining"
+        keywords: [refinery, refining, process, crude distillation, cracking]
+      - name: "Trading & Commercial"
+        keywords: [trading, commodity, commercial, supply, cargo, crude trading]
+      - name: "Petrochemicals"
+        keywords: [petrochemical, polymer, chemical, plastics, ethylene]
+
+  - primary: "Operations"
+    keywords: [operations, maintenance, plant, facility, production, reliability,
+               integrity, asset, turnaround, shutdown]
+    secondaries:
+      - name: "Plant Operations"
+        keywords: [plant, facility, operations, control room, shift]
+      - name: "Maintenance & Integrity"
+        keywords: [maintenance, integrity, reliability, inspection, corrosion, asset care]
+      - name: "Projects"
+        keywords: [projects, capital projects, project management, epc, commissioning]
+
+  - primary: "HSE"
+    keywords: [hse, "health safety environment", safety, environment,
+               hsseq, "process safety", "fire safety", emergency, "she committee"]
+    secondaries:
+      - name: "Process Safety"
+        keywords: [process safety, hazops, pssr, pressure systems, safety engineering]
+      - name: "Environmental"
+        keywords: [environment, environmental, sustainability, emissions, carbon, esg]
+
+  - primary: "Engineering"
+    keywords: [engineering, projects, capital projects, epc, project delivery,
+               mechanical, electrical, civil, instrument, construction]
+    secondaries:
+      - name: "Mechanical Engineering"
+        keywords: [mechanical, rotating equipment, static equipment, piping]
+      - name: "Electrical & Instrumentation"
+        keywords: [electrical, instrument, control, automation, plc, dcs, scada]
+      - name: "Civil & Structural"
+        keywords: [civil, structural, foundation, construction]
+      - name: "Project Management"
+        keywords: [project management, pmo, project controls, planning, scheduling]
+
+  - primary: "Renewable Energy"
+    keywords: [renewable, solar, wind, hydrogen, battery, energy storage,
+               green energy, clean energy, low carbon, decarbonisation]
+    secondaries:
+      - name: "Solar"
+        keywords: [solar, photovoltaic, pv]
+      - name: "Wind"
+        keywords: [wind, offshore wind, onshore wind, turbine]
+      - name: "Hydrogen & New Fuels"
+        keywords: [hydrogen, green hydrogen, biofuel, ammonia, synthetic fuel]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, tax, treasury, investor relations, financial planning]
+    secondaries:
+      - name: "FP&A"
+        keywords: [fp&a, financial planning, budgeting, forecasting]
+      - name: "Treasury"
+        keywords: [treasury, cash, liquidity, hedging]
+
+  - primary: "Commercial"
+    keywords: [commercial, gas marketing, lng, gas, contracts, pricing, supply]
+    secondaries:
+      - name: "Gas Trading"
+        keywords: [gas trading, power trading, lng trading, gas marketing]
+      - name: "Contracts"
+        keywords: [contracts, commercial agreements, joa, psa, gspa]

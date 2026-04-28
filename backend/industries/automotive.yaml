@@ -1,0 +1,225 @@
+id: automotive
+name: "Automotive & Manufacturing"
+sector: Automotive
+detection_keywords:
+  company: [automotive, auto, vehicle, motor, motors, "tata motors", toyota, ford,
+            bmw, mercedes, "general motors", gm, stellantis, volkswagen, renault,
+            honda, nissan, hyundai, mahindra, maruti, tesla, rivian, lucid,
+            "electric vehicle", ev, "oem"]
+  industry_hint: [automotive, vehicle, "ev", "electric vehicle", powertrain, manufacturing,
+                  "supply chain", assembly, "oem", "tier 1", "tier 2"]
+  designation: ["plant manager", "powertrain", "vehicle dynamics", "supply chain",
+                "assembly", "quality engineer", "manufacturing engineer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors / Group Chairman"
+    canonical:
+      - "Chairman"
+      - "Board Director"
+      - "Non-Executive Director"
+      - "Group Chairman"
+      - "Board Member"
+    patterns: ["chairman", "non.?exec", "board member", "board director"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "Group CEO / President"
+    canonical:
+      - "President & CEO"
+      - "Group President"
+      - "Chief Executive Officer"
+      - "Group CEO"
+      - "President"
+      - "Chief Operating Officer"
+      - "Chief Financial Officer"
+      - "Chief Technology Officer"
+    patterns: ["chief \\w+ officer", "group president", "group ceo"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technology Officer"
+
+  - layer: 2
+    label: "SVP / EVP / Global Head"
+    canonical:
+      - "SVP Global Supply Chain"
+      - "SVP Manufacturing"
+      - "SVP Engineering"
+      - "Executive Vice President"
+      - "Senior Vice President"
+      - "Global Head"
+      - "Group Vice President"
+    patterns: ["senior vice president", "\\bsvp\\b", "executive vice president", "\\bevp\\b", "global head"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical:
+      - "Vice President"
+      - "General Manager"
+      - "VP Manufacturing"
+      - "VP Engineering"
+      - "VP Quality"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "general manager", "\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Plant Manager / Senior Director"
+    canonical:
+      - "Plant Manager"
+      - "Senior Director"
+      - "Regional Director"
+      - "Head of Manufacturing"
+      - "Head of Quality"
+      - "Programme Director"
+    patterns: ["plant manager", "senior director", "regional director", "head of"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Department Head"
+    canonical:
+      - "Director"
+      - "Engineering Director"
+      - "Manufacturing Director"
+      - "Quality Director"
+    patterns: ["\\bdirector\\b", "\\bhead\\b"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Manufacturing Manager"
+      - "Quality Manager"
+      - "Programme Manager"
+    patterns: ["senior manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Team Leader"
+    canonical:
+      - "Manager"
+      - "Team Leader"
+      - "Shift Manager"
+      - "Production Manager"
+    patterns: ["\\bmanager\\b", "team leader", "team lead"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Specialist"
+    canonical:
+      - "Senior Engineer"
+      - "Principal Engineer"
+      - "Lead Engineer"
+      - "Senior Specialist"
+    patterns: ["senior engineer", "principal engineer", "lead engineer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Analyst"
+    canonical:
+      - "Engineer"
+      - "Manufacturing Engineer"
+      - "Quality Engineer"
+      - "Process Engineer"
+      - "Vehicle Dynamics Engineer"
+    patterns: ["\\bengineer\\b", "\\banalyst\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern / Apprentice"
+    canonical:
+      - "Graduate Engineer"
+      - "Intern"
+      - "Apprentice"
+      - "Trainee"
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\bapprentice\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Engineering"
+    keywords: [engineering, powertrain, ev, "electric vehicle", "battery", "adas",
+               autonomous, firmware, embedded, "vehicle dynamics", "chassis"]
+    secondaries:
+      - name: "PowerTrain Engineering"
+        keywords: [powertrain, drivetrain, transmission, engine, propulsion, combustion,
+                   "internal combustion", "driveline"]
+      - name: "EV & Battery Systems"
+        keywords: ["ev", "electric vehicle", "battery", "battery systems", "battery cell",
+                   "energy storage", "bms", "battery management"]
+      - name: "Autonomous & ADAS"
+        keywords: [autonomous, "self-driving", adas, lidar, radar, "sensor fusion",
+                   "computer vision", "perception", "autonomous driving"]
+      - name: "Body & Chassis"
+        keywords: ["body engineering", chassis, "vehicle dynamics", suspension, steering,
+                   brakes, "body structure", "exterior"]
+      - name: "Embedded & Software"
+        keywords: [embedded, firmware, "infotainment", "telematics", "ota",
+                   "over the air", "hmi", "vehicle software"]
+      - name: "Quality Assurance"
+        keywords: ["quality assurance", qa, qc, testing, validation, verification,
+                   "quality engineering", "quality control"]
+      - name: "R&D"
+        keywords: ["r&d", research, innovation, "advanced engineering", lab, "concept"]
+
+  - primary: "Operations"
+    keywords: [manufacturing, production, assembly, plant, factory, operations,
+               "supply chain", logistics, procurement]
+    secondaries:
+      - name: "Assembly Operations"
+        keywords: [assembly, production, "assembly line", "body shop", "paint shop",
+                   "general assembly", "trim and final"]
+      - name: "Supply Chain"
+        keywords: ["supply chain", logistics, procurement, sourcing, vendor, purchasing,
+                   "tier 1", "tier 2", "just in time", "kanban"]
+      - name: "Manufacturing Engineering"
+        keywords: ["manufacturing engineering", "process engineering", tooling,
+                   "plant engineering", "industrial engineering"]
+      - name: "Quality Control"
+        keywords: ["quality control", "incoming quality", "supplier quality",
+                   "production quality", "defect", "six sigma"]
+
+  - primary: "Sales"
+    keywords: [sales, "dealer network", distribution, aftermarket, "fleet sales",
+               "retail sales", dealer, "dealer management", "vehicle sales",
+               "sales operations", "account management"]
+    secondaries:
+      - name: "Vehicle Sales"
+        keywords: [sales, dealer, "fleet sales", "retail sales", distribution,
+                   "dealer management", "national accounts"]
+      - name: "Aftersales & Service"
+        keywords: [aftersales, service, warranty, parts, accessories,
+                   "aftersales operations", "service operations"]
+      - name: "Sales Operations"
+        keywords: ["sales operations", "sales planning", "revenue operations",
+                   "sales analytics", "sales enablement"]
+
+  - primary: "Marketing"
+    keywords: [marketing, brand, "marketing communications", "product marketing",
+               "digital marketing", campaign, advertising, "brand management",
+               "corporate communications", "trade marketing", "channel marketing"]
+    secondaries:
+      - name: "Brand & Communications"
+        keywords: [brand, communications, advertising, pr, "public relations",
+                   "brand management", "corporate communications"]
+      - name: "Digital Marketing"
+        keywords: ["digital marketing", campaign, "social media", seo, sem,
+                   "performance marketing", "growth marketing"]
+      - name: "Trade & Channel Marketing"
+        keywords: ["trade marketing", "channel marketing", "shopper marketing",
+                   "retail marketing", "customer marketing"]
+
+  - primary: "Customer Service"
+    keywords: ["customer service", "customer experience", "customer care",
+               "customer support", cx, "contact centre", "contact center"]
+    secondaries:
+      - name: "Customer Experience"
+        keywords: ["customer experience", cx, "customer satisfaction", "voice of customer"]
+      - name: "Customer Support"
+        keywords: ["customer support", "customer care", "contact centre", "helpdesk"]

@@ -1,0 +1,182 @@
+id: government
+name: "Government & Public Sector"
+sector: Govt
+detection_keywords:
+  company: [government, ministry, "department of", bureau, agency, federal, "state govt",
+            municipal, secretariat, "civil service", "cabinet office", "public sector",
+            "local authority", "local government", council, "nhs", "hmrc", "fca",
+            "bank of england", "regulatory authority"]
+  industry_hint: [government, "public sector", ministry, policy, regulatory, "civil service"]
+  designation: ["secretary", "commissioner", "minister", "permanent secretary",
+                "director general", "chief inspector", "under secretary"]
+
+hierarchy:
+  - layer: 0
+    label: "Minister / Head of State"
+    canonical:
+      - "President"
+      - "Prime Minister"
+      - "Minister"
+      - "Cabinet Minister"
+      - "Secretary of State"
+      - "Governor"
+      - "Commissioner"
+    patterns: ["\\bminister\\b", "\\bpresident\\b", "prime minister", "secretary of state"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "Permanent Secretary / Director General"
+    canonical:
+      - "Permanent Secretary"
+      - "Secretary General"
+      - "Director General"
+      - "Chief Executive"
+      - "Accountable Officer"
+      - "Chief Inspector"
+    patterns: ["permanent secretary", "director general", "secretary general", "chief executive"]
+    abbreviations:
+      PS: "Permanent Secretary"
+      DG: "Director General"
+
+  - layer: 2
+    label: "Deputy Secretary / Executive Director"
+    canonical:
+      - "Deputy Secretary"
+      - "Under Secretary"
+      - "Executive Director"
+      - "Deputy Director General"
+      - "Second Permanent Secretary"
+    patterns: ["deputy secretary", "under secretary", "deputy director general"]
+    abbreviations: {}
+
+  - layer: 3
+    label: "Assistant Secretary / Director"
+    canonical:
+      - "Assistant Secretary"
+      - "Additional Secretary"
+      - "Director"
+      - "Deputy Director"
+      - "Head of Division"
+    patterns: ["assistant secretary", "additional secretary", "\\bdirector\\b"]
+    abbreviations: {}
+
+  - layer: 4
+    label: "Joint Secretary / Bureau Chief"
+    canonical:
+      - "Joint Secretary"
+      - "Bureau Chief"
+      - "Deputy Director"
+      - "Regional Director"
+      - "District Collector"
+      - "Superintendent"
+    patterns: ["joint secretary", "bureau chief", "district collector", "regional director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Deputy Secretary / Senior Policy Advisor"
+    canonical:
+      - "Deputy Secretary"
+      - "Senior Policy Advisor"
+      - "Head of Team"
+      - "Branch Head"
+      - "Grade 6"
+      - "Grade 7"
+    patterns: ["senior policy", "head of team", "grade 6", "grade 7"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Executive Officer / Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Executive Officer"
+      - "Grade 7"
+      - "Policy Manager"
+    patterns: ["senior manager", "senior executive officer", "policy manager"]
+    abbreviations:
+      SEO: "Senior Executive Officer"
+
+  - layer: 7
+    label: "Higher Executive Officer / Manager"
+    canonical:
+      - "Manager"
+      - "Higher Executive Officer"
+      - "Policy Adviser"
+      - "Programme Manager"
+    patterns: ["\\bmanager\\b", "higher executive officer", "policy adviser"]
+    abbreviations:
+      HEO: "Higher Executive Officer"
+
+  - layer: 8
+    label: "Executive Officer / Senior Analyst"
+    canonical:
+      - "Executive Officer"
+      - "Senior Analyst"
+      - "Senior Policy Analyst"
+      - "Senior Researcher"
+    patterns: ["executive officer", "senior analyst", "senior researcher"]
+    abbreviations:
+      EO: "Executive Officer"
+
+  - layer: 9
+    label: "Administrative Officer / Analyst"
+    canonical:
+      - "Administrative Officer"
+      - "Policy Analyst"
+      - "Researcher"
+      - "Officer"
+      - "Analyst"
+    patterns: ["administrative officer", "policy analyst", "\\banalyst\\b", "\\bofficer\\b"]
+    abbreviations:
+      AO: "Administrative Officer"
+
+  - layer: 10
+    label: "Administrative Assistant / Intern"
+    canonical:
+      - "Administrative Assistant"
+      - "Graduate Fast Stream"
+      - "Intern"
+      - "Trainee"
+      - "Graduate"
+    patterns: ["\\bintern\\b", "graduate fast stream", "\\btrainee\\b", "\\bgraduate\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Policy & Strategy"
+    keywords: [policy, strategy, strategic, advisory, planning, legislation]
+    secondaries:
+      - name: "Policy Development"
+        keywords: [policy, "policy development", legislation, "policy analysis"]
+      - name: "Strategy & Planning"
+        keywords: [strategy, "strategic planning", "long term planning", transformation]
+
+  - primary: "Operations"
+    keywords: [operations, delivery, service, implementation, programme]
+    secondaries:
+      - name: "Service Delivery"
+        keywords: [delivery, "service delivery", "frontline services", implementation]
+      - name: "Programme Management"
+        keywords: [programme, pmo, project, "programme management", "change delivery"]
+
+  - primary: "Legal & Compliance"
+    keywords: [legal, compliance, regulatory, enforcement, legislation]
+    secondaries:
+      - name: "Legal Advisory"
+        keywords: [legal, counsel, solicitor, barrister, "legal advisory", "legal services"]
+      - name: "Regulatory & Enforcement"
+        keywords: [regulatory, enforcement, inspection, "regulatory compliance", licensing]
+
+  - primary: "Finance"
+    keywords: [finance, audit, accounting, treasury, "public spending", expenditure]
+    secondaries:
+      - name: "Public Finance"
+        keywords: [finance, budget, expenditure, "public spending", "financial management"]
+      - name: "Internal Audit"
+        keywords: [audit, assurance, "internal audit", "value for money", "national audit"]
+
+  - primary: "Information Technology"
+    keywords: [digital, technology, it, data, "digital services", "gov.uk"]
+    secondaries:
+      - name: "Digital Services"
+        keywords: [digital, "digital services", "government digital", gdpr, "online services"]
+      - name: "Data & Analytics"
+        keywords: [data, analytics, statistics, "data science", "open data"]

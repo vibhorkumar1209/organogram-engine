@@ -1,0 +1,473 @@
+id: banking_finance
+name: "Banking & Financial Services"
+sector: Public
+detection_keywords:
+  company: [bank, banking, "financial services", "financial group", fintech,
+            "asset management", "wealth management", "capital markets", securities,
+            investments, "investment bank", "credit union", "building society",
+            "financial corp", "bancorp", "fund management",
+            jpmorgan, citigroup, "bank of america", hsbc, barclays, "wells fargo",
+            "goldman sachs", "morgan stanley", "deutsche bank", bnp, "credit suisse",
+            ubs, "standard chartered", "dbs bank", "charles schwab",
+            "t. rowe price", fidelity, vanguard, blackrock, blackstone,
+            mastercard, visa, fiserv, "american express", "comerica", "huntington",
+            "td bank", "royal bank", "lloyds", "natwest", "santander", "ing"]
+  industry_hint: [bank, banking, financial, fintech, lending, mortgage,
+                  treasury, "capital markets", "asset management", "wealth management",
+                  "investment management", "private equity", "hedge fund", "mutual fund",
+                  "fixed income", equities, derivatives, payments, "financial technology"]
+  designation: ["chief financial", "chief risk", "head of credit", "head of lending",
+                "relationship manager", "branch manager", "credit analyst",
+                "mortgage", "underwriter", "aml", "kyc", "portfolio manager",
+                "fund manager", "investment analyst", "equity analyst",
+                "fixed income", "derivatives", "quantitative", "quant"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman of the Board"
+      - "Non-Executive Chairman"
+      - "Non-Executive Director"
+      - "Senior Independent Director"
+      - "Independent Director"
+      - "Board Member"
+      - "Board Director"
+      - "Trustee"
+      - "Supervisory Board Member"
+    patterns:
+      - "non.?exec"
+      - "\\bchairman\\b"
+      - "\\bchairperson\\b"
+      - "independent director"
+      - "board member"
+      - "supervisory board"
+    abbreviations: []
+
+  - layer: 1
+    label: "C-Suite / Executive Management"
+    canonical:
+      - "Group Chief Executive Officer"
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Technology Officer"
+      - "Chief Information Officer"
+      - "Chief Risk Officer"
+      - "Chief Compliance Officer"
+      - "Chief Digital Officer"
+      - "Chief Data Officer"
+      - "Chief Marketing Officer"
+      - "Chief People Officer"
+      - "Chief Human Resources Officer"
+      - "Chief Commercial Officer"
+      - "Chief Credit Officer"
+      - "Chief Investment Officer"
+      - "Chief Revenue Officer"
+      - "Chief Legal Officer"
+      - "Chief Transformation Officer"
+      - "Chief Information Security Officer"
+      - "Chief Analytics Officer"
+      - "Chief Strategy Officer"
+      - "Chief Sustainability Officer"
+      - "Chief Product Officer"
+      - "Chief Growth Officer"
+      - "Chief Customer Officer"
+      - "Chief Experience Officer"
+      - "Group Managing Director"
+      - "President"
+    patterns:
+      - "chief \\w+ officer"
+      - "chief \\w+ \\w+ officer"
+      - "group chief"
+      - "group ceo"
+      - "group md"
+      - "group managing director"
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      CTO: "Chief Technology Officer"
+      CIO: "Chief Information Officer"
+      CRO: "Chief Risk Officer"
+      CCO: "Chief Compliance Officer"
+      CDO: "Chief Digital Officer"
+      CMO: "Chief Marketing Officer"
+      CPO: "Chief People Officer"
+      CHRO: "Chief Human Resources Officer"
+      CLO: "Chief Legal Officer"
+
+  - layer: 2
+    label: "Executive Director / MD / EVP"
+    canonical:
+      - "Managing Director"
+      - "Executive Director"
+      - "Executive Vice President"
+      - "Group Director"
+      - "Group Head"
+      - "Divisional CEO"
+      - "Divisional Managing Director"
+      - "Country CEO"
+      - "Regional CEO"
+    patterns:
+      - "managing director"
+      - "executive vice president"
+      - "\\bevp\\b"
+      - "\\bmd\\b"
+      - "global head"
+      - "group director"
+      - "group head"
+      - "divisional ceo"
+    abbreviations:
+      MD: "Managing Director"
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "Vice President / Divisional Head"
+    canonical:
+      - "Vice President"
+      - "Senior Vice President"
+      - "Director General"
+      - "General Manager"
+      - "Divisional Director"
+      - "Country Head"
+      - "Regional Head"
+      - "Business Head"
+    patterns:
+      - "(?<!associate )(?<!assistant )vice president"
+      - "\\bsvp\\b"
+      - "general manager"
+      - "country head"
+      - "regional head"
+      - "business head"
+      - "\\bvp\\b"
+    abbreviations:
+      VP: "Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head of Business"
+    canonical:
+      - "Senior Director"
+      - "Head of Retail Banking"
+      - "Head of Corporate Banking"
+      - "Head of Treasury"
+      - "Head of Compliance"
+      - "Head of Risk"
+      - "Regional Director"
+      - "Area Director"
+    patterns:
+      - "senior director"
+      - "head of \\w+"
+      - "regional director"
+      - "area director"
+    abbreviations: []
+
+  - layer: 5
+    label: "Director / Head"
+    canonical:
+      - "Director"
+      - "Head"
+      - "Principal"
+    patterns:
+      - "\\bdirector\\b"
+      - "\\bhead\\b"
+      - "\\bprincipal\\b"
+    abbreviations: []
+
+  - layer: 6
+    label: "Senior Manager / Associate Director"
+    canonical:
+      - "Senior Manager"
+      - "Associate Director"
+      - "Deputy Director"
+    patterns:
+      - "senior manager"
+      - "associate director"
+      - "deputy director"
+    abbreviations: []
+
+  - layer: 7
+    label: "Manager / Team Lead"
+    canonical:
+      - "Manager"
+      - "Team Lead"
+      - "Team Leader"
+      - "Branch Manager"
+      - "Relationship Manager"
+      - "Portfolio Manager"
+    patterns:
+      - "\\bmanager\\b"
+      - "team lead"
+      - "portfolio manager"
+    abbreviations: []
+
+  - layer: 8
+    label: "Senior Analyst / Specialist"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Specialist"
+      - "Senior Consultant"
+      - "Senior Associate"
+      - "Senior Officer"
+    patterns:
+      - "senior analyst"
+      - "senior specialist"
+      - "senior associate"
+      - "senior officer"
+    abbreviations: []
+
+  - layer: 9
+    label: "Analyst / Associate / Officer"
+    canonical:
+      - "Analyst"
+      - "Associate"
+      - "Officer"
+      - "Consultant"
+      - "Specialist"
+      - "Executive"
+    patterns:
+      - "\\banalyst\\b"
+      - "\\bassociate\\b"
+      - "\\bofficer\\b"
+      - "\\bconsultant\\b"
+    abbreviations: []
+
+  - layer: 10
+    label: "Graduate / Intern / Entry"
+    canonical:
+      - "Graduate"
+      - "Graduate Analyst"
+      - "Graduate Trainee"
+      - "Intern"
+      - "Trainee"
+      - "Junior"
+      - "Apprentice"
+    patterns:
+      - "\\bgraduate\\b"
+      - "\\bintern\\b"
+      - "\\btrainee\\b"
+      - "\\bjunior\\b"
+      - "\\bapprentice\\b"
+    abbreviations: []
+
+departments:
+  - primary: "Executive Leadership"
+    keywords: [board, "non-executive", "independent director", chairman, trustee,
+               "board of directors", "supervisory board", "audit committee",
+               "remuneration committee", "nominations committee", "risk committee"]
+    secondaries:
+      - name: "Board of Directors"
+        keywords: [board, chairman, "non-executive director", "independent director",
+                   "senior independent director", trustee]
+      - name: "Executive Committee"
+        keywords: ["executive committee", exco, "group executive committee", "exco member",
+                   "managing director", "executive director", "group head"]
+      - name: "Audit & Risk Committee"
+        keywords: ["audit committee", "risk committee", "nominations committee",
+                   "remuneration committee"]
+
+  - primary: "Retail Banking"
+    keywords: [retail, "retail banking", branch, "personal banking", "consumer banking",
+               mortgage, "home loan", "current account", savings, deposit, "credit card"]
+    secondaries:
+      - name: "Branch Network"
+        keywords: [branch, "branch manager", "branch banking", "retail banking", "personal banking"]
+      - name: "Mortgages & Lending"
+        keywords: [mortgage, "home loan", lending, "secured lending", "residential mortgage"]
+      - name: "Consumer Lending"
+        keywords: ["personal loan", "consumer lending", unsecured, "credit card", instalment, overdraft]
+      - name: "Deposits & Savings"
+        keywords: [deposit, savings, "current account", "savings account", "fixed deposit"]
+      - name: "Digital & Mobile Banking"
+        keywords: ["digital banking", "mobile banking", "app banking", "online banking",
+                   "digital channels", "open banking"]
+
+  - primary: "Commercial Banking"
+    keywords: ["commercial banking", sme, "business banking", "corporate banking",
+               "transaction banking", "cash management", trade, "trade finance",
+               "commercial lending", "corporate lending"]
+    secondaries:
+      - name: "SME Banking"
+        keywords: [sme, "small business", "business banking", "commercial banking", "mid-market"]
+      - name: "Corporate Banking"
+        keywords: ["corporate banking", "corporate finance", "transaction banking",
+                   "cash management", "large corporates", "multinational"]
+      - name: "Trade Finance"
+        keywords: ["trade finance", trade, "supply chain finance", "export finance",
+                   "import finance", "letters of credit", "documentary credits"]
+      - name: "Treasury & Markets"
+        keywords: [treasury, liquidity, "balance sheet", "interest rate risk",
+                   funding, "fx", "foreign exchange", "money markets"]
+
+  - primary: "Investment Banking"
+    keywords: ["investment banking", "capital markets", "mergers and acquisitions",
+               "m&a", advisory, dcm, ecm, "equity capital", "debt capital", syndication,
+               "equity analyst", "equity research", "fixed income analyst",
+               "investment analyst", "research analyst", "securities analyst"]
+    secondaries:
+      - name: "M&A Advisory"
+        keywords: [mergers, acquisitions, "m&a", advisory, "corporate finance advisory",
+                   "strategic advisory", "deal advisory"]
+      - name: "Capital Markets"
+        keywords: ["capital markets", dcm, ecm, syndication, "equity capital markets",
+                   "debt capital markets", "bond", "issuance"]
+      - name: "Equity Research"
+        keywords: ["equity research", "equity analyst", "fixed income research",
+                   "credit research", "sector research", "research analyst",
+                   "investment analyst", "securities analyst"]
+      - name: "Sales & Trading"
+        keywords: [sales, trading, "market making", "flow trading", derivatives, equities,
+                   "fixed income", "fx trading", "commodities trading"]
+
+  - primary: "Risk Management"
+    keywords: [risk, "risk management", credit, "credit risk", "market risk",
+               "operational risk", "liquidity risk", compliance, "regulatory"]
+    secondaries:
+      - name: "Credit Risk"
+        keywords: ["credit risk", "credit analysis", "credit quality", "credit officer",
+                   underwriting, "loan assessment", "credit approval", "credit committee"]
+      - name: "Market & Liquidity Risk"
+        keywords: ["market risk", "trading risk", "var", "counterparty risk",
+                   "liquidity risk", "interest rate risk", "fx risk"]
+      - name: "Operational Risk"
+        keywords: ["operational risk", "op risk", "operational resilience",
+                   "business continuity", "third party risk"]
+      - name: "Compliance & Financial Crime"
+        keywords: [compliance, regulatory, aml, kyc, "financial crime", "conduct risk",
+                   "bsa", "money laundering", "sanctions", "fraud prevention"]
+      - name: "Internal Audit"
+        keywords: ["internal audit", audit, assurance, "internal controls",
+                   "sox", "it audit"]
+
+  - primary: "Information Technology"
+    keywords: [technology, "information technology", software, digital, infrastructure,
+               cybersecurity, "data engineering", "it operations", "tech", engineering,
+               "it services", "it department"]
+    secondaries:
+      - name: "Software Engineering"
+        keywords: [software, engineering, developer, backend, frontend, fullstack,
+                   devops, sre, cloud, platform, mobile]
+      - name: "Data & Analytics"
+        keywords: [data, analytics, "data science", "business intelligence", bi,
+                   insights, reporting, "data engineering", "data platform"]
+      - name: "Cybersecurity"
+        keywords: [cyber, "information security", infosec, ciso, "security operations",
+                   soc, "threat intelligence", penetration]
+      - name: "IT Infrastructure"
+        keywords: [infrastructure, network, sysadmin, "helpdesk", "it support",
+                   "it operations", "end user computing", "service desk"]
+      - name: "Architecture & Transformation"
+        keywords: [architect, "enterprise architecture", "solution architect",
+                   transformation, "change management", pmo, "programme management"]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, financial, "fp&a", tax, treasury, reporting,
+               "investor relations", audit, "financial control",
+               cfo, "chief financial", "head of finance", "vp finance",
+               "director of finance", "finance director", "group finance"]
+    secondaries:
+      - name: "Financial Reporting & Control"
+        keywords: ["financial reporting", controller, "financial controller",
+                   accounting, bookkeeping, "month end", "year end", "statutory accounts"]
+      - name: "FP&A & Budgeting"
+        keywords: ["fp&a", fpa, "financial planning", "financial analyst",
+                   budgeting, forecasting, "management accounts", "business planning"]
+      - name: "Tax"
+        keywords: [tax, taxation, vat, "transfer pricing", "corporate tax", "deferred tax"]
+      - name: "Investor Relations"
+        keywords: ["investor relations", ir, shareholders, "analyst relations",
+                   "capital markets day", "results", "equity story"]
+
+  - primary: "Human Resources"
+    keywords: [hr, "human resources", people, talent, recruiting, "hr business partner",
+               learning, "compensation", payroll, "organisational development"]
+    secondaries:
+      - name: "Talent Acquisition"
+        keywords: [recruiting, recruiter, "talent acquisition", "talent management",
+                   "executive search", "campus recruiting", "early careers"]
+      - name: "HR Business Partnering"
+        keywords: [hrbp, "hr business partner", "people partner", "hr manager",
+                   "people operations", "hr director"]
+      - name: "Learning & Development"
+        keywords: [learning, "l&d", training, enablement, "organisational development",
+                   "talent development", "leadership development"]
+      - name: "Compensation & Benefits"
+        keywords: [compensation, benefits, "total rewards", payroll, reward,
+                   "benefits administration", "incentives"]
+
+  - primary: "Legal & Compliance"
+    keywords: [legal, counsel, lawyer, attorney, compliance, regulatory, secretariat,
+               "company secretary", "general counsel"]
+    secondaries:
+      - name: "General Counsel / Legal"
+        keywords: [legal, counsel, lawyer, attorney, litigation, "general counsel",
+                   "in-house legal", "legal affairs", "legal advisory"]
+      - name: "Regulatory & Government Affairs"
+        keywords: ["regulatory affairs", "government affairs", "public affairs",
+                   "regulatory engagement", "policy", "lobbying"]
+      - name: "Company Secretariat"
+        keywords: ["company secretary", secretariat, "corporate governance",
+                   "board administration", "governance"]
+
+  - primary: "Strategy & Corporate Development"
+    keywords: [strategy, strategic, "corporate development", "business development",
+               "m&a", "chief of staff", transformation, innovation]
+    secondaries:
+      - name: "Group Strategy"
+        keywords: ["group strategy", "corporate strategy", "strategic planning",
+                   "business strategy", "long range plan"]
+      - name: "Corporate Development & M&A"
+        keywords: ["corporate development", "m&a", "mergers", "acquisitions",
+                   "strategic investments", "joint ventures", "divestiture"]
+      - name: "Transformation & Innovation"
+        keywords: [transformation, "change management", innovation, "agile",
+                   "new business models", "digital transformation"]
+
+  - primary: "Asset & Wealth Management"
+    keywords: ["asset management", "wealth management", "fund management",
+               "investment management", "portfolio management", "portfolio manager",
+               "asset manager", "fund manager", "investment manager",
+               "private banking", "private wealth", "family office",
+               "discretionary", etf, "mutual fund", "hedge fund", "asset class"]
+    secondaries:
+      - name: "Portfolio Management"
+        keywords: ["portfolio management", "fund management", "investment portfolio",
+                   "portfolio manager", "fund manager", etf, "multi-asset"]
+      - name: "Private Banking & Wealth"
+        keywords: ["private banking", "private wealth", "wealth management", hnwi,
+                   "family office", "ultra high net worth", uhnwi]
+      - name: "Client Advisory"
+        keywords: ["client advisory", "financial planning", "investment advisory",
+                   "financial advisor", "wealth planner"]
+
+  - primary: "Treasury"
+    keywords: [treasury, "group treasury", "corporate treasury", "balance sheet",
+               liquidity, funding, alm, "asset liability", "interest rate risk"]
+    secondaries:
+      - name: "Balance Sheet Management"
+        keywords: [alm, "asset liability", "balance sheet", "interest rate risk", "structural risk"]
+      - name: "Funding & Liquidity"
+        keywords: [funding, liquidity, "cash management", "liquidity risk", "repo", "money markets"]
+
+  - primary: "Operations"
+    keywords: [operations, "financial operations", "banking operations", "shared services",
+               "back office", settlements, "trade processing", "payment operations",
+               "loan operations", "account operations"]
+    secondaries:
+      - name: "Trade & Settlement Operations"
+        keywords: [settlement, "trade processing", "custody", clearing, "reconciliation"]
+      - name: "Payments Operations"
+        keywords: ["payment operations", "payment processing", "payments", "wire transfer"]
+      - name: "Shared Services"
+        keywords: ["shared services", "global business services", gbs, "service centre", bpo]
+
+  - primary: "Marketing"
+    keywords: [marketing, communications, brand, "corporate communications",
+               "digital marketing", "marketing communications", "public relations"]
+    secondaries:
+      - name: "Brand & Digital Marketing"
+        keywords: [brand, "digital marketing", "social media", "content", "campaign"]
+      - name: "Corporate Communications"
+        keywords: ["corporate communications", "media relations", "internal communications",
+                   pr, "press office", "public relations"]

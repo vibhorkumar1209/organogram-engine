@@ -1,0 +1,163 @@
+id: manufacturing
+name: "General Manufacturing & Industrial"
+sector: Public
+detection_keywords:
+  company: [manufacturing, industrial, "heavy industry", engineering, machinery,
+            chemicals, materials, "building materials", construction, steel,
+            "paper and packaging", consumer goods, fmcg, "consumer products"]
+  industry_hint: [manufacturing, industrial, production, factory, "supply chain",
+                  engineering, chemicals, materials, fmcg, "consumer goods"]
+  designation: ["plant manager", "production manager", "manufacturing operations manager",
+                "supply chain manager", "quality manager", "process engineer",
+                "factory manager", "shift manager", "plant operations manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Chairman"
+    canonical: ["Chairman", "Non-Executive Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "Group CEO / President"
+    canonical: ["President & CEO", "Chief Executive Officer", "Group President",
+                "Chief Operating Officer", "Chief Financial Officer"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+
+  - layer: 2
+    label: "SVP / VP / Division Head"
+    canonical: ["Senior Vice President", "Vice President", "Executive Vice President",
+                "Division Head", "Business Unit Head"]
+    patterns: ["senior vice president", "\\bsvp\\b", "executive vice president", "\\bevp\\b"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "General Manager / VP"
+    canonical: ["General Manager", "Vice President", "Regional General Manager"]
+    patterns: ["general manager", "(?<!associate )(?<!assistant )vice president", "\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Plant Manager / Factory Head"
+    canonical: ["Plant Manager", "Factory Manager", "Site Manager", "Site Director"]
+    patterns: ["plant manager", "factory manager", "site manager", "site director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Department Manager / Director"
+    canonical: ["Production Manager", "Operations Manager", "Quality Manager",
+                "Supply Chain Manager", "Engineering Manager"]
+    patterns: ["\\bdirector\\b", "\\bmanager\\b", "head of"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical: ["Senior Manager", "Senior Production Manager"]
+    patterns: ["senior manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Shift Manager / Supervisor"
+    canonical: ["Shift Manager", "Shift Supervisor", "Line Supervisor", "Team Leader"]
+    patterns: ["shift manager", "supervisor", "team leader"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Specialist"
+    canonical: ["Senior Engineer", "Principal Engineer", "Lead Engineer",
+                "Senior Process Engineer", "Senior Quality Engineer"]
+    patterns: ["senior engineer", "principal engineer", "lead engineer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Analyst / Technician"
+    canonical: ["Process Engineer", "Quality Engineer", "Production Engineer",
+                "Maintenance Engineer", "Chemical Engineer", "Technician"]
+    patterns: ["\\bengineer\\b", "\\banalyst\\b", "\\btechnician\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern / Operator"
+    canonical: ["Graduate Engineer", "Intern", "Trainee", "Apprentice", "Operator"]
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\btrainee\\b", "\\bapprentice\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Operations"
+    keywords: [manufacturing, production, assembly, factory, plant, operations]
+    secondaries:
+      - name: "Production Operations"
+        keywords: [production, assembly, "production line", manufacturing, operations]
+      - name: "Engineering & Maintenance"
+        keywords: [engineering, maintenance, "process engineering", "plant engineering", tooling]
+      - name: "Quality Control"
+        keywords: [quality, "quality control", qc, "six sigma", inspection, "quality assurance"]
+
+  - primary: "Supply Chain"
+    keywords: ["supply chain", logistics, procurement, warehousing, distribution]
+    secondaries:
+      - name: "Procurement & Sourcing"
+        keywords: [procurement, sourcing, purchasing, "vendor management", "supplier management"]
+      - name: "Logistics & Warehousing"
+        keywords: [logistics, warehousing, distribution, "inbound logistics", "outbound logistics"]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, "financial planning", "cost accounting",
+               "management accounts", tax, treasury, audit, "finance manager",
+               "finance director", "chief financial", cfo, "fp&a"]
+    secondaries:
+      - name: "Financial Planning & Analysis"
+        keywords: ["fp&a", "financial planning", "management accounts", budgeting, forecasting]
+      - name: "Cost Accounting"
+        keywords: ["cost accounting", costing, "product costing", "variance analysis"]
+      - name: "Financial Control"
+        keywords: ["financial control", "internal controls", audit, compliance]
+
+  - primary: "Human Resources"
+    keywords: [hr, "human resources", "people", talent, recruiting, payroll,
+               "industrial relations", "labour relations", "employee relations",
+               "hr manager", "hr director", "chief people", chro,
+               "people operations", "workforce management"]
+    secondaries:
+      - name: "Talent & Recruitment"
+        keywords: [recruiting, "talent acquisition", "talent management", hiring]
+      - name: "Industrial Relations"
+        keywords: ["industrial relations", "labour relations", "employee relations",
+                   "trade union", "works council"]
+      - name: "HR Operations"
+        keywords: ["hr operations", payroll, hris, "hr systems", "workforce management"]
+
+  - primary: "Sales"
+    keywords: [sales, "key account", distribution, "channel management",
+               "key account management", "national accounts", "trade sales",
+               "sales operations", "account management", "business development"]
+    secondaries:
+      - name: "Key Account Management"
+        keywords: ["key account management", "national accounts", "key accounts",
+                   "strategic accounts"]
+      - name: "Trade Sales"
+        keywords: ["trade sales", distribution, "channel management", "channel sales",
+                   "field sales"]
+      - name: "Sales Operations"
+        keywords: ["sales operations", "sales planning", "revenue operations"]
+
+  - primary: "Marketing"
+    keywords: [marketing, brand, "trade marketing", "channel marketing",
+               "product marketing", campaign, advertising, "marketing manager",
+               "marketing director", "brand management"]
+    secondaries:
+      - name: "Trade Marketing"
+        keywords: ["trade marketing", "channel marketing", "shopper marketing",
+                   "category management"]
+      - name: "Brand & Communications"
+        keywords: [brand, communications, advertising, pr, "corporate communications"]
+      - name: "Digital Marketing"
+        keywords: ["digital marketing", "performance marketing", campaign, seo, sem]

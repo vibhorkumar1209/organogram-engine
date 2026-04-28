@@ -1,0 +1,218 @@
+id: real_estate
+name: "Real Estate, Property & Construction"
+sector: Public
+detection_keywords:
+  company: [real estate, property, construction, architecture, engineering, infrastructure,
+            "jones lang laSalle", jll, cbre, cushman, colliers, savills, knightfrank,
+            "hines", brookfield, prologis, "public storage", realty, reit,
+            "toll brothers", lennar, pulte, "kb home", "d.r. horton",
+            "turner construction", bechtel, skanska, aecom, jacobs,
+            balfour, "laing o'rourke", "keller williams", "century 21", remax]
+  industry_hint: [real estate, property, construction, architecture, engineering,
+                  "property management", reit, "commercial real estate", residential,
+                  infrastructure, facilities management]
+  designation: ["property manager", "asset manager", "leasing", "brokerage",
+                "site manager", "project manager", "quantity surveyor",
+                "civil engineer", "structural engineer", "architect", "facilities"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?exec", "independent director"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Investment Officer"
+      - "Chief Development Officer"
+      - "Chief People Officer"
+      - "Chief Technology Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief \\w+ officer"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CIO: "Chief Investment Officer"
+      CDO: "Chief Development Officer"
+
+  - layer: 2
+    label: "EVP / Group MD"
+    canonical:
+      - "Executive Vice President"
+      - "Managing Director"
+      - "Group Managing Director"
+      - "Country CEO"
+      - "Regional CEO"
+    patterns: ["executive vice president", "managing director", "group \\w+ director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "SVP / VP / General Manager"
+    canonical:
+      - "Senior Vice President"
+      - "Vice President"
+      - "VP Asset Management"
+      - "VP Development"
+      - "VP Leasing"
+      - "VP Property Management"
+      - "General Manager"
+      - "Regional Manager"
+    patterns: ["senior vice president", "(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head"
+    canonical:
+      - "Senior Director"
+      - "Head of Asset Management"
+      - "Head of Development"
+      - "Head of Leasing"
+      - "Head of Construction"
+      - "Regional Director"
+      - "Market Director"
+    patterns: ["senior director", "head of \\w+", "regional director", "market director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Senior Project Manager"
+    canonical:
+      - "Director"
+      - "Senior Project Manager"
+      - "Project Director"
+      - "Development Manager"
+    patterns: ["\\bdirector\\b", "project director", "senior project manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior Engineer"
+    canonical:
+      - "Senior Manager"
+      - "Senior Property Manager"
+      - "Senior Asset Manager"
+      - "Principal Engineer"
+      - "Associate Director"
+      - "Senior Architect"
+    patterns: ["senior manager", "senior \\w+ manager", "associate director", "principal engineer"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Engineer / Architect"
+    canonical:
+      - "Property Manager"
+      - "Asset Manager"
+      - "Project Manager"
+      - "Site Manager"
+      - "Civil Engineer"
+      - "Structural Engineer"
+      - "Architect"
+      - "Quantity Surveyor"
+      - "Leasing Manager"
+    patterns: ["\\bmanager\\b", "\\bengineer\\b", "\\barchitect\\b", "quantity surveyor"]
+    abbreviations:
+      QS: "Quantity Surveyor"
+
+  - layer: 8
+    label: "Senior Analyst / Senior Associate"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Associate"
+      - "Senior Valuer"
+      - "Senior Surveyor"
+    patterns: ["senior analyst", "senior associate", "senior valuer", "senior surveyor"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Associate / Surveyor"
+    canonical:
+      - "Analyst"
+      - "Associate"
+      - "Surveyor"
+      - "Valuer"
+      - "Specialist"
+    patterns: ["\\banalyst\\b", "\\bassociate\\b", "\\bsurveyor\\b", "\\bvaluer\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical:
+      - "Graduate Surveyor"
+      - "Graduate Engineer"
+      - "Intern"
+      - "Trainee"
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Asset Management"
+    keywords: [asset management, portfolio management, property management, facilities management,
+               fm, real estate management, building management]
+    secondaries:
+      - name: "Portfolio Management"
+        keywords: [portfolio, portfolio management, investment portfolio, asset strategy]
+      - name: "Property Management"
+        keywords: [property management, building management, tenant, occupier, facilities]
+      - name: "Facilities Management"
+        keywords: [facilities management, fm, hard services, soft services, building services]
+
+  - primary: "Development & Construction"
+    keywords: [development, construction, project delivery, project management, site,
+               building, civil works, fit-out, refurbishment, redevelopment]
+    secondaries:
+      - name: "Project Management"
+        keywords: [project management, project delivery, pmo, programme, construction management]
+      - name: "Architecture & Design"
+        keywords: [architecture, architectural design, master planning, urban design, bim]
+      - name: "Engineering"
+        keywords: [civil engineering, structural engineering, mechanical, electrical, mep, services]
+      - name: "Quantity Surveying"
+        keywords: [quantity surveying, qs, cost management, cost planning, cost control, procurement]
+
+  - primary: "Transactions & Leasing"
+    keywords: [transactions, leasing, sales, brokerage, investment, disposal, acquisition,
+               letting, lease, tenant representation, landlord]
+    secondaries:
+      - name: "Leasing"
+        keywords: [leasing, letting, tenant rep, landlord representation, lease negotiation]
+      - name: "Investment & Capital Markets"
+        keywords: [investment, capital markets, acquisition, disposal, sale, purchase]
+      - name: "Valuation"
+        keywords: [valuation, appraisal, valuer, advisory, red book]
+
+  - primary: "Research & Consultancy"
+    keywords: [research, consultancy, advisory, market research, data, analytics, consulting]
+    secondaries:
+      - name: "Market Research"
+        keywords: [market research, market analysis, data, intelligence, insight]
+      - name: "Sustainability Advisory"
+        keywords: [sustainability, esg, green, energy efficiency, net zero, breeam]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, financial, treasury, investor relations, reporting, tax]
+    secondaries:
+      - name: "Investment Finance"
+        keywords: [investment finance, debt, equity, financing, capital structure]
+      - name: "FP&A"
+        keywords: [fp&a, financial planning, budgeting, forecasting]
+
+  - primary: "Property Development"
+    keywords: [land, planning, development, planning permission, zoning, residential, commercial development]
+    secondaries:
+      - name: "Land & Planning"
+        keywords: [land, planning, planning permission, planning application, zoning]
+      - name: "Residential Development"
+        keywords: [residential, housing, homes, apartments, housebuilding]
+      - name: "Commercial Development"
+        keywords: [commercial, office, retail, industrial, logistics development]

@@ -1,0 +1,327 @@
+id: technology
+name: "Technology & Software"
+sector: Startup
+detection_keywords:
+  company: [tech, technology, software, "saas", "ai", "cloud", "cyber",
+            "data", "platform", "solutions", "systems", "digital", "labs",
+            "innovations", "ventures", "semiconductors", "computing", "networks",
+            microsoft, oracle, ibm, sap, salesforce, google, apple, meta, nvidia,
+            amazon, cisco, intel, "hewlett packard", hp, dell, accenture, infosys,
+            wipro, "tata consultancy", tcs, "hcl", capgemini, atos, cognizant,
+            "service now", "workday", "palantir", "snowflake", "databricks",
+            "splunk", "crowdstrike", palo, "fortinet", qualcomm, "broadcom", amd]
+  industry_hint: [technology, software, saas, cloud, "ai", "machine learning",
+                  startup, "data", "platform", cybersecurity, fintech, iot,
+                  "information technology", "it services", "it consulting",
+                  "enterprise software", "semiconductor", "networking", "hardware",
+                  "computer science", "data center", "devops"]
+  designation: ["software engineer", "product manager", "data scientist", "devops",
+                "frontend", "backend", "fullstack", "ml engineer", "site reliability",
+                "cloud engineer", "infrastructure engineer", "security engineer",
+                "erp consultant", "sap consultant", "solution architect", "it manager",
+                "it director", "chief information officer", "chief technology officer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Board Director"
+      - "Non-Executive Director"
+      - "Independent Board Member"
+      - "Board Observer"
+      - "Founding Partner"
+    patterns: ["\\bchairman\\b", "board director", "non.?exec", "board observer"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "Co-Founder & CEO"
+      - "Founder & CEO"
+      - "Chief Technology Officer"
+      - "Chief Product Officer"
+      - "Chief Operating Officer"
+      - "Chief Revenue Officer"
+      - "Chief Financial Officer"
+      - "Chief Marketing Officer"
+      - "Chief People Officer"
+      - "Chief Information Security Officer"
+      - "Chief Data Officer"
+      - "Chief AI Officer"
+      - "Chief Growth Officer"
+      - "Chief Customer Officer"
+      - "President"
+    patterns:
+      - "co-founder"
+      - "\\bfounder\\b"
+      - "chief \\w+ officer"
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CTO: "Chief Technology Officer"
+      CPO: "Chief Product Officer"
+      COO: "Chief Operating Officer"
+      CRO: "Chief Revenue Officer"
+      CFO: "Chief Financial Officer"
+      CMO: "Chief Marketing Officer"
+      CISO: "Chief Information Security Officer"
+      CDO: "Chief Data Officer"
+
+  - layer: 3
+    label: "VP / Head (Division)"
+    canonical:
+      - "Vice President of Engineering"
+      - "Vice President of Product"
+      - "VP Engineering"
+      - "VP Product"
+      - "VP Sales"
+      - "VP Marketing"
+      - "VP Operations"
+      - "General Manager"
+      - "Head of Engineering"
+      - "Head of Product"
+      - "Global Head of Sales"
+      - "Global Head of Engineering"
+      - "Global Head of Product"
+    patterns:
+      - "(?<!associate )(?<!assistant )vice president"
+      - "\\bvp\\b"
+      - "global head"
+      - "head of engineering"
+      - "head of product"
+      - "general manager"
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head of Team"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "Assistant Vice President"
+      - "Head of Platform"
+      - "Head of Data"
+      - "Head of Security"
+      - "Head of Infrastructure"
+      - "Technical Program Director"
+    patterns: ["senior director", "head of \\w+", "associate vice president", "assistant vice president"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director of Engineering"
+      - "Engineering Director"
+      - "Director of Product"
+      - "Director of Sales"
+      - "Director of Data Science"
+      - "Director of Operations"
+      - "Group Engineering Manager"
+    patterns:
+      - "director of"
+      - "engineering director"
+      - "group engineering manager"
+    abbreviations: {}
+
+  - layer: 7
+    label: "Engineering Manager / Technical Lead"
+    canonical:
+      - "Engineering Manager"
+      - "Technical Lead"
+    patterns:
+      - "engineering manager"
+      - "technical lead"
+    abbreviations: {}
+
+  - layer: 8
+    label: "Staff / Principal / Lead Engineer"
+    canonical:
+      - "Staff Engineer"
+      - "Staff Software Engineer"
+      - "Principal Engineer"
+      - "Principal Software Engineer"
+      - "Lead Software Engineer"
+      - "Lead Engineer"
+      - "Lead Data Scientist"
+      - "Lead ML Engineer"
+      - "Senior Software Engineer"
+      - "Senior Frontend Engineer"
+      - "Senior Backend Engineer"
+      - "Senior Product Manager"
+      - "Senior Data Scientist"
+      - "Senior ML Engineer"
+      - "Senior Data Engineer"
+      - "Senior DevOps Engineer"
+      - "Senior Designer"
+      - "Senior UX Designer"
+      - "Senior QA Engineer"
+      - "Senior Solutions Engineer"
+    patterns:
+      - "staff engineer"
+      - "principal engineer"
+      - "lead engineer"
+      - "lead developer"
+      - "lead data"
+      - "lead ml"
+      - "senior \\w+ engineer"
+      - "senior product manager"
+      - "senior \\w+ designer"
+      - "senior data scientist"
+    abbreviations: {}
+
+  - layer: 9
+    label: "Software Engineer / PM / Designer"
+    canonical:
+      - "Software Engineer"
+      - "Frontend Engineer"
+      - "Backend Engineer"
+      - "Full Stack Engineer"
+      - "Product Manager"
+      - "Product Designer"
+      - "UX Designer"
+      - "Data Scientist"
+      - "ML Engineer"
+      - "Data Engineer"
+      - "DevOps Engineer"
+      - "Site Reliability Engineer"
+      - "Cloud Engineer"
+      - "Software Engineer II"
+      - "Associate Product Manager"
+      - "Data Analyst"
+      - "Business Analyst"
+      - "QA Engineer"
+      - "Solutions Engineer"
+    patterns:
+      - "software engineer"
+      - "product manager"
+      - "data scientist"
+      - "\\bsre\\b"
+      - "devops"
+      - "engineer ii"
+      - "associate \\w+ manager"
+      - "\\banalyst\\b"
+    abbreviations:
+      PM: "Product Manager"
+      SRE: "Site Reliability Engineer"
+      APM: "Associate Product Manager"
+
+  - layer: 10
+    label: "Intern / Graduate / Junior"
+    canonical:
+      - "Software Engineering Intern"
+      - "Product Management Intern"
+      - "Data Science Intern"
+      - "Graduate Engineer"
+      - "Intern"
+      - "Software Engineer I"
+      - "Junior Software Engineer"
+      - "Junior Data Analyst"
+      - "Junior Product Manager"
+      - "Junior Data Scientist"
+    patterns: ["\\bintern\\b", "\\bgraduate\\b", "\\btrainee\\b", "engineer i\\b", "junior \\w+"]
+    abbreviations: {}
+
+departments:
+  - primary: "Engineering"
+    keywords: [engineering, software, backend, frontend, fullstack, platform,
+               infrastructure, devops, sre, cloud, mobile, embedded, firmware]
+    secondaries:
+      - name: "Backend Engineering"
+        keywords: [backend, "server-side", api, microservices, "distributed systems"]
+      - name: "Frontend Engineering"
+        keywords: [frontend, "front-end", ui, "web development", react, angular, vue]
+      - name: "Mobile Engineering"
+        keywords: [mobile, ios, android, "react native", flutter]
+      - name: "Platform / Infrastructure"
+        keywords: [platform, infrastructure, devops, sre, "site reliability", cloud, kubernetes]
+      - name: "Data Engineering"
+        keywords: ["data engineering", "data pipeline", etl, "data platform", "data infrastructure"]
+      - name: "Security Engineering"
+        keywords: [security, cybersecurity, "application security", "appsec", infosec]
+      - name: "QA & Testing"
+        keywords: ["quality assurance", qa, qc, testing, "test automation", sdet]
+
+  - primary: "Product Management"
+    keywords: [product, "product management", ux, design, "user experience", "user research"]
+    secondaries:
+      - name: "Product Management"
+        keywords: ["product manager", "product management", "product owner", "product lead", roadmap]
+      - name: "UX / Design"
+        keywords: [ux, ui, design, "user experience", "user interface", "product design",
+                   "visual design", "interaction design", "user research"]
+
+  - primary: "Data & AI"
+    keywords: [data, "data science", "machine learning", ai, "artificial intelligence",
+               analytics, "deep learning", llm, nlp]
+    secondaries:
+      - name: "Data Science & ML"
+        keywords: ["data science", "machine learning", "deep learning", "ml engineer",
+                   "ai research", "computer vision", nlp, llm, "generative ai"]
+      - name: "Analytics & BI"
+        keywords: [analytics, "business intelligence", bi, insights, reporting,
+                   "product analytics", "growth analytics"]
+
+  - primary: "Sales"
+    keywords: [sales, "business development", revenue, "account executive", "go-to-market"]
+    secondaries:
+      - name: "Sales"
+        keywords: [sales, "account executive", "ae", "business development", "enterprise sales",
+                   "smb sales", "inside sales"]
+      - name: "Customer Success"
+        keywords: ["customer success", csm, "account management", "customer experience", "onboarding"]
+      - name: "Partnerships"
+        keywords: [partnerships, alliances, "channel", "ecosystem", "strategic alliances"]
+
+  - primary: "Marketing"
+    keywords: [marketing, growth, brand, content, "demand generation", "product marketing"]
+    secondaries:
+      - name: "Growth & Performance"
+        keywords: [growth, "performance marketing", paid, seo, sem, "demand generation", "growth hacking"]
+      - name: "Product Marketing"
+        keywords: ["product marketing", "go-to-market", positioning, messaging, "competitive intelligence"]
+      - name: "Brand & Content"
+        keywords: [brand, content, "content marketing", copywriter, editor, "social media"]
+
+  - primary: "Information Technology"
+    keywords: [information technology, "it operations", "it infrastructure", "it service",
+               "enterprise it", "erp", "sap implementation", "it support", "it management",
+               "help desk", "service desk", "end user computing", "euc", "it governance"]
+    secondaries:
+      - name: "IT Operations"
+        keywords: ["it operations", "it ops", itsm, itil, "service management", "incident management", "it service delivery"]
+      - name: "ERP & Enterprise Applications"
+        keywords: [erp, sap, oracle, dynamics, "erp implementation", "enterprise applications", "s4hana", "it systems"]
+      - name: "IT Infrastructure"
+        keywords: ["it infrastructure", "network", "data center", "server", "storage", "cloud infrastructure", "helpdesk"]
+      - name: "IT Security"
+        keywords: ["it security", "information security", "cyber security", "cybersecurity", "iam", "endpoint security"]
+
+  - primary: "Operations"
+    keywords: [operations, "business operations", "it consulting", "professional services",
+               "managed services", "delivery", "client delivery", "program management"]
+    secondaries:
+      - name: "Professional Services"
+        keywords: ["professional services", "implementation", "consulting services", "delivery"]
+      - name: "Managed Services"
+        keywords: ["managed services", outsourcing, "it outsourcing", "bpo", "shared services"]
+
+  - primary: "Human Resources"
+    keywords: ["human resources", "hr operations", "hr ops", "people operations",
+               "people ops", "workforce management", "talent acquisition",
+               "talent management", "learning and development",
+               hr, people, talent, workforce, learning, recruiting]
+    secondaries:
+      - name: "Talent Acquisition"
+        keywords: ["talent acquisition", recruiting, recruitment, "tech recruiting"]
+      - name: "Total Rewards"
+        keywords: ["total rewards", compensation, benefits, equity, "stock options", "rsu"]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, financial, "fp&a", tax, treasury, "investor relations"]
+    secondaries:
+      - name: "FP&A"
+        keywords: ["fp&a", "financial planning", budgeting, forecasting]
+      - name: "Investor Relations"
+        keywords: ["investor relations", "capital markets", shareholders]

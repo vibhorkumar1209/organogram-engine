@@ -1,0 +1,274 @@
+id: pharma_life_sciences
+name: "Pharma, Biotech & Life Sciences"
+sector: Public
+detection_keywords:
+  company: [pharma, pharmaceutical, biotech, biotechnology, "life sciences", medical,
+            biologics, vaccines, diagnostics, therapeutics, "drug", clinical,
+            pfizer, roche, novartis, merck, "johnson & johnson", abbvie, bristol,
+            "eli lilly", astrazeneca, bms, genentech, gilead, amgen, biogen,
+            regeneron, moderna, "novo nordisk", sanofi, bayer, gsk, "10x genomics",
+            "ge healthcare", medtronic, abbvie, "cvs health", illumina]
+  industry_hint: [pharmaceutical, biotech, "life sciences", biopharma, biologics,
+                  clinical, medical devices, diagnostics, genomics, oncology, vaccines]
+  designation: ["clinical researcher", "regulatory affairs", "pharmacovigilance",
+                "drug development", "clinical trials", "medical affairs",
+                "biostatistician", "principal investigator", "medical director",
+                "scientific officer", "pharmacist"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?exec", "independent director"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite / Executive Leadership"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Medical Officer"
+      - "Chief Scientific Officer"
+      - "Chief Commercial Officer"
+      - "Chief People Officer"
+      - "Chief Technology Officer"
+      - "Chief Digital Officer"
+      - "Chief Information Officer"
+      - "Chief Regulatory Officer"
+      - "President"
+      - "Founder"
+      - "Co-Founder"
+    patterns: ["chief \\w+ officer", "\\bfounder\\b", "co-founder"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      CMO: "Chief Medical Officer"
+      CSO: "Chief Scientific Officer"
+      CTO: "Chief Technology Officer"
+      CDO: "Chief Digital Officer"
+
+  - layer: 2
+    label: "EVP / President (Division)"
+    canonical:
+      - "Executive Vice President"
+      - "President, Oncology"
+      - "President, R&D"
+      - "President, Commercial"
+      - "Managing Director"
+      - "Group Vice President"
+      - "Senior Vice President"
+      - "EVP Research"
+      - "EVP Commercial"
+    patterns: ["executive vice president", "evp \\w+", "president, \\w+", "managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical:
+      - "Vice President"
+      - "VP Clinical Development"
+      - "VP Regulatory Affairs"
+      - "VP Medical Affairs"
+      - "VP Commercial"
+      - "VP Research"
+      - "VP Operations"
+      - "General Manager"
+      - "Country Manager"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager", "country manager"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head"
+    canonical:
+      - "Senior Director"
+      - "Head of Clinical"
+      - "Head of Regulatory"
+      - "Head of Medical Affairs"
+      - "Head of Commercial"
+      - "Medical Director"
+      - "Director of Research"
+    patterns: ["senior director", "head of \\w+", "medical director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Clinical Director"
+      - "Scientific Director"
+    patterns: ["\\bdirector\\b"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Principal Scientist"
+    canonical:
+      - "Senior Manager"
+      - "Principal Scientist"
+      - "Principal Investigator"
+      - "Principal Researcher"
+      - "Senior Medical Manager"
+    patterns: ["senior manager", "principal scientist", "principal investigator"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Scientist"
+    canonical:
+      - "Manager"
+      - "Senior Scientist"
+      - "Clinical Research Manager"
+      - "Project Manager"
+      - "Medical Science Liaison"
+    patterns: ["\\bmanager\\b", "senior scientist", "medical science liaison"]
+    abbreviations:
+      MSL: "Medical Science Liaison"
+
+  - layer: 8
+    label: "Scientist / Specialist / Analyst"
+    canonical:
+      - "Scientist"
+      - "Research Scientist"
+      - "Clinical Research Associate"
+      - "Regulatory Affairs Specialist"
+      - "Pharmacovigilance Specialist"
+      - "Biostatistician"
+      - "Data Manager"
+      - "Senior Analyst"
+    patterns: ["\\bscientist\\b", "research associate", "\\bspecialist\\b"]
+    abbreviations:
+      CRA: "Clinical Research Associate"
+
+  - layer: 9
+    label: "Analyst / Associate / CRA"
+    canonical:
+      - "Analyst"
+      - "Associate Scientist"
+      - "Associate Researcher"
+      - "Clinical Research Associate"
+      - "Regulatory Analyst"
+    patterns: ["\\banalyst\\b", "\\bassociate\\b", "\\bcra\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate"
+    canonical:
+      - "Intern"
+      - "Graduate"
+      - "Trainee"
+      - "Student Placement"
+    patterns: ["\\bintern\\b", "\\bgraduate\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Research & Development"
+    keywords: [research, development, r&d, drug discovery, discovery, preclinical,
+               laboratory, science, biology, chemistry, pharmacology]
+    secondaries:
+      - name: "Drug Discovery"
+        keywords: [drug discovery, discovery, target identification, lead optimization,
+                   medicinal chemistry, computational biology]
+      - name: "Preclinical Research"
+        keywords: [preclinical, in vitro, in vivo, toxicology, pharmacokinetics, pk/pd]
+      - name: "Clinical Development"
+        keywords: [clinical development, clinical trials, phase i, phase ii, phase iii,
+                   phase iv, clinical operations, investigator]
+      - name: "Biostatistics & Data"
+        keywords: [biostatistics, statistical, data management, bioinformatics, clinical data]
+      - name: "Translational Medicine"
+        keywords: [translational, translational medicine, biomarker, translational research]
+
+  - primary: "Medical Affairs"
+    keywords: [medical affairs, medical science liaison, msl, medical education,
+               medical information, pharmacovigilance, drug safety, clinical]
+    secondaries:
+      - name: "Medical Science Liaison"
+        keywords: [msl, medical science liaison, field medical]
+      - name: "Drug Safety & Pharmacovigilance"
+        keywords: [pharmacovigilance, drug safety, adverse event, safety reporting, pv]
+      - name: "Medical Information"
+        keywords: [medical information, medical communications]
+
+  - primary: "Regulatory Affairs"
+    keywords: [regulatory affairs, regulatory, submissions, regulatory strategy,
+               dossier, health authority, fda, ema, cdsco, tga, mhra]
+    secondaries:
+      - name: "Regulatory Submissions"
+        keywords: [submissions, nda, bla, maa, ind, ectd, dossier]
+      - name: "Regulatory Strategy"
+        keywords: [regulatory strategy, regulatory intelligence, agency meetings]
+      - name: "CMC Regulatory"
+        keywords: [cmc, chemistry manufacturing, quality regulatory]
+
+  - primary: "Clinical Operations"
+    keywords: [clinical operations, clinical trials management, site management,
+               cro, contract research, clinical monitoring, trial management]
+    secondaries:
+      - name: "Trial Management"
+        keywords: [trial management, study management, clinical project manager, cpm]
+      - name: "Site Management"
+        keywords: [site management, cra, clinical research associate, site monitoring]
+
+  - primary: "Sales"
+    keywords: [commercial, sales, marketing, launch, brand, market access, pricing]
+    secondaries:
+      - name: "Sales"
+        keywords: [sales, field sales, territory, pharmaceutical sales, specialty sales]
+      - name: "Market Access"
+        keywords: [market access, pricing, reimbursement, hta, payer, health economics]
+      - name: "Brand & Marketing"
+        keywords: [brand, marketing, product marketing, launch, promotion]
+
+  - primary: "Operations"
+    keywords: [manufacturing, production, quality, gmp, cmc, supply chain,
+               fill finish, formulation, packaging, aseptic]
+    secondaries:
+      - name: "Manufacturing Operations"
+        keywords: [manufacturing, production, fill finish, aseptic, fermentation]
+      - name: "Quality Assurance"
+        keywords: [quality assurance, qa, gmp, quality systems, compliance, batch release]
+      - name: "Quality Control"
+        keywords: [quality control, qc, analytical, testing, laboratory]
+      - name: "CMC / Formulation"
+        keywords: [cmc, formulation, drug product, drug substance, analytical development]
+
+  - primary: "Supply Chain"
+    keywords: [supply chain, logistics, distribution, cold chain, planning, procurement]
+    secondaries:
+      - name: "Supply Planning"
+        keywords: [supply planning, demand planning, s&op, inventory]
+      - name: "Logistics & Distribution"
+        keywords: [logistics, distribution, cold chain, warehousing, temperature]
+
+  - primary: "Finance"
+    keywords: [finance, financial, accounting, tax, treasury, investor relations, fp&a]
+    secondaries:
+      - name: "FP&A"
+        keywords: [fp&a, financial planning, budgeting, forecasting]
+      - name: "Investor Relations"
+        keywords: [investor relations, ir, capital markets]
+
+  - primary: "Human Resources"
+    keywords: [human resources, hr, people, talent, workforce]
+    secondaries:
+      - name: "Talent Acquisition"
+        keywords: [talent acquisition, recruiting, recruitment]
+      - name: "Total Rewards"
+        keywords: [total rewards, compensation, benefits, payroll]
+
+  - primary: "Information Technology"
+    keywords: [information technology, it, digital, technology, data, analytics]
+    secondaries:
+      - name: "Digital Health"
+        keywords: [digital health, digital therapeutics, patient apps, wearables]
+      - name: "Data & Analytics"
+        keywords: [data analytics, real world data, data science, ai, machine learning]
+      - name: "IT Infrastructure"
+        keywords: [infrastructure, network, cloud, it operations]

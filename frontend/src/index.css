@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  background: #080f16;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a1520; }
+::-webkit-scrollbar-thumb { background: #1e3a52; border-radius: 3px; }
+
+/* Node tooltips */
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  background: rgba(8,15,22,0.97);
+  border: 1px solid #1e3a52;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  max-width: 260px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* SVG nodes */
+.org-node { cursor: pointer; }
+.org-node:hover rect { filter: brightness(1.2); }
+.org-node.person-node:hover rect { filter: brightness(1.35); }
+
+/* Link lines — works for both horizontal and vertical */
+.org-link {
+  fill: none;
+  stroke: #1e3a52;
+  stroke-width: 1.2;
+  stroke-opacity: 0.65;
+}
+
+/* Search highlight */
+.node-highlight .node-bg {
+  filter: drop-shadow(0 0 8px #3491E8) brightness(1.5);
+}
+
+/* Zoom controls */
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0c1e2e;
+  border: 1px solid #1e3a52;
+  border-radius: 6px;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.zoom-btn:hover {
+  background: #0c3649;
+  color: #e2e8f0;
+}
+
+/* Breadcrumb */
+.breadcrumb-item {
+  cursor: pointer;
+  color: #3491E8;
+  transition: color 0.15s;
+}
+.breadcrumb-item:hover { color: #60b4ff; }
+.breadcrumb-sep { color: #334155; margin: 0 4px; }
+
+/* Stats badge */
+.stat-badge {
+  background: #0c1e2e;
+  border: 1px solid #1e3a52;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #64748b;
+}
+.stat-badge span { color: #3491E8; font-weight: 600; }
+
+/* Sector legend */
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

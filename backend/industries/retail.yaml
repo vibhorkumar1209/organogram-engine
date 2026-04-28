@@ -1,0 +1,228 @@
+id: retail
+name: "Retail & Consumer Goods"
+sector: Public
+detection_keywords:
+  company: [retail, store, shop, supermarket, grocery, ecommerce, e-commerce,
+            merchandise, consumer, fmcg, "fast moving", apparel, fashion,
+            walmart, target, amazon, kroger, costco, "best buy", "home depot",
+            "cvs", walgreens, "dollar tree", macy, nordstrom, gap, zara,
+            "7-eleven", sephora, ulta, "tractor supply"]
+  industry_hint: [retail, consumer goods, ecommerce, fmcg, cpg, "fast moving consumer",
+                  apparel, fashion, grocery, "consumer products"]
+  designation: ["store manager", "category manager", "merchandising", "buyer",
+                "planner", "retail operations", "e-commerce", "consumer insights"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Marketing Officer"
+      - "Chief Commercial Officer"
+      - "Chief Merchandise Officer"
+      - "Chief Digital Officer"
+      - "Chief People Officer"
+      - "Chief Supply Chain Officer"
+      - "Chief Customer Officer"
+      - "President"
+    patterns: ["chief \\w+ officer", "\\bfounder\\b", "co-founder"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      CMO: "Chief Marketing Officer"
+      CCO: "Chief Commercial Officer"
+      CDO: "Chief Digital Officer"
+
+  - layer: 2
+    label: "EVP / Group MD"
+    canonical:
+      - "Executive Vice President"
+      - "Managing Director"
+      - "President of Retail"
+      - "Group President"
+      - "EVP Merchandising"
+      - "EVP Supply Chain"
+    patterns: ["executive vice president", "managing director", "group president"]
+    abbreviations:
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "SVP / VP"
+    canonical:
+      - "Senior Vice President"
+      - "Vice President"
+      - "VP Merchandising"
+      - "VP Operations"
+      - "VP Supply Chain"
+      - "VP E-Commerce"
+      - "VP Store Operations"
+      - "General Manager"
+    patterns: ["senior vice president", "(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / Head"
+    canonical:
+      - "Senior Director"
+      - "Head of Merchandising"
+      - "Head of E-Commerce"
+      - "Head of Category"
+      - "Head of Operations"
+      - "Director of Stores"
+      - "Regional Director"
+    patterns: ["senior director", "head of \\w+", "regional director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Buying Director"
+      - "Store Director"
+    patterns: ["\\bdirector\\b"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Buyer"
+      - "Category Manager"
+      - "Merchandise Manager"
+      - "District Manager"
+    patterns: ["senior manager", "district manager", "category manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Buyer"
+    canonical:
+      - "Store Manager"
+      - "Buyer"
+      - "Planner"
+      - "Area Manager"
+      - "Department Manager"
+    patterns: ["\\bmanager\\b", "\\bbuyer\\b", "\\bplanner\\b"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Associate"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Associate"
+      - "Senior Specialist"
+      - "Senior Merchant"
+    patterns: ["senior analyst", "senior associate", "senior specialist"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Associate"
+    canonical:
+      - "Analyst"
+      - "Associate"
+      - "Specialist"
+      - "Merchant"
+      - "Assistant Buyer"
+    patterns: ["\\banalyst\\b", "\\bassociate\\b", "\\bspecialist\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical:
+      - "Intern"
+      - "Graduate"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "\\bgraduate\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Merchandising"
+    keywords: [merchandising, buying, buyer, merchandise, category, assortment, range planning]
+    secondaries:
+      - name: "Category Management"
+        keywords: [category management, category manager, category planning, assortment]
+      - name: "Buying"
+        keywords: [buyer, buying, purchase, procurement, sourcing, supplier]
+      - name: "Planning & Allocation"
+        keywords: [planning, allocation, planner, replenishment, open to buy, otb]
+
+  - primary: "Store Operations"
+    keywords: [store, retail operations, store operations, in-store, shop floor, branch]
+    secondaries:
+      - name: "District / Regional Operations"
+        keywords: [district, regional, area, territory, multi-site]
+      - name: "Store Management"
+        keywords: [store manager, department manager, team leader]
+      - name: "Visual Merchandising"
+        keywords: [visual merchandising, vm, display, window, store design]
+
+  - primary: "E-Commerce & Digital"
+    keywords: [ecommerce, e-commerce, digital, online, omnichannel, omni-channel,
+               marketplace, digital commerce, d2c, direct to consumer]
+    secondaries:
+      - name: "Digital Commerce"
+        keywords: [ecommerce, online store, digital commerce, marketplace]
+      - name: "Omnichannel"
+        keywords: [omnichannel, omni-channel, click and collect, ship from store]
+
+  - primary: "Supply Chain"
+    keywords: [supply chain, logistics, distribution, warehouse, fulfillment,
+               inventory, stock, transportation, last mile]
+    secondaries:
+      - name: "Distribution & Fulfilment"
+        keywords: [distribution center, fulfillment center, warehouse, dc]
+      - name: "Transportation"
+        keywords: [transportation, freight, carrier, last mile, delivery]
+      - name: "Inventory Management"
+        keywords: [inventory, stock management, replenishment, shrink]
+
+  - primary: "Marketing"
+    keywords: [marketing, brand, advertising, promotion, loyalty, crm,
+               "customer marketing", "customer engagement", "customer experience marketing"]
+    secondaries:
+      - name: "Brand & Campaign"
+        keywords: [brand, advertising, campaign, media, creative]
+      - name: "Loyalty & CRM"
+        keywords: [loyalty, crm, customer relationship, rewards, membership]
+      - name: "Digital Marketing"
+        keywords: [digital marketing, social media, seo, email, performance]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, financial planning, treasury, audit, tax]
+    secondaries:
+      - name: "FP&A"
+        keywords: [fp&a, financial planning, analysis, budgeting, forecasting]
+      - name: "Accounting"
+        keywords: [accounting, accounts payable, accounts receivable, general ledger]
+
+  - primary: "Human Resources"
+    keywords: [human resources, hr, people, talent, workforce, learning]
+    secondaries:
+      - name: "Talent Acquisition"
+        keywords: [talent acquisition, recruiting, recruitment]
+      - name: "Learning & Development"
+        keywords: [learning, development, training, capability]
+
+  - primary: "Information Technology"
+    keywords: [information technology, it, technology, digital technology, pos,
+               point of sale, epos, systems, erp, sap]
+    secondaries:
+      - name: "Retail Technology"
+        keywords: [pos, epos, point of sale, retail tech, store technology]
+      - name: "ERP & Systems"
+        keywords: [erp, sap, oracle, retail systems]

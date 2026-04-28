@@ -1,0 +1,241 @@
+id: insurance
+name: "Insurance & Reinsurance"
+sector: Public
+detection_keywords:
+  company: [insurance, reinsurance, insurer, "life insurance", "general insurance",
+            underwriting, claims, broker, "lloyd's", actuarial,
+            chubb, aig, zurich, allianz, "aviva", axa, prudential,
+            metlife, cigna, "hartford", travelers, "liberty mutual",
+            "sun life", manulife, unum, "great-west", lincoln, "new york life",
+            qbe, "swiss re", "munich re", hannover, scor, mapfre]
+  industry_hint: [insurance, reinsurance, underwriting, actuarial, claims,
+                  "life insurance", "general insurance", "property casualty",
+                  "health insurance", brokerage, risk]
+  designation: ["underwriter", "actuary", "claims manager", "loss adjuster",
+                "reinsurance", "risk manager", "broker", "account executive",
+                "policy", "premium", "catastrophe"]
+
+hierarchy:
+  - layer: 0
+    label: "Board of Directors"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?exec", "independent director"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "Chief Financial Officer"
+      - "Chief Operating Officer"
+      - "Chief Risk Officer"
+      - "Chief Underwriting Officer"
+      - "Chief Claims Officer"
+      - "Chief Actuarial Officer"
+      - "Chief Investment Officer"
+      - "Chief Commercial Officer"
+      - "Chief People Officer"
+      - "Chief Technology Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief \\w+ officer"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CRO: "Chief Risk Officer"
+      CUO: "Chief Underwriting Officer"
+      CIO: "Chief Investment Officer"
+      COO: "Chief Operating Officer"
+
+  - layer: 2
+    label: "EVP / Division President"
+    canonical:
+      - "Executive Vice President"
+      - "President, North America"
+      - "President, Life"
+      - "President, Property & Casualty"
+      - "Division President"
+      - "Managing Director"
+      - "Group Director"
+    patterns: ["executive vice president", "division president", "managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "SVP / VP / General Manager"
+    canonical:
+      - "Senior Vice President"
+      - "Vice President"
+      - "VP Underwriting"
+      - "VP Claims"
+      - "VP Actuarial"
+      - "General Manager"
+      - "Country Head"
+      - "Regional Manager"
+    patterns: ["senior vice president", "(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head"
+    canonical:
+      - "Senior Director"
+      - "Head of Underwriting"
+      - "Head of Claims"
+      - "Head of Actuarial"
+      - "Regional Director"
+      - "Head of Risk"
+    patterns: ["senior director", "head of \\w+", "regional director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Chief Underwriter"
+    canonical:
+      - "Director"
+      - "Chief Underwriter"
+      - "Senior Underwriter"
+      - "Underwriting Manager"
+      - "Claims Manager"
+    patterns: ["\\bdirector\\b", "chief underwriter", "underwriting manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior Actuary"
+    canonical:
+      - "Senior Manager"
+      - "Senior Actuary"
+      - "Senior Underwriter"
+      - "Senior Claims Manager"
+      - "Pricing Manager"
+    patterns: ["senior manager", "senior actuary", "senior underwriter"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Underwriter / Actuary"
+    canonical:
+      - "Manager"
+      - "Underwriter"
+      - "Actuary"
+      - "Claims Adjuster"
+      - "Account Manager"
+      - "Loss Adjuster"
+    patterns: ["\\bmanager\\b", "\\bunderwriter\\b", "\\bactuary\\b", "loss adjuster"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Associate"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Associate"
+      - "Senior Specialist"
+      - "Actuarial Analyst"
+    patterns: ["senior analyst", "actuarial analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Associate / Officer"
+    canonical:
+      - "Analyst"
+      - "Associate"
+      - "Specialist"
+      - "Claims Officer"
+      - "Underwriting Officer"
+    patterns: ["\\banalyst\\b", "\\bassociate\\b", "\\bspecialist\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical:
+      - "Graduate Actuary"
+      - "Actuarial Student"
+      - "Intern"
+      - "Graduate"
+      - "Trainee Underwriter"
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Underwriting"
+    keywords: [underwriting, underwriter, risk selection, policy, premium,
+               property, casualty, liability, marine, aviation, specialty]
+    secondaries:
+      - name: "Property & Casualty"
+        keywords: [property, casualty, "p&c", homeowners, commercial property, fire]
+      - name: "Life & Health"
+        keywords: [life insurance, health insurance, group life, group health, protection, disability]
+      - name: "Marine & Aviation"
+        keywords: [marine, aviation, hull, cargo, war risk]
+      - name: "Specialty Lines"
+        keywords: [specialty, professional liability, directors officers, cyber, e&o, d&o, financial lines]
+      - name: "Reinsurance"
+        keywords: [reinsurance, retrocession, treaty, facultative, cat, catastrophe]
+
+  - primary: "Claims"
+    keywords: [claims, adjuster, loss, settlement, litigation, claims management]
+    secondaries:
+      - name: "Property Claims"
+        keywords: [property claims, building claims, contents, cat claims]
+      - name: "Liability Claims"
+        keywords: [liability claims, bodily injury, casualty claims, legal liability]
+      - name: "Complex / Major Claims"
+        keywords: [complex claims, major claims, large loss, catastrophe claims]
+      - name: "Claims Operations"
+        keywords: [claims operations, triage, first notice, fnol, claims handling]
+
+  - primary: "Actuarial"
+    keywords: [actuarial, actuary, pricing, reserving, modelling, catastrophe modelling,
+               ratemaking, experience analysis, capital]
+    secondaries:
+      - name: "Pricing"
+        keywords: [pricing, ratemaking, rate adequacy, tariff, product pricing]
+      - name: "Reserving"
+        keywords: [reserving, ibnr, reserve, loss development, valuation]
+      - name: "Capital & Risk Modelling"
+        keywords: [capital, solvency, orsa, cat modelling, risk modelling, economic capital]
+
+  - primary: "Risk Management"
+    keywords: [risk management, enterprise risk, operational risk, regulatory risk, compliance]
+    secondaries:
+      - name: "Enterprise Risk"
+        keywords: [enterprise risk, erm, risk appetite, risk framework]
+      - name: "Regulatory Compliance"
+        keywords: [compliance, regulatory, solvency ii, naic, ifrs17, regulatory reporting]
+
+  - primary: "Sales"
+    keywords: [sales, distribution, broker, channel, agency, account, business development]
+    secondaries:
+      - name: "Broker & Intermediary"
+        keywords: [broker, intermediary, appointed representative, mga, coverholder]
+      - name: "Direct & Digital"
+        keywords: [direct, digital, online, telesales, affinity]
+      - name: "Account Management"
+        keywords: [account management, key account, national accounts, global accounts]
+
+  - primary: "Finance"
+    keywords: [finance, accounting, financial reporting, investment, tax, treasury, fp&a]
+    secondaries:
+      - name: "Investment Management"
+        keywords: [investment, asset management, portfolio, fixed income, equities, alm]
+      - name: "Financial Reporting"
+        keywords: [financial reporting, statutory, gaap, ifrs, solvency]
+
+  - primary: "Information Technology"
+    keywords: [information technology, it, technology, digital, systems, data]
+    secondaries:
+      - name: "Digital Insurance"
+        keywords: [digital, insurtech, digital transformation, api, platform]
+      - name: "Data & Analytics"
+        keywords: [data, analytics, data science, predictive, ai, machine learning]
+
+  - primary: "Operations"
+    keywords: [operations, policy administration, processing, service center, shared services]
+    secondaries:
+      - name: "Policy Administration"
+        keywords: [policy administration, policy processing, endorsements, renewals]
+      - name: "Customer Operations"
+        keywords: [customer service, customer operations, contact center, service delivery]

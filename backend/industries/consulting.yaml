@@ -1,0 +1,135 @@
+id: consulting
+name: "Consulting & Professional Services"
+sector: Private
+detection_keywords:
+  company: [consulting, consultancy, advisors, advisory, "professional services",
+            mckinsey, bcg, bain, deloitte, pwc, kpmg, "ernst & young", ey,
+            accenture, "oliver wyman", "roland berger", partners, associates, llp]
+  industry_hint: [consulting, advisory, "management consulting", "strategy consulting",
+                  "professional services", "big 4"]
+  designation: ["consultant", "associate", "partner", "engagement manager",
+                "principal", "managing consultant", "senior consultant"]
+
+hierarchy:
+  - layer: 0
+    label: "Senior Partner / Managing Partner"
+    canonical:
+      - "Senior Partner"
+      - "Managing Partner"
+      - "Global Managing Partner"
+      - "Global Chairman"
+      - "Founding Partner"
+      - "Senior Managing Director"
+    patterns: ["senior partner", "managing partner", "global managing", "founding partner"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "Partner / Executive Director"
+    canonical:
+      - "Partner"
+      - "Executive Director"
+      - "Regional Managing Partner"
+    patterns: ["\\bpartner\\b", "executive director"]
+    abbreviations: {}
+
+  - layer: 2
+    label: "Principal / Director"
+    canonical:
+      - "Principal"
+      - "Director"
+      - "Associate Partner"
+      - "Managing Consultant"
+    patterns: ["\\bprincipal\\b", "\\bdirector\\b", "associate partner", "managing consultant"]
+    abbreviations: {}
+
+  - layer: 4
+    label: "Associate Principal / Associate Director"
+    canonical:
+      - "Associate Principal"
+      - "Associate Director"
+      - "Project Lead"
+      - "Senior Project Manager"
+    patterns: ["associate principal", "associate director", "project lead"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Advisor"
+    patterns: ["senior manager", "senior advisor"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Engagement Manager"
+    canonical:
+      - "Manager"
+      - "Engagement Manager"
+      - "Project Manager"
+      - "Case Team Leader"
+    patterns: ["engagement manager", "\\bmanager\\b", "case team leader"]
+    abbreviations:
+      EM: "Engagement Manager"
+
+  - layer: 8
+    label: "Senior Consultant / Senior Associate"
+    canonical:
+      - "Senior Consultant"
+      - "Senior Associate"
+    patterns: ["senior consultant", "senior associate"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Consultant / Associate / Analyst"
+    canonical:
+      - "Consultant"
+      - "Associate"
+      - "Business Analyst"
+      - "Junior Consultant"
+      - "Analyst"
+      - "Research Analyst"
+    patterns: ["\\bconsultant\\b", "\\bassociate\\b", "business analyst", "\\banalyst\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate"
+    canonical:
+      - "Intern"
+      - "Summer Analyst"
+      - "Graduate"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "summer analyst", "\\bgraduate\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Strategy"
+    keywords: [strategy, "management consulting", "corporate strategy", transformation]
+    secondaries:
+      - name: "Corporate Strategy"
+        keywords: [strategy, "corporate strategy", "growth strategy", "strategic planning"]
+      - name: "Operations & Transformation"
+        keywords: [operations, transformation, "operational excellence", "process improvement"]
+
+  - primary: "Financial Advisory"
+    keywords: [financial, advisory, "deal advisory", "transaction services", valuation]
+    secondaries:
+      - name: "Deal Advisory & M&A"
+        keywords: ["deal advisory", "m&a", "transaction services", "due diligence", valuation]
+      - name: "Restructuring"
+        keywords: [restructuring, "turnaround", "insolvency", "distressed"]
+
+  - primary: "Technology"
+    keywords: [technology, digital, it, "technology consulting", "digital transformation"]
+    secondaries:
+      - name: "Digital Transformation"
+        keywords: ["digital transformation", "digital advisory", "technology strategy"]
+      - name: "IT Implementation"
+        keywords: ["it implementation", "erp", "system integration", "it advisory"]
+
+  - primary: "Risk & Compliance"
+    keywords: [risk, compliance, regulatory, forensics, "risk advisory"]
+    secondaries:
+      - name: "Risk Advisory"
+        keywords: ["risk advisory", "enterprise risk", "risk management consulting"]
+      - name: "Regulatory & Compliance"
+        keywords: [regulatory, compliance, "regulatory advisory", "financial regulation"]

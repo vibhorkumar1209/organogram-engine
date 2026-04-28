@@ -1,0 +1,167 @@
+id: ngo
+name: "NGO / Non-Profit / International Development"
+sector: NGO
+detection_keywords:
+  company: [ngo, nonprofit, "non-profit", foundation, trust, charity, "social enterprise",
+            "un ", unicef, who, "world bank", oxfam, "save the children", "red cross",
+            "international federation", "development", "relief", "aid", usaid, "dfid"]
+  industry_hint: [ngo, nonprofit, charity, "international development", humanitarian,
+                  "civil society", foundation, "social impact"]
+  designation: ["programme director", "field coordinator", "country director",
+                "monitoring and evaluation", "fundraising", "advocacy"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Trustees"
+    canonical:
+      - "Board Chair"
+      - "Trustee"
+      - "Board Member"
+      - "Board Director"
+      - "Patron"
+      - "Honorary President"
+    patterns: ["\\btrustee\\b", "board chair", "board member", "\\bpatron\\b"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "Executive Director / CEO"
+    canonical:
+      - "Executive Director"
+      - "Chief Executive Officer"
+      - "Secretary General"
+      - "Director General"
+      - "President"
+      - "Chief Operating Officer"
+    patterns: ["executive director", "chief executive", "secretary general", "director general"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      ED: "Executive Director"
+
+  - layer: 2
+    label: "Deputy Executive Director / Country Director"
+    canonical:
+      - "Deputy Executive Director"
+      - "Country Director"
+      - "Regional Director"
+      - "Area Director"
+      - "Chief of Party"
+    patterns: ["deputy executive", "country director", "regional director", "chief of party"]
+    abbreviations: {}
+
+  - layer: 3
+    label: "Director / Head of Department"
+    canonical:
+      - "Director of Programmes"
+      - "Director of Operations"
+      - "Director of Fundraising"
+      - "Head of Programmes"
+      - "Head of Operations"
+    patterns: ["director of", "head of", "\\bdirector\\b"]
+    abbreviations: {}
+
+  - layer: 4
+    label: "Senior Programme Manager"
+    canonical:
+      - "Senior Programme Manager"
+      - "Senior Project Manager"
+      - "Senior Advisor"
+      - "Technical Advisor"
+      - "Chief Technical Advisor"
+    patterns: ["senior programme", "senior project", "technical advisor", "chief technical"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Programme Manager / Manager"
+    canonical:
+      - "Programme Manager"
+      - "Project Manager"
+      - "Advocacy Manager"
+      - "Fundraising Manager"
+    patterns: ["programme manager", "project manager", "\\bmanager\\b"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Officer / Coordinator"
+    canonical:
+      - "Senior Programme Officer"
+      - "Senior Field Coordinator"
+      - "Senior Monitoring & Evaluation Officer"
+    patterns: ["senior \\w+ officer", "senior \\w+ coordinator"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Officer / Coordinator"
+    canonical:
+      - "Programme Officer"
+      - "Field Officer"
+      - "Field Coordinator"
+      - "Monitoring & Evaluation Officer"
+      - "Communications Officer"
+    patterns: ["programme officer", "field officer", "field coordinator", "\\bofficer\\b"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Associate / Specialist"
+    canonical:
+      - "Senior Associate"
+      - "Specialist"
+      - "Consultant"
+      - "Research Analyst"
+    patterns: ["\\bspecialist\\b", "\\bconsultant\\b", "senior associate"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Associate / Analyst"
+    canonical:
+      - "Associate"
+      - "Analyst"
+      - "Researcher"
+      - "Grant Writer"
+    patterns: ["\\bassociate\\b", "\\banalyst\\b", "\\bresearcher\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Volunteer / Intern"
+    canonical:
+      - "Intern"
+      - "Volunteer"
+      - "Graduate Volunteer"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "\\bvolunteer\\b", "\\btrainee\\b", "\\bgraduate\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Programmes"
+    keywords: [programme, project, operations, field, implementation, delivery]
+    secondaries:
+      - name: "Field Operations"
+        keywords: [field, "field operations", "field coordinator", implementation, delivery]
+      - name: "Programme Management"
+        keywords: [programme, "programme management", "project management", coordination]
+      - name: "Monitoring & Evaluation"
+        keywords: ["monitoring", evaluation, "m&e", "impact measurement", "results",
+                   "learning", "accountability"]
+
+  - primary: "Advocacy & Communications"
+    keywords: [advocacy, communications, policy, campaigns, media, "public affairs"]
+    secondaries:
+      - name: "Advocacy & Policy"
+        keywords: [advocacy, policy, "government relations", campaigns, "public affairs"]
+      - name: "Communications & Media"
+        keywords: [communications, media, "social media", "digital communications", pr, journalism]
+
+  - primary: "Fundraising & Partnerships"
+    keywords: [fundraising, partnerships, donors, grants, "resource mobilization"]
+    secondaries:
+      - name: "Fundraising"
+        keywords: [fundraising, "donor relations", grants, "grant writing", "major donors"]
+      - name: "Partnerships & Alliances"
+        keywords: [partnerships, alliances, "strategic partnerships", "corporate partnerships"]
+
+  - primary: "Finance"
+    keywords: [finance, administration, hr, legal, compliance, governance]
+    secondaries:
+      - name: "Finance & Grants Management"
+        keywords: [finance, accounting, "grants management", "financial management", audit]
+      - name: "Human Resources"
+        keywords: [hr, "human resources", people, talent, recruiting, "staff welfare"]
