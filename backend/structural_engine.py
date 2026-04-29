@@ -682,10 +682,119 @@ def build_from_records(records: list[dict],
     for rec in classified:
         dag.insert_person(rec)
 
+    # Always enrich with LLM-sourced Board & Executive Management,
+    # regardless of what was in the uploaded file.
+    _enrich_with_llm_leadership(dag, classified, company_name)
+
     db = OrganogramDB(db_path=db_path)
     db.upsert_dag(dag)
 
     return dag, db
+
+
+# ─────────────────────────────────────────────
+# LLM LEADERSHIP ENRICHMENT
+# ─────────────────────────────────────────────
+
+def _name_key(name: str) -> str:
+    """Normalised dedup key: first two words lowercase, letters only."""
+    words = re.sub(r"[^a-z ]", "", name.lower()).split()
+    return " ".join(words[:2])
+
+
+def _enrich_with_llm_leadership(
+    dag: OrganogramDAG,
+    classified: list,
+    company_name: str,
+) -> None:
+    """
+    For every distinct company in the dataset, fetch Board of Directors and
+    Executive Management via Claude and inject them into the DAG.
+
+    - Runs unconditionally after every upload / demo load.
+    - Deduplicates against names already present in the DAG.
+    - Board members  → layer 0, dept_primary = "Board of Management"
+    - C-Suite execs  → layer 1, dept_primary = "Executive Management"
+    - Injected nodes carry nlp_method = "llm_leadership" for provenance.
+    """
+    try:
+        from llm_fallback import llm_fetch_leadership
+    except ImportError:
+        return
+
+    # ── Collect unique companies ──────────────────────────────────────
+    companies: dict[str, dict] = {}   # company_name → {region, sector}
+
+    # 1. Declared company name (always included)
+    companies[company_name.strip()] = {"region": "Global HQ", "sector": "Private"}
+
+    # 2. Companies found in the uploaded records
+    for rec in classified:
+        co = (getattr(rec, "company", "") or "").strip()
+        if co and co not in companies:
+            companies[co] = {
+                "region": getattr(rec, "region", "Global HQ") or "Global HQ",
+                "sector": getattr(rec, "sector", "Private")  or "Private",
+            }
+
+    # Fill region/sector for the declared company from existing classified records
+    if company_name in companies and classified:
+        # Use the most common region among all records
+        from collections import Counter
+        region_counts = Counter(
+            getattr(r, "region", "Global HQ") or "Global HQ" for r in classified
+        )
+        sector_counts = Counter(
+            getattr(r, "sector", "Private") or "Private" for r in classified
+        )
+        companies[company_name]["region"] = region_counts.most_common(1)[0][0]
+        companies[company_name]["sector"] = sector_counts.most_common(1)[0][0]
+
+    # ── Build existing-name index for deduplication ───────────────────
+    existing_keys: set[str] = set()
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") == "person":
+            existing_keys.add(_name_key(attrs.get("label", "")))
+
+    # ── Fetch and inject per company ─────────────────────────────────
+    for co, ctx in companies.items():
+        leadership = llm_fetch_leadership(co)
+        region = ctx["region"]
+        sector = ctx["sector"]
+
+        injections: list[tuple[int, str, str, str]] = []  # (layer, name, title, dept)
+        for person in leadership.get("board", []):
+            injections.append((0, person["name"], person["title"], "Board of Management"))
+        for person in leadership.get("executives", []):
+            injections.append((1, person["name"], person["title"], "Executive Management"))
+
+        for layer, name, title, dept_primary in injections:
+            key = _name_key(name)
+            if key in existing_keys:
+                continue   # already in DAG from uploaded data
+            existing_keys.add(key)
+
+            # Build a minimal ClassifiedRecord and insert
+            from inference_logic import ClassifiedRecord
+            rec = ClassifiedRecord(
+                id=f"llm_{uuid.uuid4().hex[:12]}",
+                full_name=name,
+                designation=title,
+                company=co,
+                linkedin_url="",
+                location="",
+                sector=sector,
+                region=region,
+                layer=layer,
+                dept_primary=dept_primary,
+                dept_secondary="",
+                dept_tertiary="",
+                nlp_confidence=0.9,
+                nlp_industry="llm",
+                nlp_method="llm_leadership",
+            )
+            dag.insert_person(rec)
 
 
 # ─────────────────────────────────────────────
