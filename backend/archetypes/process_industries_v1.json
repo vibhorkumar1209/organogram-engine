@@ -1,0 +1,770 @@
+{
+  "archetype_id": "process_industries",
+  "version": 1,
+  "name": "Process Industries",
+  "industries": [
+    "Energy (Oil & Gas)",
+    "Mineral / Mining / Natural Resources",
+    "Utilities",
+    "Industrial Manufacturing — Process",
+    "Pharmaceuticals / Life Sciences"
+  ],
+  "common_sub_industries": [
+    "Upstream O&G",
+    "Midstream O&G",
+    "Downstream / Refining",
+    "Petrochemicals",
+    "Specialty Chemicals",
+    "Commodity Chemicals",
+    "Big Pharma",
+    "Generics Pharma",
+    "Biotech",
+    "CDMO / CMO",
+    "Power Generation",
+    "Power T&D",
+    "Water Utility",
+    "Hard-rock Mining",
+    "Iron Ore",
+    "Coal",
+    "Critical Minerals"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Operations (Plant Ops)",
+    "Process Engineering",
+    "R&D",
+    "Quality",
+    "EHS / Sustainability",
+    "Supply Chain",
+    "Procurement",
+    "Commercial",
+    "Marketing",
+    "Regulatory Affairs",
+    "Medical Affairs",
+    "HR",
+    "Legal",
+    "IT",
+    "Compliance",
+    "Corporate Affairs"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Operating Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Operations"
+      },
+      {
+        "level": 3,
+        "title": "VP Operations"
+      },
+      {
+        "level": 4,
+        "title": "Plant Director / Refinery Manager"
+      },
+      {
+        "level": 5,
+        "title": "Plant Manager / Site Manager"
+      },
+      {
+        "level": 6,
+        "title": "Senior Operations Manager"
+      },
+      {
+        "level": 7,
+        "title": "Operations Manager / Shift Superintendent"
+      },
+      {
+        "level": 8,
+        "title": "Shift Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Process Operator"
+      },
+      {
+        "level": 10,
+        "title": "Process Operator"
+      }
+    ],
+    "R&D": [
+      {
+        "level": 1,
+        "title": "Chief Scientific Officer"
+      },
+      {
+        "level": 2,
+        "title": "SVP R&D"
+      },
+      {
+        "level": 3,
+        "title": "VP R&D"
+      },
+      {
+        "level": 4,
+        "title": "Senior R&D Director"
+      },
+      {
+        "level": 5,
+        "title": "R&D Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior R&D Manager"
+      },
+      {
+        "level": 7,
+        "title": "R&D Manager"
+      },
+      {
+        "level": 8,
+        "title": "Principal Scientist"
+      },
+      {
+        "level": 9,
+        "title": "Senior Scientist"
+      },
+      {
+        "level": 10,
+        "title": "Scientist"
+      }
+    ],
+    "Process Engineering": [
+      {
+        "level": 1,
+        "title": "Chief Technology Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Engineering"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Engineering"
+      },
+      {
+        "level": 4,
+        "title": "Engineering Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Engineering Manager"
+      },
+      {
+        "level": 6,
+        "title": "Engineering Manager"
+      },
+      {
+        "level": 7,
+        "title": "Lead Process Engineer"
+      },
+      {
+        "level": 8,
+        "title": "Senior Process Engineer"
+      },
+      {
+        "level": 9,
+        "title": "Process Engineer"
+      },
+      {
+        "level": 10,
+        "title": "Junior Engineer"
+      }
+    ],
+    "Quality": [
+      {
+        "level": 1,
+        "title": "Chief Quality Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Quality / QA"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director QA"
+      },
+      {
+        "level": 4,
+        "title": "QA Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior QA Manager"
+      },
+      {
+        "level": 6,
+        "title": "QA Manager"
+      },
+      {
+        "level": 7,
+        "title": "QA Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior QA Specialist"
+      },
+      {
+        "level": 9,
+        "title": "QA Specialist"
+      },
+      {
+        "level": 10,
+        "title": "QA Analyst"
+      }
+    ],
+    "EHS / Sustainability": [
+      {
+        "level": 1,
+        "title": "Chief Sustainability Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP EHS"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director EHS"
+      },
+      {
+        "level": 4,
+        "title": "EHS Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior EHS Manager"
+      },
+      {
+        "level": 6,
+        "title": "EHS Manager"
+      },
+      {
+        "level": 7,
+        "title": "EHS Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior EHS Specialist"
+      },
+      {
+        "level": 9,
+        "title": "EHS Specialist"
+      },
+      {
+        "level": 10,
+        "title": "EHS Analyst"
+      }
+    ],
+    "Supply Chain": [
+      {
+        "level": 1,
+        "title": "Chief Supply Chain Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Supply Chain"
+      },
+      {
+        "level": 3,
+        "title": "VP Supply Chain"
+      },
+      {
+        "level": 4,
+        "title": "Senior Supply Chain Director"
+      },
+      {
+        "level": 5,
+        "title": "Supply Chain Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Supply Chain Manager"
+      },
+      {
+        "level": 7,
+        "title": "Supply Chain Manager"
+      },
+      {
+        "level": 8,
+        "title": "Logistics Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Logistics Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Logistics Analyst"
+      }
+    ],
+    "Procurement": [
+      {
+        "level": 1,
+        "title": "Chief Procurement Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Procurement"
+      },
+      {
+        "level": 3,
+        "title": "VP Procurement"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Procurement"
+      },
+      {
+        "level": 5,
+        "title": "Director Procurement"
+      },
+      {
+        "level": 6,
+        "title": "Senior Procurement Manager"
+      },
+      {
+        "level": 7,
+        "title": "Procurement Manager"
+      },
+      {
+        "level": 8,
+        "title": "Sourcing Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Buyer"
+      },
+      {
+        "level": 10,
+        "title": "Buyer"
+      }
+    ],
+    "Commercial": [
+      {
+        "level": 1,
+        "title": "Chief Commercial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Commercial"
+      },
+      {
+        "level": 3,
+        "title": "VP Commercial"
+      },
+      {
+        "level": 4,
+        "title": "Senior Commercial Director"
+      },
+      {
+        "level": 5,
+        "title": "Commercial Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Commercial Manager"
+      },
+      {
+        "level": 7,
+        "title": "Commercial Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Account Manager"
+      },
+      {
+        "level": 9,
+        "title": "Account Manager"
+      },
+      {
+        "level": 10,
+        "title": "Sales Representative"
+      }
+    ],
+    "Regulatory Affairs": [
+      {
+        "level": 1,
+        "title": "Chief Regulatory Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Regulatory Affairs"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director RA"
+      },
+      {
+        "level": 4,
+        "title": "RA Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior RA Manager"
+      },
+      {
+        "level": 6,
+        "title": "RA Manager"
+      },
+      {
+        "level": 7,
+        "title": "RA Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior RA Specialist"
+      },
+      {
+        "level": 9,
+        "title": "RA Specialist"
+      },
+      {
+        "level": 10,
+        "title": "RA Analyst"
+      }
+    ],
+    "Medical Affairs": [
+      {
+        "level": 1,
+        "title": "Chief Medical Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Medical Affairs"
+      },
+      {
+        "level": 3,
+        "title": "Senior Medical Director"
+      },
+      {
+        "level": 4,
+        "title": "Medical Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Medical Science Liaison"
+      },
+      {
+        "level": 6,
+        "title": "Medical Science Liaison"
+      },
+      {
+        "level": 7,
+        "title": "Senior Medical Affairs Manager"
+      },
+      {
+        "level": 8,
+        "title": "Medical Affairs Manager"
+      },
+      {
+        "level": 9,
+        "title": "Medical Writer"
+      },
+      {
+        "level": 10,
+        "title": "Medical Affairs Associate"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ],
+    "Compliance": [
+      {
+        "level": 1,
+        "title": "Chief Compliance Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Compliance"
+      },
+      {
+        "level": 3,
+        "title": "VP Compliance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Compliance"
+      },
+      {
+        "level": 5,
+        "title": "Director Compliance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Compliance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Compliance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Compliance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Compliance Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Compliance Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5,
+      "Plant Manager": 4
+    },
+    "UK": {
+      "Director": 1,
+      "Managing Director": 2
+    },
+    "Germany": {
+      "Geschäftsführer": 2,
+      "Werksleiter": 4,
+      "Betriebsleiter": 5
+    },
+    "Japan": {
+      "代表取締役 (Daihyō Torishimariyaku)": 1,
+      "工場長 (Kōjō-chō)": 4,
+      "部長 (Buchō)": 5
+    },
+    "France": {
+      "Directeur Général": 1,
+      "Directeur d'usine": 4
+    },
+    "Middle East / GCC": {
+      "Director General": 2,
+      "Director": 4
+    },
+    "India": {
+      "AVP": 4,
+      "DGM": 6,
+      "AGM": 7,
+      "Senior Manager": 6
+    }
+  },
+  "atypical_roles": [
+    "Chief Sustainability Officer",
+    "Chief Safety Officer",
+    "Chief Medical Officer",
+    "Refinery Manager",
+    "Mine Manager",
+    "Site President",
+    "VP HSE",
+    "Asset Manager (O&G)"
+  ]
+}

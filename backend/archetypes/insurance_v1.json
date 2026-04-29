@@ -1,0 +1,546 @@
+{
+  "archetype_id": "insurance",
+  "version": 1,
+  "name": "Insurance",
+  "industries": [
+    "P&C Insurance",
+    "Life Insurance",
+    "Reinsurance",
+    "Healthcare Insurance (Payers)"
+  ],
+  "common_sub_industries": [
+    "P&C Personal Lines",
+    "P&C Commercial Lines",
+    "Specialty Insurance",
+    "Life Insurance",
+    "Annuities",
+    "Health Payer (Commercial)",
+    "Health Payer (Government — Medicare/Medicaid)",
+    "Reinsurance — Treaty",
+    "Reinsurance — Facultative",
+    "Lloyd's Market",
+    "Bancassurance"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Underwriting",
+    "Claims",
+    "Actuarial",
+    "Distribution / Sales",
+    "Investment / Treasury",
+    "Risk",
+    "Compliance",
+    "Operations",
+    "Marketing",
+    "HR",
+    "Legal",
+    "IT",
+    "Customer Service"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Underwriting": [
+      {
+        "level": 1,
+        "title": "Chief Underwriting Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Underwriting"
+      },
+      {
+        "level": 3,
+        "title": "SVP Underwriting"
+      },
+      {
+        "level": 4,
+        "title": "Senior Underwriting Director"
+      },
+      {
+        "level": 5,
+        "title": "Underwriting Director / Head of UW"
+      },
+      {
+        "level": 6,
+        "title": "Senior Underwriting Manager"
+      },
+      {
+        "level": 7,
+        "title": "Underwriting Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Underwriter"
+      },
+      {
+        "level": 9,
+        "title": "Underwriter"
+      },
+      {
+        "level": 10,
+        "title": "Junior Underwriter"
+      }
+    ],
+    "Claims": [
+      {
+        "level": 1,
+        "title": "Chief Claims Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Claims"
+      },
+      {
+        "level": 3,
+        "title": "SVP Claims"
+      },
+      {
+        "level": 4,
+        "title": "Senior Claims Director"
+      },
+      {
+        "level": 5,
+        "title": "Claims Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Claims Manager"
+      },
+      {
+        "level": 7,
+        "title": "Claims Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Claims Adjuster"
+      },
+      {
+        "level": 9,
+        "title": "Claims Adjuster"
+      },
+      {
+        "level": 10,
+        "title": "Junior Claims Adjuster"
+      }
+    ],
+    "Actuarial": [
+      {
+        "level": 1,
+        "title": "Chief Actuary"
+      },
+      {
+        "level": 2,
+        "title": "EVP / SVP Actuarial"
+      },
+      {
+        "level": 3,
+        "title": "VP Actuarial"
+      },
+      {
+        "level": 4,
+        "title": "Senior Actuarial Director"
+      },
+      {
+        "level": 5,
+        "title": "Actuarial Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Actuarial Manager"
+      },
+      {
+        "level": 7,
+        "title": "Actuarial Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Actuary (FSA/FCAS)"
+      },
+      {
+        "level": 9,
+        "title": "Actuary (ASA/ACAS)"
+      },
+      {
+        "level": 10,
+        "title": "Actuarial Analyst"
+      }
+    ],
+    "Distribution": [
+      {
+        "level": 1,
+        "title": "Chief Distribution Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Distribution"
+      },
+      {
+        "level": 3,
+        "title": "SVP Sales"
+      },
+      {
+        "level": 4,
+        "title": "Senior Distribution Director"
+      },
+      {
+        "level": 5,
+        "title": "Distribution Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Sales Manager"
+      },
+      {
+        "level": 7,
+        "title": "Sales Manager / Agency Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Agent"
+      },
+      {
+        "level": 9,
+        "title": "Agent"
+      },
+      {
+        "level": 10,
+        "title": "Junior Agent"
+      }
+    ],
+    "Risk": [
+      {
+        "level": 1,
+        "title": "Chief Risk Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Risk"
+      },
+      {
+        "level": 3,
+        "title": "VP Risk"
+      },
+      {
+        "level": 4,
+        "title": "Senior Risk Director"
+      },
+      {
+        "level": 5,
+        "title": "Risk Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Risk Manager"
+      },
+      {
+        "level": 7,
+        "title": "Risk Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Risk Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Risk Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Risk Analyst"
+      }
+    ],
+    "Compliance": [
+      {
+        "level": 1,
+        "title": "Chief Compliance Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Compliance"
+      },
+      {
+        "level": 3,
+        "title": "VP Compliance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Compliance"
+      },
+      {
+        "level": 5,
+        "title": "Director Compliance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Compliance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Compliance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Compliance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Compliance Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Compliance Analyst"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "AVP": 5,
+      "SVP": 2,
+      "EVP": 2,
+      "Director": 5
+    },
+    "UK": {
+      "Managing Director": 2,
+      "Director": 1,
+      "Lloyd's Active Underwriter": 3
+    },
+    "India": {
+      "AVP": 5,
+      "DGM": 6,
+      "AGM": 7,
+      "Whole-Time Director": 2
+    },
+    "Germany": {
+      "Vorstand": 2,
+      "Geschäftsführer": 2
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "本部長": 3
+    },
+    "Bermuda": {
+      "CEO": 1,
+      "President": 1,
+      "Chief Underwriting Officer": 2
+    }
+  },
+  "atypical_roles": [
+    "Chief Actuary",
+    "Chief Underwriting Officer",
+    "Chief Claims Officer",
+    "Appointed Actuary",
+    "Active Underwriter (Lloyd's)",
+    "Chief Investment Officer (Insurance)"
+  ]
+}

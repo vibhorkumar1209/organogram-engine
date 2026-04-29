@@ -11,45 +11,52 @@ detection_keywords:
                 "principal", "managing consultant", "senior consultant"]
 
 hierarchy:
-  - layer: 0
-    label: "Senior Partner / Managing Partner"
+  - layer: 1
+    label: "Managing Partner / Senior Partner"
     canonical:
-      - "Senior Partner"
       - "Managing Partner"
+      - "Senior Partner"
       - "Global Managing Partner"
       - "Global Chairman"
       - "Founding Partner"
       - "Senior Managing Director"
-    patterns: ["senior partner", "managing partner", "global managing", "founding partner"]
-    abbreviations: {}
-
-  - layer: 1
-    label: "Partner / Executive Director"
-    canonical:
-      - "Partner"
-      - "Executive Director"
-      - "Regional Managing Partner"
-    patterns: ["\\bpartner\\b", "executive director"]
+    patterns: ["managing partner", "senior partner", "global managing", "founding partner"]
     abbreviations: {}
 
   - layer: 2
-    label: "Principal / Director"
+    label: "Partner"
+    canonical:
+      - "Partner"
+      - "Equity Partner"
+      - "Regional Managing Partner"
+    patterns: ["\\bpartner\\b"]
+    abbreviations: {}
+
+  - layer: 3
+    label: "Principal / Managing Director (Consulting)"
     canonical:
       - "Principal"
-      - "Director"
-      - "Associate Partner"
       - "Managing Consultant"
-    patterns: ["\\bprincipal\\b", "\\bdirector\\b", "associate partner", "managing consultant"]
+    patterns: ["\\bprincipal\\b", "managing consultant"]
     abbreviations: {}
 
   - layer: 4
-    label: "Associate Principal / Associate Director"
+    label: "Associate Partner / Senior Director"
     canonical:
+      - "Associate Partner"
+      - "Senior Director"
+    patterns: ["associate partner", "senior director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Associate Principal"
+    canonical:
+      - "Director"
       - "Associate Principal"
       - "Associate Director"
       - "Project Lead"
       - "Senior Project Manager"
-    patterns: ["associate principal", "associate director", "project lead"]
+    patterns: ["\\bdirector\\b", "associate principal", "associate director", "project lead"]
     abbreviations: {}
 
   - layer: 6

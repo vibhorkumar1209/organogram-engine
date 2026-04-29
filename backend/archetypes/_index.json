@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "archetype_count": 12,
+  "archetypes": [
+    {
+      "archetype_id": "industrial_asset_heavy",
+      "name": "Industrial Asset-Heavy Manufacturer",
+      "industries": [
+        "Automotive",
+        "Aerospace & Defence",
+        "Industrial Manufacturing — Discrete",
+        "IT Hardware",
+        "Medical Devices"
+      ],
+      "file": "industrial_asset_heavy_v1.json"
+    },
+    {
+      "archetype_id": "process_industries",
+      "name": "Process Industries",
+      "industries": [
+        "Energy (Oil & Gas)",
+        "Mineral / Mining / Natural Resources",
+        "Utilities",
+        "Industrial Manufacturing — Process",
+        "Pharmaceuticals / Life Sciences"
+      ],
+      "file": "process_industries_v1.json"
+    },
+    {
+      "archetype_id": "consumer_brand_goods",
+      "name": "Consumer Brand Goods",
+      "industries": [
+        "Consumer Products",
+        "Agriculture (branded)"
+      ],
+      "file": "consumer_brand_goods_v1.json"
+    },
+    {
+      "archetype_id": "retail_hospitality",
+      "name": "Retail & Hospitality",
+      "industries": [
+        "Retail",
+        "Wholesale / Distribution",
+        "Hospitality / Travel",
+        "Consumer Services",
+        "Ecommerce"
+      ],
+      "file": "retail_hospitality_v1.json"
+    },
+    {
+      "archetype_id": "banking",
+      "name": "Banking",
+      "industries": [
+        "Retail Banking / Commercial Banking"
+      ],
+      "file": "banking_v1.json"
+    },
+    {
+      "archetype_id": "capital_markets",
+      "name": "Capital Markets",
+      "industries": [
+        "Financial Markets / Capital Markets / Investments"
+      ],
+      "file": "capital_markets_v1.json"
+    },
+    {
+      "archetype_id": "insurance",
+      "name": "Insurance",
+      "industries": [
+        "P&C Insurance",
+        "Life Insurance",
+        "Reinsurance",
+        "Healthcare Insurance (Payers)"
+      ],
+      "file": "insurance_v1.json"
+    },
+    {
+      "archetype_id": "healthcare_delivery",
+      "name": "Healthcare Delivery",
+      "industries": [
+        "Healthcare Providers"
+      ],
+      "file": "healthcare_delivery_v1.json"
+    },
+    {
+      "archetype_id": "software_telecom",
+      "name": "Software & Telecom",
+      "industries": [
+        "Software",
+        "High Tech / Technology",
+        "Telecommunications",
+        "Media & Entertainment"
+      ],
+      "file": "software_telecom_v1.json"
+    },
+    {
+      "archetype_id": "professional_it_services",
+      "name": "Professional & IT Services",
+      "industries": [
+        "IT Services",
+        "Business Services / Professional Services"
+      ],
+      "file": "professional_it_services_v1.json"
+    },
+    {
+      "archetype_id": "public_sector_ngo",
+      "name": "Public Sector & NGO",
+      "industries": [
+        "Public Sector & Government",
+        "Non-Profit / NGO",
+        "Education"
+      ],
+      "file": "public_sector_ngo_v1.json"
+    },
+    {
+      "archetype_id": "asset_light_operations",
+      "name": "Asset-Light Operations",
+      "industries": [
+        "Real Estate",
+        "Supply Chain / Logistics",
+        "Transportation"
+      ],
+      "file": "asset_light_operations_v1.json"
+    }
+  ]
+}

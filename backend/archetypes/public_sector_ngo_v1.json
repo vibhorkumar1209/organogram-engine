@@ -1,0 +1,572 @@
+{
+  "archetype_id": "public_sector_ngo",
+  "version": 1,
+  "name": "Public Sector & NGO",
+  "industries": [
+    "Public Sector & Government",
+    "Non-Profit / NGO",
+    "Education"
+  ],
+  "common_sub_industries": [
+    "Federal / Central Government",
+    "State / Provincial Government",
+    "Local / Municipal Government",
+    "Defence / Military",
+    "International NGO",
+    "Domestic NGO",
+    "Foundation",
+    "Multilateral Agency (UN, WB, etc.)",
+    "K-12 Education",
+    "Higher Education — Public",
+    "Higher Education — Private",
+    "Vocational / Skills Training"
+  ],
+  "departments": [
+    "Executive Leadership",
+    "Programs / Operations",
+    "Policy / Research",
+    "Advocacy / Communications",
+    "Fundraising / Development",
+    "Finance",
+    "Grants Management",
+    "Field Operations",
+    "Monitoring & Evaluation",
+    "HR",
+    "Legal",
+    "IT",
+    "Compliance",
+    "Volunteer Management"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Executive Director / CEO"
+      },
+      {
+        "level": 2,
+        "title": "Deputy Executive Director"
+      },
+      {
+        "level": 3,
+        "title": "Chief of Staff"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Strategy Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Programs": [
+      {
+        "level": 1,
+        "title": "Chief Program Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Programs"
+      },
+      {
+        "level": 3,
+        "title": "Senior Program Director"
+      },
+      {
+        "level": 4,
+        "title": "Country Director / Program Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Program Manager"
+      },
+      {
+        "level": 6,
+        "title": "Program Manager"
+      },
+      {
+        "level": 7,
+        "title": "Program Officer"
+      },
+      {
+        "level": 8,
+        "title": "Senior Program Coordinator"
+      },
+      {
+        "level": 9,
+        "title": "Program Coordinator"
+      },
+      {
+        "level": 10,
+        "title": "Program Associate"
+      }
+    ],
+    "Fundraising": [
+      {
+        "level": 1,
+        "title": "Chief Development Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Development"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Development"
+      },
+      {
+        "level": 4,
+        "title": "Development Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Development Manager"
+      },
+      {
+        "level": 6,
+        "title": "Development Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior Major Gifts Officer"
+      },
+      {
+        "level": 8,
+        "title": "Major Gifts Officer"
+      },
+      {
+        "level": 9,
+        "title": "Development Associate"
+      },
+      {
+        "level": 10,
+        "title": "Development Coordinator"
+      }
+    ],
+    "Policy / Research": [
+      {
+        "level": 1,
+        "title": "Chief Research Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Research"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Research"
+      },
+      {
+        "level": 4,
+        "title": "Senior Research Fellow / Research Director"
+      },
+      {
+        "level": 5,
+        "title": "Research Fellow / Senior Research Manager"
+      },
+      {
+        "level": 6,
+        "title": "Senior Researcher"
+      },
+      {
+        "level": 7,
+        "title": "Researcher"
+      },
+      {
+        "level": 8,
+        "title": "Research Associate"
+      },
+      {
+        "level": 9,
+        "title": "Research Assistant"
+      },
+      {
+        "level": 10,
+        "title": "Intern"
+      }
+    ],
+    "Government — Civil Service (India model)": [
+      {
+        "level": 1,
+        "title": "Cabinet Secretary"
+      },
+      {
+        "level": 2,
+        "title": "Secretary"
+      },
+      {
+        "level": 3,
+        "title": "Additional Secretary"
+      },
+      {
+        "level": 4,
+        "title": "Joint Secretary"
+      },
+      {
+        "level": 5,
+        "title": "Director"
+      },
+      {
+        "level": 6,
+        "title": "Deputy Secretary"
+      },
+      {
+        "level": 7,
+        "title": "Under Secretary"
+      },
+      {
+        "level": 8,
+        "title": "Section Officer"
+      },
+      {
+        "level": 9,
+        "title": "Senior Assistant"
+      },
+      {
+        "level": 10,
+        "title": "Assistant"
+      }
+    ],
+    "Government — Civil Service (US model)": [
+      {
+        "level": 1,
+        "title": "Secretary (Cabinet)"
+      },
+      {
+        "level": 2,
+        "title": "Deputy Secretary"
+      },
+      {
+        "level": 3,
+        "title": "Under Secretary / Assistant Secretary"
+      },
+      {
+        "level": 4,
+        "title": "Deputy Assistant Secretary"
+      },
+      {
+        "level": 5,
+        "title": "Senior Executive Service (SES)"
+      },
+      {
+        "level": 6,
+        "title": "GS-15"
+      },
+      {
+        "level": 7,
+        "title": "GS-14"
+      },
+      {
+        "level": 8,
+        "title": "GS-13"
+      },
+      {
+        "level": 9,
+        "title": "GS-12"
+      },
+      {
+        "level": 10,
+        "title": "GS-11 and below"
+      }
+    ],
+    "Education — University": [
+      {
+        "level": 1,
+        "title": "President / Vice-Chancellor / Chancellor"
+      },
+      {
+        "level": 2,
+        "title": "Provost"
+      },
+      {
+        "level": 3,
+        "title": "Vice Provost / Senior Vice President"
+      },
+      {
+        "level": 4,
+        "title": "Dean"
+      },
+      {
+        "level": 5,
+        "title": "Associate Dean / Department Chair"
+      },
+      {
+        "level": 6,
+        "title": "Full Professor"
+      },
+      {
+        "level": 7,
+        "title": "Associate Professor"
+      },
+      {
+        "level": 8,
+        "title": "Assistant Professor"
+      },
+      {
+        "level": 9,
+        "title": "Lecturer / Adjunct"
+      },
+      {
+        "level": 10,
+        "title": "Teaching Assistant"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "Secretary": 1,
+      "Deputy Secretary": 2,
+      "Under Secretary": 3,
+      "Assistant Secretary": 3,
+      "Director General": 3,
+      "SES": 4
+    },
+    "UK": {
+      "Permanent Secretary": 1,
+      "Director General": 2,
+      "Director": 3,
+      "Deputy Director": 4,
+      "SCS Pay Band 1": 4,
+      "Vice-Chancellor": 1
+    },
+    "India": {
+      "Cabinet Secretary": 1,
+      "Secretary": 2,
+      "Additional Secretary": 3,
+      "Joint Secretary": 4,
+      "Director": 5,
+      "Deputy Secretary": 6,
+      "Under Secretary": 7,
+      "Section Officer": 8,
+      "Vice-Chancellor": 1,
+      "Pro Vice-Chancellor": 2,
+      "Registrar": 3,
+      "Dean": 3,
+      "HOD": 4,
+      "Professor": 5
+    },
+    "EU": {
+      "Director-General": 2,
+      "Director": 3,
+      "Head of Unit": 5,
+      "Policy Officer": 7
+    },
+    "UN / Multilateral": {
+      "Under-Secretary-General": 2,
+      "Assistant Secretary-General": 3,
+      "D-2": 3,
+      "D-1": 4,
+      "P-5": 5,
+      "P-4": 6,
+      "P-3": 7,
+      "P-2": 8,
+      "P-1": 9
+    }
+  },
+  "atypical_roles": [
+    "Executive Director (NGO = CEO)",
+    "Country Director",
+    "Provost",
+    "Dean",
+    "Department Chair",
+    "Cabinet Secretary",
+    "Permanent Secretary",
+    "Director General",
+    "Joint Secretary",
+    "Under-Secretary-General"
+  ],
+  "notes": [
+    "'Executive Director' in NGO context = CEO equivalent (Level 1), NOT a senior manager.",
+    "'Director' in EU/UN civil service = Level 3, NOT Level 5.",
+    "'Director' in Indian civil service = Level 5; NOT Level 1 like the corporate UK Director."
+  ]
+}

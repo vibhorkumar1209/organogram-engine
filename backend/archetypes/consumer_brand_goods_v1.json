@@ -1,0 +1,631 @@
+{
+  "archetype_id": "consumer_brand_goods",
+  "version": 1,
+  "name": "Consumer Brand Goods",
+  "industries": [
+    "Consumer Products",
+    "Agriculture (branded)"
+  ],
+  "common_sub_industries": [
+    "Food & Beverage",
+    "Beauty & Personal Care",
+    "Home Care",
+    "Apparel & Footwear",
+    "Tobacco",
+    "Pet Care",
+    "Branded Agri-inputs"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Marketing & Brand",
+    "Sales",
+    "R&D",
+    "Supply Chain",
+    "Manufacturing",
+    "Quality",
+    "Procurement",
+    "Insights & Analytics",
+    "Digital / Ecommerce",
+    "HR",
+    "Legal",
+    "IT",
+    "Corporate Affairs"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Marketing": [
+      {
+        "level": 1,
+        "title": "Chief Marketing Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Marketing"
+      },
+      {
+        "level": 3,
+        "title": "VP Marketing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Brand Director"
+      },
+      {
+        "level": 5,
+        "title": "Brand Director / Category Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Brand Manager"
+      },
+      {
+        "level": 7,
+        "title": "Brand Manager"
+      },
+      {
+        "level": 8,
+        "title": "Assistant Brand Manager"
+      },
+      {
+        "level": 9,
+        "title": "Marketing Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Marketing Associate"
+      }
+    ],
+    "Sales": [
+      {
+        "level": 1,
+        "title": "Chief Sales Officer / Chief Customer Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Sales"
+      },
+      {
+        "level": 3,
+        "title": "VP Sales"
+      },
+      {
+        "level": 4,
+        "title": "Senior Sales Director / Customer Director"
+      },
+      {
+        "level": 5,
+        "title": "Sales Director / National Account Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Sales Manager"
+      },
+      {
+        "level": 7,
+        "title": "Key Account Manager / Sales Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Account Executive"
+      },
+      {
+        "level": 9,
+        "title": "Account Executive"
+      },
+      {
+        "level": 10,
+        "title": "Sales Representative"
+      }
+    ],
+    "R&D": [
+      {
+        "level": 1,
+        "title": "Chief R&D Officer"
+      },
+      {
+        "level": 2,
+        "title": "SVP R&D"
+      },
+      {
+        "level": 3,
+        "title": "VP R&D"
+      },
+      {
+        "level": 4,
+        "title": "Senior R&D Director"
+      },
+      {
+        "level": 5,
+        "title": "R&D Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior R&D Manager"
+      },
+      {
+        "level": 7,
+        "title": "R&D Manager"
+      },
+      {
+        "level": 8,
+        "title": "Principal Scientist"
+      },
+      {
+        "level": 9,
+        "title": "Senior Scientist"
+      },
+      {
+        "level": 10,
+        "title": "Scientist"
+      }
+    ],
+    "Supply Chain": [
+      {
+        "level": 1,
+        "title": "Chief Supply Chain Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Supply Chain"
+      },
+      {
+        "level": 3,
+        "title": "VP Supply Chain"
+      },
+      {
+        "level": 4,
+        "title": "Senior Supply Chain Director"
+      },
+      {
+        "level": 5,
+        "title": "Supply Chain Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Supply Chain Manager"
+      },
+      {
+        "level": 7,
+        "title": "Supply Chain Manager"
+      },
+      {
+        "level": 8,
+        "title": "Logistics Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Supply Chain Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Supply Chain Analyst"
+      }
+    ],
+    "Manufacturing": [
+      {
+        "level": 1,
+        "title": "Chief Manufacturing Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Manufacturing"
+      },
+      {
+        "level": 3,
+        "title": "VP Manufacturing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Plant Director"
+      },
+      {
+        "level": 5,
+        "title": "Plant Director / Plant Manager"
+      },
+      {
+        "level": 6,
+        "title": "Senior Manufacturing Manager"
+      },
+      {
+        "level": 7,
+        "title": "Manufacturing Manager"
+      },
+      {
+        "level": 8,
+        "title": "Production Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Production Engineer"
+      },
+      {
+        "level": 10,
+        "title": "Production Operator"
+      }
+    ],
+    "Digital / Ecommerce": [
+      {
+        "level": 1,
+        "title": "Chief Digital Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Digital"
+      },
+      {
+        "level": 3,
+        "title": "VP Ecommerce"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Ecommerce"
+      },
+      {
+        "level": 5,
+        "title": "Director Ecommerce"
+      },
+      {
+        "level": 6,
+        "title": "Senior Ecommerce Manager"
+      },
+      {
+        "level": 7,
+        "title": "Ecommerce Manager"
+      },
+      {
+        "level": 8,
+        "title": "Ecommerce Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Ecommerce Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Ecommerce Analyst"
+      }
+    ],
+    "Insights & Analytics": [
+      {
+        "level": 1,
+        "title": "Chief Insights Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Consumer Insights"
+      },
+      {
+        "level": 3,
+        "title": "Senior Insights Director"
+      },
+      {
+        "level": 4,
+        "title": "Insights Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Insights Manager"
+      },
+      {
+        "level": 6,
+        "title": "Insights Manager"
+      },
+      {
+        "level": 7,
+        "title": "Insights Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Consumer Researcher"
+      },
+      {
+        "level": 9,
+        "title": "Consumer Researcher"
+      },
+      {
+        "level": 10,
+        "title": "Insights Analyst"
+      }
+    ],
+    "Procurement": [
+      {
+        "level": 1,
+        "title": "Chief Procurement Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Procurement"
+      },
+      {
+        "level": 3,
+        "title": "VP Procurement"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Procurement"
+      },
+      {
+        "level": 5,
+        "title": "Director Procurement"
+      },
+      {
+        "level": 6,
+        "title": "Senior Procurement Manager"
+      },
+      {
+        "level": 7,
+        "title": "Procurement Manager"
+      },
+      {
+        "level": 8,
+        "title": "Sourcing Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Buyer"
+      },
+      {
+        "level": 10,
+        "title": "Buyer"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5
+    },
+    "UK": {
+      "Director": 1,
+      "Managing Director": 2,
+      "Brand Director": 4
+    },
+    "Germany": {
+      "Geschäftsführer": 2,
+      "Marketingleiter": 3
+    },
+    "France": {
+      "Directeur Général": 1,
+      "Directeur Marketing": 3
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "本部長": 3,
+      "部長": 5
+    },
+    "India": {
+      "AVP": 4,
+      "GM Marketing": 4,
+      "DGM": 6,
+      "AGM": 7
+    },
+    "Brazil": {
+      "Diretor Geral": 1,
+      "Diretor": 3,
+      "Gerente": 7
+    },
+    "China": {
+      "总裁": 1,
+      "副总裁": 3,
+      "总监": 5
+    }
+  },
+  "atypical_roles": [
+    "Chief Brand Officer",
+    "Chief Customer Officer",
+    "Chief Insights Officer",
+    "General Manager — [Brand/Category]",
+    "Chief Ecommerce Officer",
+    "Country Manager"
+  ]
+}

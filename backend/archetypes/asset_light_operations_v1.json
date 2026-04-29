@@ -1,0 +1,548 @@
+{
+  "archetype_id": "asset_light_operations",
+  "version": 1,
+  "name": "Asset-Light Operations",
+  "industries": [
+    "Real Estate",
+    "Supply Chain / Logistics",
+    "Transportation"
+  ],
+  "common_sub_industries": [
+    "Commercial REIT",
+    "Residential REIT",
+    "Property Management",
+    "Real Estate Brokerage",
+    "Real Estate Development",
+    "3PL / 4PL",
+    "Freight Forwarding",
+    "Last-mile Delivery",
+    "Trucking / Road Freight",
+    "Rail Freight",
+    "Ocean Freight",
+    "Air Cargo",
+    "Passenger Airlines",
+    "Public Transit",
+    "Ride-sharing / Mobility-as-a-Service"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Operations",
+    "Network Planning",
+    "Fleet / Property Management",
+    "Commercial / Sales",
+    "Customer Experience",
+    "Technology",
+    "Real Estate Acquisition",
+    "Leasing",
+    "HR",
+    "Legal",
+    "IT",
+    "Compliance",
+    "Safety"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Operating Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Operations"
+      },
+      {
+        "level": 3,
+        "title": "VP Operations"
+      },
+      {
+        "level": 4,
+        "title": "Senior Regional Operations Director"
+      },
+      {
+        "level": 5,
+        "title": "Regional Operations Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Operations Manager"
+      },
+      {
+        "level": 7,
+        "title": "Operations Manager / Hub Manager"
+      },
+      {
+        "level": 8,
+        "title": "Operations Lead / Shift Manager"
+      },
+      {
+        "level": 9,
+        "title": "Senior Operations Coordinator"
+      },
+      {
+        "level": 10,
+        "title": "Operations Coordinator"
+      }
+    ],
+    "Network Planning": [
+      {
+        "level": 1,
+        "title": "Chief Network Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Network Planning"
+      },
+      {
+        "level": 3,
+        "title": "Senior Network Director"
+      },
+      {
+        "level": 4,
+        "title": "Network Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Network Planning Manager"
+      },
+      {
+        "level": 6,
+        "title": "Network Planning Manager"
+      },
+      {
+        "level": 7,
+        "title": "Network Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Network Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Network Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Network Analyst"
+      }
+    ],
+    "Fleet": [
+      {
+        "level": 1,
+        "title": "Chief Fleet Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Fleet"
+      },
+      {
+        "level": 3,
+        "title": "Senior Fleet Director"
+      },
+      {
+        "level": 4,
+        "title": "Fleet Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Fleet Manager"
+      },
+      {
+        "level": 6,
+        "title": "Fleet Manager"
+      },
+      {
+        "level": 7,
+        "title": "Fleet Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Fleet Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Fleet Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Driver Manager"
+      }
+    ],
+    "Commercial / Sales": [
+      {
+        "level": 1,
+        "title": "Chief Commercial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Commercial"
+      },
+      {
+        "level": 3,
+        "title": "VP Commercial"
+      },
+      {
+        "level": 4,
+        "title": "Senior Commercial Director"
+      },
+      {
+        "level": 5,
+        "title": "Commercial Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Commercial Manager"
+      },
+      {
+        "level": 7,
+        "title": "Commercial Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Account Manager"
+      },
+      {
+        "level": 9,
+        "title": "Account Manager"
+      },
+      {
+        "level": 10,
+        "title": "Sales Representative"
+      }
+    ],
+    "Real Estate / Leasing": [
+      {
+        "level": 1,
+        "title": "Chief Investment Officer (REIT)"
+      },
+      {
+        "level": 2,
+        "title": "EVP Real Estate"
+      },
+      {
+        "level": 3,
+        "title": "VP Real Estate"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Real Estate / Acquisitions"
+      },
+      {
+        "level": 5,
+        "title": "Acquisitions Director / Leasing Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Asset Manager"
+      },
+      {
+        "level": 7,
+        "title": "Asset Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Leasing Agent"
+      },
+      {
+        "level": 9,
+        "title": "Leasing Agent"
+      },
+      {
+        "level": 10,
+        "title": "Leasing Coordinator"
+      }
+    ],
+    "Safety": [
+      {
+        "level": 1,
+        "title": "Chief Safety Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Safety"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Safety"
+      },
+      {
+        "level": 4,
+        "title": "Safety Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Safety Manager"
+      },
+      {
+        "level": 6,
+        "title": "Safety Manager"
+      },
+      {
+        "level": 7,
+        "title": "Safety Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Safety Specialist"
+      },
+      {
+        "level": 9,
+        "title": "Safety Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Safety Coordinator"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5,
+      "Hub Manager": 7
+    },
+    "UK": {
+      "Managing Director": 2,
+      "Director": 1,
+      "Operations Director": 3
+    },
+    "India": {
+      "AVP": 4,
+      "GM": 4,
+      "DGM": 6,
+      "AGM": 7,
+      "Branch Manager": 7,
+      "Hub Manager": 7
+    },
+    "Singapore / SEA": {
+      "Country Manager": 3,
+      "Operations Director": 4
+    },
+    "Germany": {
+      "Geschäftsführer": 2,
+      "Niederlassungsleiter": 4
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "営業所長": 7
+    }
+  },
+  "atypical_roles": [
+    "Chief Network Officer",
+    "Chief Fleet Officer",
+    "Chief Investment Officer (REIT)",
+    "Asset Manager",
+    "Hub Manager",
+    "Country Manager"
+  ]
+}

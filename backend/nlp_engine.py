@@ -264,6 +264,182 @@ def _build_global_normaliser(dirs: list[IndustryDirectory]) -> TitleNormaliser:
 
 
 # ─────────────────────────────────────────────────────────────────
+# REGION OVERLAY INDEX
+# ─────────────────────────────────────────────────────────────────
+
+OVERLAY_CSV = Path(__file__).parent / "region_overlay.csv"
+ARCHETYPES_DIR = Path(__file__).parent / "archetypes"
+
+# Location string → overlay region code mappings (ordered most-specific first)
+_LOCATION_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(usa|united states|u\.s\.a|u\.s\.|new york|san francisco|'
+                r'seattle|boston|chicago|los angeles|austin|dallas|houston|atlanta|'
+                r'denver|silicon valley|bay area|nyc|sf|washington d\.?c|'
+                r'palo alto|menlo park|mountain view|cupertino)\b', re.I), "USA"),
+    (re.compile(r'\b(uk|united kingdom|england|scotland|wales|london|manchester|'
+                r'birmingham|edinburgh|glasgow|bristol|leeds|oxford|cambridge)\b', re.I), "UK"),
+    (re.compile(r'\b(india|mumbai|delhi|bangalore|bengaluru|hyderabad|pune|'
+                r'chennai|kolkata|gurugram|noida|ahmedabad|gurgaon)\b', re.I), "India"),
+    (re.compile(r'\b(japan|tokyo|osaka|nagoya|kyoto|yokohama|sapporo)\b', re.I), "Japan"),
+    (re.compile(r'\b(germany|deutschland|berlin|frankfurt|munich|münchen|'
+                r'hamburg|cologne|düsseldorf|stuttgart|hannover)\b', re.I), "Germany"),
+    (re.compile(r'\b(france|paris|lyon|marseille|toulouse|bordeaux|lille)\b', re.I), "France"),
+    (re.compile(r'\b(china|beijing|shanghai|shenzhen|guangzhou|chengdu|'
+                r'hangzhou|wuhan|中国|中國)\b', re.I), "China"),
+    (re.compile(r'\b(south korea|korea|seoul|busan|인천|한국)\b', re.I), "South Korea"),
+    (re.compile(r'\b(singapore|싱가포르)\b', re.I), "Singapore"),
+    (re.compile(r'\b(australia|sydney|melbourne|brisbane|perth|canberra|adelaide)\b', re.I), "Australia"),
+    (re.compile(r'\b(canada|toronto|vancouver|montreal|calgary|ottawa|edmonton)\b', re.I), "Canada"),
+    (re.compile(r'\b(uae|dubai|abu dhabi|saudi arabia|riyadh|qatar|doha|'
+                r'kuwait|bahrain|oman|muscat|gcc|gulf)\b', re.I), "GCC"),
+    (re.compile(r'\b(brazil|brasil|são paulo|sao paulo|rio de janeiro|'
+                r'brasília|brasilia|belo horizonte|curitiba)\b', re.I), "Brazil"),
+    (re.compile(r'\b(mexico|méxico|ciudad de méxico|cdmx|monterrey|guadalajara)\b', re.I), "Mexico"),
+    (re.compile(r'\b(indonesia|jakarta|surabaya|bandung|bali)\b', re.I), "Indonesia"),
+    (re.compile(r'\b(malaysia|kuala lumpur|\bkl\b|penang|malaysia)\b', re.I), "Malaysia"),
+    (re.compile(r'\b(thailand|bangkok|chiang mai)\b', re.I), "Thailand"),
+    (re.compile(r'\b(vietnam|ho chi minh|hanoi|hcmc)\b', re.I), "Vietnam"),
+    (re.compile(r'\b(philippines|manila|cebu|makati)\b', re.I), "Philippines"),
+    (re.compile(r'\b(united nations|un secretariat)\b', re.I), "UN"),
+    (re.compile(r'\b(european commission|european union|brussels|eu)\b', re.I), "EU"),
+]
+
+# Industry YAML id → archetype_id mapping (default; refined by hint below)
+_INDUSTRY_TO_ARCHETYPE: dict[str, str] = {
+    "technology":           "software_telecom",
+    "banking_finance":      "banking",
+    "consulting":           "professional_it_services",
+    "manufacturing":        "industrial_asset_heavy",
+    "automotive":           "industrial_asset_heavy",
+    "energy":               "process_industries",
+    "pharma_life_sciences": "process_industries",
+    "healthcare":           "healthcare_delivery",
+    "retail":               "retail_hospitality",
+    "insurance":            "insurance",
+    "real_estate":          "asset_light_operations",
+    "government":           "public_sector_ngo",
+    "ngo":                  "public_sector_ngo",
+}
+
+# Keywords in industry_hint or company → override archetype (highest-specificity wins)
+# Note: no trailing \b — avoids blocking plurals/suffixes (e.g. "capital_markets", "banking")
+_ARCHETYPE_OVERRIDE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(capital.?markets?|investment.?bank|hedge.?fund|'
+                r'asset.?manag|private.?equity|venture.?capital|'
+                r'securities|brokerage|wealth.?manag)', re.I), "capital_markets"),
+    (re.compile(r'\b(it.?services?|it.?consult|managed.?services?|outsourc|'
+                r'tcs|infosys|wipro|hcl\b|cognizant|capgemini|accenture|'
+                r'tech.?mahindra|mphasis|hexaware)', re.I), "professional_it_services"),
+    (re.compile(r'\b(ngo|non.?profit|charity|foundation\b|unicef|undp\b|'
+                r'world.?bank|red.?cross)', re.I), "public_sector_ngo"),
+    (re.compile(r'\b(pharma|pharmaceutical|biotech|life.?science|'
+                r'pfizer|novartis|roche|astrazeneca|merck\b|eli.?lilly|'
+                r'clinical.?trial|drug.?discovery)', re.I), "process_industries"),
+]
+
+
+def _resolve_archetype(industry_id: str, industry_hint: str, company: str) -> str:
+    """
+    Resolve archetype_id from industry YAML id, with refinement from
+    free-text hint and company name for sub-industry precision.
+    """
+    combined = f"{industry_hint} {company}".lower()
+    for pattern, archetype in _ARCHETYPE_OVERRIDE_PATTERNS:
+        if pattern.search(combined):
+            return archetype
+    return _INDUSTRY_TO_ARCHETYPE.get(industry_id, "any")
+
+
+def _location_to_overlay_region(location: str) -> str:
+    """Map raw location string → overlay region code."""
+    if not location:
+        return "Global"
+    for pattern, region in _LOCATION_PATTERNS:
+        if pattern.search(location):
+            return region
+    return "Global"
+
+
+class RegionOverlayIndex:
+    """
+    Loads region_overlay.csv and provides (title_raw, region, archetype_id) → level lookup.
+    Implements the 5-pass lookup order from the README (most specific → least specific).
+    Level scale: 1 (CEO) → 10 (Entry). Maps to our internal L1-L10 directly.
+    Board-only roles (Non-Exec Director) fall through to FALLBACK_RULES → L0.
+    """
+
+    def __init__(self):
+        self._index: dict[tuple, int] = {}
+        self._load()
+
+    def _load(self) -> None:
+        import csv
+        if not OVERLAY_CSV.exists():
+            logger.warning("region_overlay.csv not found — overlay disabled")
+            return
+        try:
+            with open(OVERLAY_CSV, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    title    = (row.get("title_raw") or "").strip().lower()
+                    region   = (row.get("region") or "Global").strip()
+                    archtype = (row.get("archetype_id") or "any").strip()
+                    sub_ind  = (row.get("sub_industry") or "").strip()
+                    level_s  = (row.get("level") or "").strip()
+                    if not title or not level_s:
+                        continue
+                    try:
+                        level = int(level_s)
+                    except ValueError:
+                        continue
+                    # Index with most-specific key
+                    self._index[(title, region, archtype, sub_ind)] = level
+                    # Also index without sub_industry as lower-priority fallback
+                    # (only if no existing sub-industry-agnostic row already set)
+                    if sub_ind:
+                        no_sub_key = (title, region, archtype, "")
+                        if no_sub_key not in self._index:
+                            self._index[no_sub_key] = level
+            logger.info(f"Region overlay loaded: {len(self._index)} rules from {OVERLAY_CSV.name}")
+        except Exception as exc:
+            logger.warning(f"Region overlay load failed: {exc}")
+
+    def lookup(
+        self,
+        title_raw: str,
+        region: str,
+        archetype_id: str,
+        sub_industry: str = "",
+    ) -> Optional[int]:
+        """
+        5-pass lookup (first match wins):
+          1. (title, region, archetype, sub_industry)  — most specific
+          2. (title, region, archetype, "")            — drop sub_industry
+          3. (title, region, "any", "")                — cross-archetype
+          4. (title, "Global", archetype, "")          — cross-region
+          5. (title, "Global", "any", "")              — universal
+        Returns level 1–10 or None if no match.
+        """
+        if not self._index:
+            return None
+        t = title_raw.strip().lower()
+        checks = [
+            (t, region, archetype_id, sub_industry) if sub_industry else None,
+            (t, region, archetype_id, ""),
+            (t, region, "any", ""),
+            (t, "Global", archetype_id, ""),
+            (t, "Global", "any", ""),
+        ]
+        for key in checks:
+            if key is None:
+                continue
+            v = self._index.get(key)
+            if v is not None:
+                return v
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────
 # INDUSTRY MATCHER
 # ─────────────────────────────────────────────────────────────────
 
@@ -485,24 +661,49 @@ class LayerClassifier:
         ]),
     ]
 
-    def __init__(self, dirs: list[IndustryDirectory]):
+    def __init__(self, dirs: list[IndustryDirectory], overlay: Optional["RegionOverlayIndex"] = None):
         self._dirs = dirs
         self._normaliser = _build_global_normaliser(dirs)
+        self._overlay = overlay
 
     def classify(
         self,
         raw_designation: str,
         industry: Optional[IndustryDirectory] = None,
+        overlay_region: str = "Global",
+        archetype_id: str = "any",
     ) -> tuple[int, float, str]:
         """
         Returns (layer, confidence, match_method).
         confidence is 0.0–1.0.
+
+        Pass 0: Region overlay lookup (highest priority — deterministic rule book)
+        Pass 1: Exact match on YAML canonicals
+        Pass 2: Regex pattern match
+        Pass 3: Substring match (word-boundary safe)
+        Pass 4: Fuzzy match (rapidfuzz)
+        Pass 5: Generic FALLBACK_RULES
         """
         if not raw_designation:
             return 9, 0.1, "fallback"
 
+        # ── Pass 0: Region overlay (deterministic, region+archetype aware) ──
+        if self._overlay:
+            overlay_level = self._overlay.lookup(
+                raw_designation, overlay_region, archetype_id
+            )
+            if overlay_level is not None:
+                # Also try with the normalised form for abbreviated titles
+                return overlay_level, 1.0, "overlay"
+
         # 1. Expand abbreviations then normalise
         normalised = self._normaliser.normalise(raw_designation)
+
+        # Pass 0b: overlay with normalised/expanded form
+        if self._overlay and normalised != raw_designation.strip().lower():
+            overlay_level = self._overlay.lookup(normalised, overlay_region, archetype_id)
+            if overlay_level is not None:
+                return overlay_level, 0.97, "overlay"
 
         source_dirs = [industry] if industry else self._dirs
 
@@ -1114,13 +1315,14 @@ class NLPEngine:
     """
 
     def __init__(self):
-        self._dirs            = IndustryDirectoryLoader.load_all()
-        self._normaliser      = _build_global_normaliser(self._dirs)
+        self._dirs             = IndustryDirectoryLoader.load_all()
+        self._normaliser       = _build_global_normaliser(self._dirs)
         self._industry_matcher = IndustryMatcher(self._dirs)
-        self._layer_classifier = LayerClassifier(self._dirs)
-        self._dept_extractor  = DepartmentExtractor(self._dirs)
-        self._region_clf      = RegionClassifier()
-        self._sector_clf      = SectorClassifier()
+        self._overlay          = RegionOverlayIndex()
+        self._layer_classifier = LayerClassifier(self._dirs, overlay=self._overlay)
+        self._dept_extractor   = DepartmentExtractor(self._dirs)
+        self._region_clf       = RegionClassifier()
+        self._sector_clf       = SectorClassifier()
 
     def classify(
         self,
@@ -1130,7 +1332,7 @@ class NLPEngine:
         location: str = "",
     ) -> ClassificationResult:
         """
-        Full pipeline: sector → industry → layer → department → region.
+        Full pipeline: sector → industry → overlay → layer → department → region.
         Returns ClassificationResult with all fields populated.
         """
         # 1. Detect sector
@@ -1139,10 +1341,23 @@ class NLPEngine:
         # 2. Best matching industry directory
         industry = self._industry_matcher.best(designation, company, industry_hint)
 
-        # 3. Layer classification
-        layer, confidence, method = self._layer_classifier.classify(designation, industry)
+        # 3. Resolve overlay region + archetype (refined by hint + company)
+        overlay_region = _location_to_overlay_region(location)
+        archetype_id   = _resolve_archetype(
+            industry.id if industry else "",
+            industry_hint,
+            company,
+        )
 
-        # 4. Department extraction
+        # 4. Layer classification (overlay → YAML → FALLBACK)
+        layer, confidence, method = self._layer_classifier.classify(
+            designation,
+            industry,
+            overlay_region=overlay_region,
+            archetype_id=archetype_id,
+        )
+
+        # 5. Department extraction
         dept_p, dept_s, dept_t = self._dept_extractor.extract(
             designation, company, industry
         )

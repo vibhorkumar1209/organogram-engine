@@ -1,0 +1,633 @@
+{
+  "archetype_id": "banking",
+  "version": 1,
+  "name": "Banking",
+  "industries": [
+    "Retail Banking / Commercial Banking"
+  ],
+  "common_sub_industries": [
+    "Universal Bank",
+    "Retail-only Bank",
+    "Commercial Bank",
+    "Community Bank",
+    "Cooperative Bank",
+    "Digital-native Bank / Neobank",
+    "Private Bank / Wealth",
+    "Custody Bank"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance / Treasury",
+    "Risk",
+    "Credit Risk",
+    "Compliance",
+    "Operations",
+    "Retail Banking",
+    "Commercial Banking",
+    "Wealth Management",
+    "Marketing",
+    "Distribution / Branch Network",
+    "Digital",
+    "HR",
+    "Legal",
+    "IT",
+    "Audit",
+    "Corporate Affairs"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Risk": [
+      {
+        "level": 1,
+        "title": "Chief Risk Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Risk"
+      },
+      {
+        "level": 3,
+        "title": "SVP Risk"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Risk"
+      },
+      {
+        "level": 5,
+        "title": "Director Risk"
+      },
+      {
+        "level": 6,
+        "title": "Senior Risk Manager"
+      },
+      {
+        "level": 7,
+        "title": "Risk Manager"
+      },
+      {
+        "level": 8,
+        "title": "Risk Officer"
+      },
+      {
+        "level": 9,
+        "title": "Senior Risk Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Risk Analyst"
+      }
+    ],
+    "Credit": [
+      {
+        "level": 1,
+        "title": "Chief Credit Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Credit"
+      },
+      {
+        "level": 3,
+        "title": "SVP Credit"
+      },
+      {
+        "level": 4,
+        "title": "Senior Credit Director"
+      },
+      {
+        "level": 5,
+        "title": "Credit Director / Senior Credit Officer"
+      },
+      {
+        "level": 6,
+        "title": "Senior Credit Manager"
+      },
+      {
+        "level": 7,
+        "title": "Credit Manager"
+      },
+      {
+        "level": 8,
+        "title": "Credit Officer"
+      },
+      {
+        "level": 9,
+        "title": "Senior Credit Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Credit Analyst"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Operating Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Operations"
+      },
+      {
+        "level": 3,
+        "title": "SVP Operations"
+      },
+      {
+        "level": 4,
+        "title": "Senior Operations Director"
+      },
+      {
+        "level": 5,
+        "title": "Operations Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Operations Manager"
+      },
+      {
+        "level": 7,
+        "title": "Operations Manager"
+      },
+      {
+        "level": 8,
+        "title": "Operations Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Operations Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Operations Analyst"
+      }
+    ],
+    "Retail Banking": [
+      {
+        "level": 1,
+        "title": "Head of Retail Banking"
+      },
+      {
+        "level": 2,
+        "title": "EVP Retail"
+      },
+      {
+        "level": 3,
+        "title": "SVP Retail Banking"
+      },
+      {
+        "level": 4,
+        "title": "Senior Retail Banking Director"
+      },
+      {
+        "level": 5,
+        "title": "Regional Retail Director"
+      },
+      {
+        "level": 6,
+        "title": "Cluster Head / Area Manager"
+      },
+      {
+        "level": 7,
+        "title": "Branch Manager"
+      },
+      {
+        "level": 8,
+        "title": "Assistant Branch Manager"
+      },
+      {
+        "level": 9,
+        "title": "Senior Banker / Relationship Manager"
+      },
+      {
+        "level": 10,
+        "title": "Banker"
+      }
+    ],
+    "Commercial Banking": [
+      {
+        "level": 1,
+        "title": "Head of Commercial Banking"
+      },
+      {
+        "level": 2,
+        "title": "EVP Commercial"
+      },
+      {
+        "level": 3,
+        "title": "SVP Commercial Banking"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Commercial"
+      },
+      {
+        "level": 5,
+        "title": "Commercial Banking Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Relationship Manager"
+      },
+      {
+        "level": 7,
+        "title": "Relationship Manager"
+      },
+      {
+        "level": 8,
+        "title": "Associate Relationship Manager"
+      },
+      {
+        "level": 9,
+        "title": "Senior Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Analyst"
+      }
+    ],
+    "Wealth Management": [
+      {
+        "level": 1,
+        "title": "Head of Wealth"
+      },
+      {
+        "level": 2,
+        "title": "EVP Wealth"
+      },
+      {
+        "level": 3,
+        "title": "SVP Private Wealth"
+      },
+      {
+        "level": 4,
+        "title": "Senior Wealth Director"
+      },
+      {
+        "level": 5,
+        "title": "Wealth Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Private Banker"
+      },
+      {
+        "level": 7,
+        "title": "Private Banker"
+      },
+      {
+        "level": 8,
+        "title": "Associate Private Banker"
+      },
+      {
+        "level": 9,
+        "title": "Wealth Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Analyst"
+      }
+    ],
+    "Compliance": [
+      {
+        "level": 1,
+        "title": "Chief Compliance Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Compliance"
+      },
+      {
+        "level": 3,
+        "title": "VP Compliance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Compliance"
+      },
+      {
+        "level": 5,
+        "title": "Director Compliance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Compliance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Compliance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Compliance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Compliance Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Compliance Analyst"
+      }
+    ],
+    "Marketing": [
+      {
+        "level": 1,
+        "title": "Chief Marketing Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Marketing"
+      },
+      {
+        "level": 3,
+        "title": "SVP Marketing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Marketing"
+      },
+      {
+        "level": 5,
+        "title": "Marketing Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Marketing Manager"
+      },
+      {
+        "level": 7,
+        "title": "Marketing Manager"
+      },
+      {
+        "level": 8,
+        "title": "Marketing Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Marketing Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Marketing Specialist"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "SVP": 3,
+      "VP": 4,
+      "AVP": 5,
+      "Director": 5
+    },
+    "UK": {
+      "Managing Director": 2,
+      "Director": 1,
+      "Senior Manager": 5
+    },
+    "India": {
+      "Whole-Time Director": 2,
+      "Executive Director": 2,
+      "President": 3,
+      "Group Head": 3,
+      "AVP": 5,
+      "DGM": 6,
+      "AGM": 7,
+      "Cluster Head": 4,
+      "Branch Manager": 7
+    },
+    "Singapore": {
+      "Managing Director": 2,
+      "Executive Director": 4,
+      "Director": 5,
+      "VP": 6
+    },
+    "GCC": {
+      "Group CEO": 1,
+      "Deputy CEO": 2,
+      "Group Head": 3
+    },
+    "Japan": {
+      "頭取 (Tōdori)": 1,
+      "副頭取 (Fuku Tōdori)": 2,
+      "支店長": 7
+    }
+  },
+  "atypical_roles": [
+    "Chief Credit Officer",
+    "Chief Risk Officer",
+    "Group Head",
+    "Cluster Head",
+    "Senior Banker",
+    "Country Treasurer"
+  ]
+}

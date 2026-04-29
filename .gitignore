@@ -31,6 +31,5 @@ Thumbs.db
 
 # Data / uploads
 backend/uploads/
-backend/*.csv
 backend/*.xlsx
 backend/test_data.json
