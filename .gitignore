@@ -32,4 +32,4 @@ Thumbs.db
 # Data / uploads
 backend/uploads/
 backend/*.xlsx
-backend/test_data.json
+# backend/test_data.json  ← now committed so /load-demo works on Render
