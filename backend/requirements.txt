@@ -8,3 +8,4 @@ python-multipart>=0.0.9
 pyyaml>=6.0.1
 rapidfuzz>=3.6.0
 beautifulsoup4>=4.12.0
+anthropic>=0.40.0

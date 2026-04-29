@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import type { OrgNode, Stats, PublicCompanyData } from './types'
+import type { OrgNode, Stats } from './types'
 import { OrgChart } from './components/OrgChart'
 import { SearchBar } from './components/SearchBar'
 import { ExecPanel } from './components/ExecPanel'
@@ -9,15 +9,6 @@ const API = import.meta.env.VITE_API_URL || '/api'
 const DEPT_TYPES = new Set<OrgNode['node_type']>([
   'global', 'region', 'dept_primary', 'dept_secondary', 'dept_tertiary',
 ])
-
-const SECTOR_COLORS: Record<string, string> = {
-  Automotive: '#F59E0B',
-  Govt:       '#3B82F6',
-  NGO:        '#10B981',
-  Startup:    '#8B5CF6',
-  Public:     '#06B6D4',
-  Private:    '#64748B',
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -60,90 +51,6 @@ function collapseNode(tree: OrgNode, targetId: string): OrgNode {
     ...tree,
     children: (tree.children ?? []).map(c => collapseNode(c, targetId)),
   }
-}
-
-/** Build synthetic BOD and EM group nodes from public company data */
-function buildSyntheticNodes(data: PublicCompanyData): OrgNode[] {
-  const nodes: OrgNode[] = []
-
-  if (data.board.length > 0) {
-    nodes.push({
-      node_id:      'syn_bod',
-      node_type:    'dept_primary',
-      label:        'Board of Directors',
-      layer:        -1,
-      sector:       'All',
-      color:        '#3491E8',
-      is_ghost:     false,
-      is_synthetic: true,
-      expanded:     true,
-      has_more:     false,
-      metadata:     { people_count: data.board.length },
-      children: data.board.map((m, i) => ({
-        node_id:      `syn_bod_${i}`,
-        node_type:    'person' as const,
-        label:        m.name,
-        layer:        m.layer,
-        sector:       'All',
-        color:        '#3491E8',
-        is_ghost:     false,
-        is_synthetic: true,
-        expanded:     false,
-        has_more:     false,
-        metadata: {
-          designation: m.title,
-          ...(m.age ? { age: m.age } : {}),
-          ...(m.pay ? { pay: m.pay } : {}),
-          data_source: (m as any).source === 'web' ? 'Website' : 'Yahoo Finance',
-        },
-      })),
-    })
-  }
-
-  if (data.executives.length > 0) {
-    nodes.push({
-      node_id:      'syn_em',
-      node_type:    'dept_primary',
-      label:        'Executive Management',
-      layer:        0,
-      sector:       'All',
-      color:        '#10B981',
-      is_ghost:     false,
-      is_synthetic: true,
-      expanded:     true,
-      has_more:     false,
-      metadata:     { people_count: data.executives.length },
-      children: data.executives.map((m, i) => ({
-        node_id:      `syn_em_${i}`,
-        node_type:    'person' as const,
-        label:        m.name,
-        layer:        m.layer,
-        sector:       'All',
-        color:        '#10B981',
-        is_ghost:     false,
-        is_synthetic: true,
-        expanded:     false,
-        has_more:     false,
-        metadata: {
-          designation: m.title,
-          ...(m.age ? { age: m.age } : {}),
-          ...(m.pay ? { pay: m.pay } : {}),
-          data_source: (m as any).source === 'web' ? 'Website' : 'Yahoo Finance',
-        },
-      })),
-    })
-  }
-
-  return nodes
-}
-
-function prependSyntheticNodes(tree: OrgNode, synNodes: OrgNode[]): OrgNode {
-  const existing = (tree.children ?? []).filter(c => !c.is_synthetic)
-  return { ...tree, children: [...synNodes, ...existing] }
-}
-
-function stripSyntheticNodes(tree: OrgNode): OrgNode {
-  return { ...tree, children: (tree.children ?? []).filter(c => !c.is_synthetic) }
 }
 
 // Map a raw executive record from /executives endpoint → OrgNode
@@ -191,13 +98,6 @@ export default function App() {
   const [fitGeneration, setFitGeneration] = useState(0)
   const bumpFit = () => setFitGeneration(g => g + 1)
 
-  // Public company (ticker + domain) state
-  const [ticker, setTicker]               = useState('')
-  const [domain, setDomain]               = useState('')
-  const [publicCompany, setPublicCompany] = useState<PublicCompanyData | null>(null)
-  const [lookupLoading, setLookupLoading] = useState(false)
-  const [lookupError, setLookupError]     = useState<string | null>(null)
-
   // ExecPanel state
   const [panelDept, setPanelDept]   = useState<OrgNode | null>(null)
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
@@ -215,17 +115,12 @@ export default function App() {
     if (viewTree) setAllNodes(flattenTree(viewTree))
   }, [viewTree])
 
-  // When deptTree changes, reapply synthetic nodes if a ticker is loaded
+  // When deptTree changes, sync to viewTree
   useEffect(() => {
     if (!deptTree) return
-    if (publicCompany) {
-      const synNodes = buildSyntheticNodes(publicCompany)
-      setViewTree(prependSyntheticNodes(deptTree, synNodes))
-    } else {
-      setViewTree(deptTree)
-    }
+    setViewTree(deptTree)
     bumpFit()
-  }, [deptTree, publicCompany])
+  }, [deptTree])
 
   // ── Load demo ──────────────────────────────────────────────────────
   const loadDemo = async () => {
@@ -254,44 +149,6 @@ export default function App() {
     setDeptTree(filtered)       // useEffect above will set viewTree
     bumpFit()          // force fit-to-screen on next render
     setStatus('ready')
-  }
-
-  // ── Public company lookup (Yahoo Finance + website scrape) ───────────
-  const handleLookup = async () => {
-    const t = ticker.trim().toUpperCase()
-    const d = domain.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '')
-    if (!t && !d) return
-    setLookupLoading(true)
-    setLookupError(null)
-    try {
-      const params = new URLSearchParams()
-      if (t) params.set('ticker', t)
-      if (d) params.set('domain', d)
-      const res = await fetch(`${API}/public-company?${params}`)
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Lookup failed' }))
-        throw new Error(err.detail ?? 'Lookup failed')
-      }
-      const data: PublicCompanyData = await res.json()
-      setPublicCompany(data)
-      // Show partial-source warnings inline but don't block
-      if (data.tickerError || data.webError) {
-        const warns = [data.tickerError, data.webError].filter(Boolean).join(' · ')
-        setLookupError(`Partial data: ${warns}`)
-      }
-    } catch (e: any) {
-      setLookupError(e.message)
-    } finally {
-      setLookupLoading(false)
-    }
-  }
-
-  const handleClearLookup = () => {
-    setPublicCompany(null)
-    setTicker('')
-    setDomain('')
-    setLookupError(null)
-    setDeptTree(prev => prev ? stripSyntheticNodes(prev) : null)
   }
 
   // ── Handle node click: expand / collapse / open panel ─────────────
@@ -503,113 +360,6 @@ export default function App() {
 
         <SearchBar allNodes={allNodes} onFocus={handleSearchFocus} />
 
-        {/* ── Public company lookup (ticker + domain) ────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          {publicCompany ? (
-            /* ── Loaded badge ───────────────────────────────── */
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              background: '#0a1e14', border: '1px solid #10B98144',
-              borderRadius: 7, padding: '5px 10px', maxWidth: 280,
-            }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981', flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: '#e2e8f0', fontWeight: 600,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {publicCompany.companyName}
-                </div>
-                <div style={{ fontSize: 9, color: '#334155', marginTop: 1 }}>
-                  {[publicCompany.ticker, publicCompany.domain].filter(Boolean).join(' · ')}
-                  {publicCompany.pageUrl && (
-                    <> · <a href={publicCompany.pageUrl} target="_blank" rel="noreferrer"
-                      style={{ color: '#3491E8', textDecoration: 'none' }}>source ↗</a></>
-                  )}
-                </div>
-              </div>
-              <button onClick={handleClearLookup}
-                style={{ background: 'none', border: 'none', color: '#475569',
-                  cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1, flexShrink: 0 }}
-                title="Clear public company data"
-              >×</button>
-            </div>
-          ) : (
-            /* ── Dual input: ticker + domain ─────────────────── */
-            <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-              {/* Ticker field */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                background: '#0c1e2e', border: '1px solid #1e3a52',
-                borderRadius: '7px 0 0 7px', padding: '4px 8px',
-              }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2">
-                  <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
-                  <polyline points="16 7 22 7 22 13"/>
-                </svg>
-                <input
-                  value={ticker}
-                  onChange={e => setTicker(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && handleLookup()}
-                  placeholder="Ticker"
-                  maxLength={10}
-                  title="Stock ticker symbol (e.g. AAPL)"
-                  style={{
-                    background: 'transparent', border: 'none', outline: 'none',
-                    color: '#e2e8f0', fontSize: 11, width: 56,
-                    textTransform: 'uppercase',
-                  }}
-                />
-              </div>
-              {/* Divider */}
-              <div style={{ width: 1, background: '#1e3a52', alignSelf: 'stretch' }} />
-              {/* Domain field */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                background: '#0c1e2e', border: '1px solid #1e3a52',
-                borderLeft: 'none', padding: '4px 8px',
-              }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="2" y1="12" x2="22" y2="12"/>
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                </svg>
-                <input
-                  value={domain}
-                  onChange={e => setDomain(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleLookup()}
-                  placeholder="apple.com"
-                  maxLength={80}
-                  title="Company domain to scrape leadership page (e.g. apple.com)"
-                  style={{
-                    background: 'transparent', border: 'none', outline: 'none',
-                    color: '#e2e8f0', fontSize: 11, width: 90,
-                  }}
-                />
-              </div>
-              {/* Lookup button */}
-              <button
-                onClick={handleLookup}
-                disabled={lookupLoading || (!ticker.trim() && !domain.trim())}
-                style={{
-                  background: lookupLoading ? '#0a1520' : '#0c3649',
-                  border: '1px solid #1e3a52', borderLeft: 'none',
-                  borderRadius: '0 7px 7px 0', padding: '4px 10px',
-                  color: lookupLoading ? '#334155' : '#3491E8',
-                  fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-              >
-                {lookupLoading ? '⟳' : 'Lookup'}
-              </button>
-            </div>
-          )}
-          {/* Error / warning */}
-          {lookupError && (
-            <div style={{ fontSize: 10, color: lookupError.startsWith('Partial') ? '#F59E0B' : '#E63946',
-              maxWidth: 160, lineHeight: 1.3 }}>
-              {lookupError.startsWith('Partial') ? '⚠' : '✕'} {lookupError}
-            </div>
-          )}
-        </div>
-
         {/* Upload */}
         <button
           onClick={() => fileInputRef.current?.click()}
@@ -696,48 +446,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* Sector legend */}
-          <div>
-            <div style={{ fontSize: 10, color: '#334155', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
-              Sectors
-            </div>
-            {Object.entries(SECTOR_COLORS).map(([sector, color]) => (
-              <div key={sector} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 10 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                <span style={{ color: '#94a3b8' }}>{sector}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Seniority scale */}
-          <div>
-            <div style={{ fontSize: 10, color: '#334155', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
-              Seniority
-            </div>
-            {([
-              [0, 'Board / NED'],
-              [1, 'C-Suite'],
-              [2, 'MD / EVP'],
-              [3, 'VP'],
-              [4, 'Sr. Director'],
-              [5, 'Director'],
-              [6, 'Sr. Manager'],
-              [7, 'Manager'],
-              [8, 'Sr. IC'],
-              [9, 'IC / Analyst'],
-              [10,'Graduate'],
-            ] as [number, string][]).map(([l, label]) => (
-              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 10 }}>
-                <div style={{
-                  width: 20, height: 14, borderRadius: 3,
-                  background: '#0c3649', color: '#3491E8',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 9, fontWeight: 700, flexShrink: 0,
-                }}>L{l}</div>
-                <span style={{ color: '#475569' }}>{label}</span>
-              </div>
-            ))}
-          </div>
         </aside>
 
         {/* ── CHART AREA ───────────────────────────────────────── */}

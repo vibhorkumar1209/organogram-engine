@@ -834,6 +834,31 @@ class LayerClassifier:
 
         return 9, 0.3, "fallback"
 
+    def classify_with_llm(
+        self,
+        raw_designation: str,
+        industry: Optional["IndustryDirectory"] = None,
+        overlay_region: str = "Global",
+        archetype_id: str = "any",
+        industry_hint: str = "",
+        company: str = "",
+    ) -> tuple[int, float, str]:
+        """
+        Full classification pipeline + LLM fallback for unresolved titles.
+        Calls self.classify() first; if confidence <= 0.35 (no rule matched),
+        delegates to Claude Haiku for a one-shot seniority guess.
+        """
+        layer, conf, method = self.classify(raw_designation, industry, overlay_region, archetype_id)
+        if conf <= 0.35:
+            try:
+                from llm_fallback import llm_classify_layer
+                llm_layer = llm_classify_layer(raw_designation, industry_hint, company)
+                if llm_layer is not None:
+                    return llm_layer, 0.72, "llm"
+            except Exception as exc:
+                logger.debug(f"LLM fallback import/call failed: {exc}")
+        return layer, conf, method
+
 
 # ─────────────────────────────────────────────────────────────────
 # DEPARTMENT EXTRACTOR
@@ -1349,12 +1374,14 @@ class NLPEngine:
             company,
         )
 
-        # 4. Layer classification (overlay → YAML → FALLBACK)
-        layer, confidence, method = self._layer_classifier.classify(
+        # 4. Layer classification (overlay → YAML → FALLBACK → LLM)
+        layer, confidence, method = self._layer_classifier.classify_with_llm(
             designation,
             industry,
             overlay_region=overlay_region,
             archetype_id=archetype_id,
+            industry_hint=industry_hint,
+            company=company,
         )
 
         # 5. Department extraction
