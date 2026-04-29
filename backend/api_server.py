@@ -100,6 +100,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/ping")
+def ping():
+    """Lightweight wake-up probe — keeps Render from cold-starting on first upload."""
+    return {"status": "ok"}
+
 # ─── In-memory state (single session) ────────
 _dag: OrganogramDAG | None = None
 _db:  OrganogramDB  | None = None
@@ -153,6 +159,10 @@ async def upload_file(file: UploadFile = File(...),
 
     if not records:
         raise HTTPException(status_code=422, detail="File appears empty.")
+
+    MAX_ROWS = 500
+    if len(records) > MAX_ROWS:
+        records = records[:MAX_ROWS]
 
     _dag, _db = build_from_records(records, company_name=company_name)
 

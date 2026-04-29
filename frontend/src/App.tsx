@@ -204,7 +204,11 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { loadDemo() }, [])
+  // Ping backend on load so Render wakes before first upload
+  useEffect(() => {
+    fetch(`${API}/ping`).catch(() => {/* ignore — just waking Render */})
+    loadDemo()
+  }, [])
 
   // Keep allNodes in sync with viewTree for search
   useEffect(() => {
@@ -372,16 +376,30 @@ export default function App() {
     setStatus('loading')
     setColWarning(null)
     setPanelDept(null); setPanelExecs(null)
-    setStatusMsg(`Uploading ${file.name}…`)
     const company = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
     const form = new FormData()
     form.append('file', file)
+
+    // Tick elapsed seconds so user knows it's working (NLP can take 20-40s)
+    let elapsed = 0
+    const tick = setInterval(() => {
+      elapsed += 1
+      setStatusMsg(`Processing ${file.name}… ${elapsed}s (NLP classifying rows)`)
+    }, 1000)
+    setStatusMsg(`Processing ${file.name}…`)
+
     try {
       const res = await fetch(
         `${API}/upload?company_name=${encodeURIComponent(company)}`,
         { method: 'POST', body: form }
       )
-      if (!res.ok) throw new Error(await res.text())
+      clearInterval(tick)
+      if (!res.ok) {
+        const errText = await res.text()
+        let detail = errText
+        try { detail = JSON.parse(errText).detail ?? errText } catch {}
+        throw new Error(detail)
+      }
       const data = await res.json()
       setStats(data.stats)
       if (data.canonical_missing?.length > 0) {
@@ -393,7 +411,13 @@ export default function App() {
       }
       await loadDeptStructure()
     } catch (e: any) {
-      setStatus('error'); setStatusMsg(e.message)
+      clearInterval(tick)
+      setStatus('error')
+      setStatusMsg(
+        e.message?.includes('fetch') || e.message?.includes('network')
+          ? 'Upload timed out — backend may be cold-starting. Wait 30s and try again.'
+          : e.message
+      )
     }
   }
 
