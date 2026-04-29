@@ -30,6 +30,204 @@ NODE_DEPT_T    = "dept_tertiary"
 NODE_PERSON    = "person"
 NODE_GHOST     = "ghost"
 
+# ─────────────────────────────────────────────
+# CANONICAL DEPARTMENT NAME NORMALIZATION
+# ─────────────────────────────────────────────
+
+# Accepted top-level (primary) department names.
+# Any name NOT in this set is treated as either a secondary/team name
+# or an industry-specific label and gets remapped via _DEPT_REMAP.
+_CANONICAL_PRIMARY: frozenset[str] = frozenset({
+    "Board of Management",
+    "Executive Management",
+    "Finance",
+    "Human Resources",
+    "People & Culture",
+    "Legal",
+    "Legal & Compliance",
+    "Risk & Compliance",
+    "Risk Management",
+    "Compliance",
+    "Technology",
+    "Information Technology",
+    "Engineering",
+    "Data & Analytics",
+    "Product Management",
+    "Operations",
+    "Supply Chain",
+    "Manufacturing",
+    "Sales",
+    "Commercial",
+    "Sales & Commercial",
+    "Marketing",
+    "Customer Experience",
+    "Customer Success",
+    "Strategy",
+    "Corporate Development",
+    "Communications",
+    "Sustainability",
+    "Research & Development",
+    "Procurement",
+    "Actuarial",
+    "Underwriting",
+    "Claims",
+    "Investment Management",
+    "Treasury",
+    "Audit",
+    "Internal Audit",
+})
+
+# Map non-canonical / industry-specific / generic dept names → canonical.
+# Keys are lowercase stripped strings.
+_DEPT_REMAP: dict[str, str] = {
+    # Generic catch-alls
+    "general":                          "Operations",
+    "general management":               "Operations",
+    "administration":                   "Operations",
+    "corporate":                        "Executive Management",
+    "corporate & executive":            "Executive Management",
+    "executive":                        "Executive Management",
+    "ceo office":                       "Executive Management",
+    "c-suite":                          "Executive Management",
+    "managing directors":               "Executive Management",
+    "president / evp":                  "Executive Management",
+    # HR variants
+    "hr":                               "Human Resources",
+    "people":                           "Human Resources",
+    "talent":                           "Human Resources",
+    "talent management":                "Human Resources",
+    "talent & culture":                 "People & Culture",
+    "people operations":                "Human Resources",
+    "workforce":                        "Human Resources",
+    "learning & development":           "Human Resources",
+    # Finance variants
+    "financial planning & analysis":    "Finance",
+    "fp&a":                             "Finance",
+    "corporate finance":                "Finance",
+    "financial services":               "Finance",
+    "accounting":                       "Finance",
+    "financial advisory":               "Finance",
+    "deal advisory":                    "Corporate Development",
+    "m&a":                              "Corporate Development",
+    "investor relations":               "Finance",
+    # Tech variants
+    "it":                               "Technology",
+    "information technology":           "Technology",
+    "digital":                          "Technology",
+    "software":                         "Engineering",
+    "data":                             "Data & Analytics",
+    "analytics":                        "Data & Analytics",
+    "data science":                     "Data & Analytics",
+    # Sales variants
+    "key accounts":                     "Sales",
+    "key account management":           "Sales",
+    "enterprise sales":                 "Sales",
+    "inside sales":                     "Sales",
+    "field sales":                      "Sales",
+    "retail sales":                     "Sales",
+    "channel sales":                    "Sales",
+    "business development":             "Sales",
+    "revenue":                          "Sales",
+    "commercial & sales":               "Sales & Commercial",
+    "sales & distribution":             "Sales",
+    "bancassurance":                    "Sales",
+    # Marketing variants
+    "brand management":                 "Marketing",
+    "brand & marketing":                "Marketing",
+    "trade marketing":                  "Marketing",
+    "shopper marketing":                "Marketing",
+    "consumer insights":                "Marketing",
+    "digital marketing":                "Marketing",
+    "performance marketing":            "Marketing",
+    "product marketing":                "Marketing",
+    "marketing & brand":                "Marketing",
+    # Operations / industry-specific
+    "vehicle sales":                    "Sales",
+    "upstream":                         "Operations",
+    "downstream":                       "Operations",
+    "e&p":                              "Operations",
+    "exploration":                      "Operations",
+    "drilling":                         "Operations",
+    "refining":                         "Operations",
+    "field development":                "Operations",
+    "mining operations":                "Operations",
+    "plant operations":                 "Operations",
+    "service delivery":                 "Operations",
+    "facilities":                       "Operations",
+    "real estate":                      "Operations",
+    # Supply chain
+    "logistics":                        "Supply Chain",
+    "warehousing":                      "Supply Chain",
+    "distribution":                     "Supply Chain",
+    "sourcing":                         "Procurement",
+    # Legal
+    "legal & regulatory":               "Legal & Compliance",
+    "regulatory":                       "Legal & Compliance",
+    "compliance & legal":               "Legal & Compliance",
+    # Risk
+    "risk":                             "Risk Management",
+    "credit risk":                      "Risk Management",
+    "market risk":                      "Risk Management",
+    "enterprise risk":                  "Risk Management",
+    "risk advisory":                    "Risk Management",
+    # R&D
+    "r&d":                              "Research & Development",
+    "innovation":                       "Research & Development",
+    "product & engineering":            "Engineering",
+    # Customer
+    "customer service":                 "Customer Experience",
+    "customer support":                 "Customer Experience",
+    "client services":                  "Customer Experience",
+    "client success":                   "Customer Success",
+    # Strategy
+    "corporate strategy":               "Strategy",
+    "group strategy":                   "Strategy",
+    "strategy & corporate development": "Strategy",
+    "business strategy":                "Strategy",
+}
+
+
+def _canonical_dept(dept_primary: str, layer: int) -> str:
+    """
+    Return a canonical primary department name.
+
+    Layer overrides take priority:
+      L0  → Board of Management (always)
+      L1  → Executive Management (C-Suite)
+      L2  → Executive Management (MD / EVP level)
+
+    For L3+, remaps non-canonical / industry-specific / generic names to the
+    closest canonical function. Falls back to "Operations" when nothing matches.
+    """
+    # Layer-based hard overrides (most important — independent of NLP dept)
+    if layer == 0:
+        return "Board of Management"
+    if layer in (1, 2):
+        return "Executive Management"
+
+    # Attempt remap via exact lookup (case-insensitive)
+    key = dept_primary.strip().lower()
+    if key in _DEPT_REMAP:
+        return _DEPT_REMAP[key]
+
+    # Accept if it's already canonical
+    for canon in _CANONICAL_PRIMARY:
+        if dept_primary.strip().lower() == canon.lower():
+            return canon
+
+    # Partial-word remap for compound names not in the explicit map
+    for banned_key, replacement in _DEPT_REMAP.items():
+        if banned_key in key:
+            return replacement
+
+    # Unknown but non-empty name — accept as-is (analyst wrote something real)
+    if dept_primary.strip():
+        return dept_primary.strip()
+
+    # Ultimate fallback
+    return "Operations"
+
+
 # Department display order — lower number = shown first
 DEPT_PRIMARY_ORDER: dict[str, int] = {
     "board of directors":    0,
@@ -220,9 +418,15 @@ class OrganogramDAG:
 
     # ─── Insert person with ghost-node bridging ─
     def insert_person(self, rec: ClassifiedRecord):
+        # Enforce canonical department names and layer-based overrides
+        # (Board L0 → "Board of Management", C-Suite L1-2 → "Executive Management")
+        dept_p = _canonical_dept(rec.dept_primary, rec.layer)
+        dept_s = rec.dept_secondary if rec.layer > 2 else ""
+        dept_t = rec.dept_tertiary  if rec.layer > 2 else ""
+
         leaf_dept_id = self.ensure_department(
             rec.region, rec.sector,
-            rec.dept_primary, rec.dept_secondary, rec.dept_tertiary
+            dept_p, dept_s, dept_t
         )
 
         person_id = rec.id
@@ -240,8 +444,8 @@ class OrganogramDAG:
                 "company":        rec.company,
                 "linkedin_url":   rec.linkedin_url,
                 "location":       rec.location,
-                "dept_primary":   rec.dept_primary,
-                "dept_secondary": rec.dept_secondary,
+                "dept_primary":   dept_p,
+                "dept_secondary": dept_s,
                 "nlp_confidence": round(getattr(rec, "nlp_confidence", 0.0), 2),
                 "nlp_industry":   getattr(rec, "nlp_industry", "generic"),
                 "nlp_method":     getattr(rec, "nlp_method", "fallback"),

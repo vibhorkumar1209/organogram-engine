@@ -948,10 +948,10 @@ class DepartmentExtractor:
                 best_secondary = uni_secondary   # uni_secondary may be "" — that's fine
             # else: keep best YAML result — at least it's a named category
 
-        # Default
+        # If no keyword matched, infer dept from designation text alone
         if not best_primary:
-            best_primary   = "General"
-            best_secondary = "General"
+            best_primary, best_secondary = self._infer_from_designation(designation)
+
 
         # 3. Tertiary from designation (empty secondary stays empty — structural engine handles it)
         tertiary = self._derive_tertiary(designation, best_secondary, best_primary)
@@ -974,6 +974,197 @@ class DepartmentExtractor:
                 if re.search(pat, text):
                     return primary, secondary
         return "", ""
+
+    # Ordered rules: (primary, secondary, [trigger_keywords])
+    # Checked top-to-bottom; first keyword match wins.
+    _DESIGNATION_DEPT_RULES: list[tuple[str, str, list[str]]] = [
+        # Board / Executive
+        ("Board of Management",  "Non-Executive Directors",
+         ["non-executive", "non exec", "ned", "supervisory board", "board of director",
+          "trustee", "governor", "independent director"]),
+        ("Executive Management", "C-Suite",
+         ["chief executive", "ceo", "chief financial", "cfo", "chief operating", "coo",
+          "chief technology", "cto", "chief information", "cio", "chief marketing", "cmo",
+          "chief people", "chief hr", "chief human", "chro", "chief risk", "cro",
+          "chief commercial", "chief revenue", "chief legal", "chief digital", "cdo",
+          "chief product", "cpo", "chief data", "chief sustainability", "chief strategy",
+          "managing director", "managing partner", "general counsel", "group counsel"]),
+        ("Executive Management", "EVP / Senior Leadership",
+         ["executive vice president", "evp", "group managing", "group president",
+          "global president", "country ceo", "regional ceo"]),
+        # Finance
+        ("Finance", "Financial Planning & Analysis",
+         ["fp&a", "financial planning", "planning and analysis", "budget", "forecasting",
+          "finance business partner", "commercial finance", "business finance"]),
+        ("Finance", "Accounting & Control",
+         ["controller", "comptroller", "accounting", "accounts payable", "accounts receivable",
+          "general ledger", "bookkeeping", "financial control", "financial reporting"]),
+        ("Finance", "Treasury",
+         ["treasurer", "treasury", "cash management", "liquidity", "forex", "fx hedging"]),
+        ("Finance", "Tax",
+         ["tax", "taxation", "vat", "transfer pricing", "tax compliance"]),
+        ("Finance", "Investor Relations",
+         ["investor relations", "ir manager", "shareholder", "equity story"]),
+        ("Finance", "",
+         ["finance", "financial", "cfo"]),
+        # Technology
+        ("Engineering", "Software Development",
+         ["software engineer", "backend engineer", "frontend engineer", "fullstack",
+          "mobile engineer", "platform engineer", "devops", "sre", "site reliability"]),
+        ("Data & Analytics", "Data Science",
+         ["data scientist", "machine learning", "deep learning", "ai engineer",
+          "nlp engineer", "computer vision"]),
+        ("Data & Analytics", "Data Engineering",
+         ["data engineer", "data platform", "data pipeline", "etl", "analytics engineer",
+          "data warehouse", "data lake"]),
+        ("Data & Analytics", "",
+         ["data analyst", "business intelligence", "bi analyst", "analytics"]),
+        ("Technology", "Cybersecurity",
+         ["cybersecurity", "cyber security", "information security", "infosec",
+          "iam", "identity access", "soc analyst", "zero trust"]),
+        ("Technology", "Infrastructure & Cloud",
+         ["infrastructure", "cloud engineer", "cloud architect", "aws", "azure", "gcp",
+          "network engineer", "systems engineer", "devops"]),
+        ("Engineering", "",
+         ["engineer", "developer", "architect", "technical lead", "tech lead", "cto"]),
+        ("Technology", "",
+         ["technology", "it ", " it ", "information technology", "digital", "product owner"]),
+        # Human Resources
+        ("Human Resources", "Talent Acquisition",
+         ["talent acquisition", "recruiter", "recruiting", "sourcing", "headhunter",
+          "campus hiring", "executive search", "employer branding"]),
+        ("Human Resources", "Learning & Development",
+         ["learning and development", "l&d", "training manager", "trainer",
+          "leadership development", "organizational development", "od "]),
+        ("Human Resources", "People Operations",
+         ["hris", "people operations", "hr operations", "hr ops", "compensation",
+          "benefits", "total rewards", "payroll", "hr systems"]),
+        ("Human Resources", "",
+         ["human resources", "hrbp", "hr business partner", "people manager",
+          "people partner", "chro", "chief people", "chief hr"]),
+        # Legal & Compliance
+        ("Legal & Compliance", "Compliance",
+         ["compliance", "kyc", "aml", "financial crime", "regulatory compliance",
+          "gdpr", "data protection"]),
+        ("Legal & Compliance", "Legal Counsel",
+         ["general counsel", "legal counsel", "in-house counsel", "solicitor",
+          "attorney", "legal advisor", "corporate legal", "litigation"]),
+        ("Legal & Compliance", "",
+         ["legal", "regulatory", "regulation"]),
+        # Risk
+        ("Risk Management", "Credit Risk",
+         ["credit risk", "credit analyst", "credit underwriter", "credit portfolio"]),
+        ("Risk Management", "Market Risk",
+         ["market risk", "trading risk", "var", "value at risk"]),
+        ("Risk Management", "",
+         ["risk manager", "enterprise risk", "operational risk", "risk officer"]),
+        # Audit
+        ("Internal Audit", "",
+         ["internal audit", "auditor", "audit manager", "sox", "audit committee"]),
+        # Sales
+        ("Sales", "Enterprise Sales",
+         ["enterprise sales", "strategic accounts", "global accounts", "national accounts",
+          "large enterprise", "major accounts"]),
+        ("Sales", "Business Development",
+         ["business development", "bd manager", "partnerships", "channel partner",
+          "alliances", "new business"]),
+        ("Sales", "Sales Operations",
+         ["sales operations", "sales ops", "revenue operations", "revops",
+          "sales enablement", "crm manager", "sales analytics"]),
+        ("Sales", "",
+         ["sales", "account executive", "account manager", "relationship manager",
+          "commercial manager", "territory manager", "regional sales"]),
+        # Marketing
+        ("Marketing", "Performance Marketing",
+         ["performance marketing", "paid media", "sem", "seo", "ppc", "google ads",
+          "programmatic", "user acquisition", "growth marketing"]),
+        ("Marketing", "Brand & Communications",
+         ["brand manager", "brand director", "brand marketing",
+          "communications", "pr manager", "public relations", "corporate communications",
+          "media relations"]),
+        ("Marketing", "Product Marketing",
+         ["product marketing", "gtm", "go-to-market", "sales enablement",
+          "competitive intelligence", "market research"]),
+        ("Marketing", "",
+         ["marketing", "cmo", "chief marketing"]),
+        # Operations
+        ("Operations", "Manufacturing",
+         ["manufacturing", "plant manager", "production manager", "factory",
+          "assembly", "production line", "manufacturing engineer"]),
+        ("Operations", "Supply Chain",
+         ["supply chain", "procurement manager", "buyer", "sourcing manager",
+          "vendor management", "purchasing", "category manager"]),
+        ("Operations", "Logistics",
+         ["logistics", "warehouse", "distribution", "fleet manager",
+          "freight", "last mile", "fulfillment"]),
+        ("Operations", "Quality",
+         ["quality assurance", "quality control", "qc", "quality manager",
+          "continuous improvement", "lean", "six sigma"]),
+        ("Operations", "",
+         ["operations", "operational", "coo", "chief operating"]),
+        # Strategy
+        ("Strategy", "Corporate Strategy",
+         ["corporate strategy", "group strategy", "strategic planning",
+          "business strategy", "strategy manager", "strategy director"]),
+        ("Strategy", "Corporate Development",
+         ["corporate development", "m&a", "mergers and acquisitions",
+          "investment banking", "post-merger", "integration"]),
+        ("Strategy", "",
+         ["strategy", "strategic"]),
+        # Product
+        ("Product Management", "",
+         ["product manager", "product director", "product owner", "head of product",
+          "vp product", "cpo", "chief product"]),
+        # Research & Development
+        ("Research & Development", "",
+         ["research", "r&d", "innovation", "scientist", "laboratory", "lab director",
+          "principal researcher", "clinical research"]),
+        # Customer Experience
+        ("Customer Experience", "Customer Support",
+         ["customer support", "help desk", "customer care", "service desk",
+          "customer service rep", "support agent"]),
+        ("Customer Experience", "Customer Success",
+         ["customer success", "client success", "account management", "csm",
+          "client relationship"]),
+        ("Customer Experience", "",
+         ["customer experience", "cx", "customer journey"]),
+        # Sustainability
+        ("Sustainability", "",
+         ["sustainability", "esg", "csr", "environmental", "net zero",
+          "carbon", "climate"]),
+        # Actuarial / Insurance
+        ("Actuarial", "",
+         ["actuary", "actuarial", "pricing actuary", "reserving", "mortality",
+          "cat model", "catastrophe model"]),
+        ("Underwriting", "",
+         ["underwriter", "underwriting", "treaty underwriter", "facultative"]),
+        ("Claims", "",
+         ["claims", "claims adjudicator", "claims manager", "claims analyst"]),
+        # Communications
+        ("Communications", "",
+         ["communications", "corporate affairs", "public affairs", "pr",
+          "media relations", "press officer"]),
+    ]
+
+    @classmethod
+    def _infer_from_designation(cls, designation: str) -> tuple[str, str]:
+        """
+        Last-resort dept inference directly from the designation string.
+        Used when no YAML or universal keyword matched.
+        Never returns empty or 'General'.
+        """
+        des = designation.lower()
+        for primary, secondary, keywords in cls._DESIGNATION_DEPT_RULES:
+            for kw in keywords:
+                # Use substring for multi-word; word-boundary for short single tokens
+                if ' ' in kw or any(c in kw for c in ('&', '/', '-')):
+                    if kw in des:
+                        return primary, secondary
+                else:
+                    if re.search(r'(?<![a-z0-9])' + re.escape(kw.strip()) + r'(?![a-z0-9])', des):
+                        return primary, secondary
+        # Absolute final fallback — prefer Operations over "General"
+        return "Operations", ""
 
     def extract_from_text(self, raw_dept_text: str, hint_primary: str = "") -> tuple[str, str, str]:
         """
