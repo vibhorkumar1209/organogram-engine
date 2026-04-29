@@ -1,0 +1,216 @@
+id: media_entertainment
+name: "Media & Entertainment"
+sector: Private
+detection_keywords:
+  company: [disney, "warner bros", "warner media", "nbcuniversal", "viacomcbs", "paramount",
+            netflix, amazon, "amazon studios", "apple tv", hbo, "sky group", "bbc",
+            "itvstudios", "channel 4", "news corp", "21st century fox", fox,
+            "sony pictures", "sony music", "universal music", "warner music",
+            "spotify", "pandora", "deezer", "ticketmaster", "live nation",
+            "wpp", "publicis", "interpublic", "omnicom", "dentsu", "havas",
+            "condé nast", "hearst", "bauer media", "reach plc"]
+  industry_hint: [media, entertainment, broadcasting, streaming, publishing, "film production",
+                  "tv production", "music", "gaming", "sports media", "advertising",
+                  "out of home", "digital media", "content creation", "studio"]
+  designation: ["producer", "director", "editor", "journalist", "content manager",
+                "commissioning editor", "showrunner", "creative director"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "board member",
+               "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / President / Studio Head"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Content Officer"
+      - "Chief Creative Officer"
+      - "Chief Technology Officer"
+      - "CTO"
+      - "President"
+      - "Studio President"
+      - "Publisher"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief content", "chief creative", "chief technology", "\\bcto\\b",
+               "\\bpresident\\b(?! vice)", "studio president", "\\bpublisher\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CCO: "Chief Creative Officer"
+      CTO: "Chief Technology Officer"
+
+  - layer: 2
+    label: "EVP / SVP / Group Director"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Managing Director"
+      - "Group Editor"
+      - "Group Creative Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "managing director", "group editor", "group creative director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+      MD: "Managing Director"
+
+  - layer: 3
+    label: "Vice President / Head of"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Head of Content"
+      - "Head of Production"
+      - "Head of Editorial"
+      - "Head of Digital"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b",
+               "head of content", "head of production", "head of editorial"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Executive Producer"
+    canonical:
+      - "Senior Director"
+      - "Executive Producer"
+      - "Showrunner"
+      - "Associate Vice President"
+      - "AVP"
+      - "Editorial Director"
+      - "Creative Director"
+    patterns: ["senior director", "executive producer", "\\bshowrunner\\b",
+               "associate vice president", "\\bavp\\b", "editorial director",
+               "creative director"]
+    abbreviations:
+      EP: "Executive Producer"
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director / Senior Producer"
+    canonical:
+      - "Director"
+      - "Senior Producer"
+      - "Senior Editor"
+      - "Commissioning Editor"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b(?! executive)(?! creative)(?! editorial)",
+               "senior producer", "senior editor", "commissioning editor",
+               "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Series Producer"
+    canonical:
+      - "Senior Manager"
+      - "Series Producer"
+      - "Senior Journalist"
+      - "Senior Writer"
+      - "Senior Account Manager"
+      - "Principal"
+    patterns: ["senior manager", "series producer", "senior journalist",
+               "senior writer", "senior account manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Producer / Editor"
+    canonical:
+      - "Manager"
+      - "Producer"
+      - "Editor"
+      - "Journalist"
+      - "Writer"
+      - "Account Manager"
+      - "Content Manager"
+      - "Brand Manager"
+    patterns: ["\\bmanager\\b", "\\bproducer\\b(?! executive)(?! series)(?! senior)",
+               "\\beditor\\b(?! senior)(?! commissioning)(?! group)", "\\bjournalist\\b",
+               "\\bwriter\\b"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Associate / Assistant Producer"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Associate"
+      - "Assistant Producer"
+      - "Senior Reporter"
+      - "Senior Research Analyst"
+    patterns: ["senior analyst", "senior associate", "assistant producer",
+               "senior reporter", "senior research analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Associate / Reporter"
+    canonical:
+      - "Analyst"
+      - "Associate"
+      - "Reporter"
+      - "Research Analyst"
+      - "Production Assistant"
+      - "Digital Analyst"
+    patterns: ["\\banalyst\\b(?! senior)", "\\bassociate\\b(?! vice)(?! director)(?! producer)",
+               "\\breporter\\b(?! senior)", "production assistant"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Runner / Trainee"
+    canonical:
+      - "Intern"
+      - "Runner"
+      - "Trainee"
+      - "Graduate Trainee"
+      - "Production Intern"
+    patterns: ["\\bintern\\b", "\\brunner\\b", "\\btrainee\\b", "graduate trainee",
+               "production intern"]
+    abbreviations: {}
+
+departments:
+  - primary: "Content & Editorial"
+    keywords: [content, editorial, programming, production, "content creation",
+               "creative", commissioning]
+    secondaries:
+      - name: "Original Content & Production"
+        keywords: ["original content", production, "film production", "tv production",
+                   "content studio", commissioning]
+      - name: "Editorial & Journalism"
+        keywords: [editorial, journalism, "news", "reporting", "digital content",
+                   "social media content"]
+
+  - primary: "Commercial & Advertising"
+    keywords: [commercial, advertising, "ad sales", "revenue", "sponsorship",
+               "brand partnerships"]
+    secondaries:
+      - name: "Advertising Sales"
+        keywords: ["advertising sales", "ad sales", "programmatic", "digital advertising"]
+      - name: "Brand Partnerships & Sponsorships"
+        keywords: ["brand partnerships", "sponsorship", "branded content", "commercial deals"]
+
+  - primary: "Technology & Distribution"
+    keywords: [technology, digital, distribution, streaming, platform, "ott", "broadcast"]
+    secondaries:
+      - name: "Digital & Streaming Platforms"
+        keywords: ["digital platforms", streaming, "ott", "app", "digital distribution"]
+      - name: "Broadcast & Technical Operations"
+        keywords: [broadcast, "technical operations", "master control", playout, transmission]
+
+  - primary: "Finance & Strategy"
+    keywords: [finance, strategy, "business development", "corporate development"]
+    secondaries:
+      - name: "Finance & FP&A"
+        keywords: [finance, "fp&a", "financial planning", accounting]
+      - name: "Strategy & Business Development"
+        keywords: [strategy, "business development", "corporate strategy", "m&a"]

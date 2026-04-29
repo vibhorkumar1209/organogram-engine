@@ -1,0 +1,212 @@
+id: life_insurance
+name: "Life Insurance & Assurance"
+sector: Private
+detection_keywords:
+  company: ["metlife", "prudential", "axa life", "manulife", "sunlife", "sun life",
+            "great-west life", "lincoln financial", "principal financial",
+            "new york life", "northwestern mutual", "mass mutual", "pacific life",
+            "protective life", "transamerica", "aegon", "aviva life", "legal & general",
+            "standard life", "scottish widows", "lic", "life insurance corporation",
+            "hdfc life", "icici prudential life", "max life", "sbi life",
+            "bajaj allianz life", "kotak life"]
+  industry_hint: ["life insurance", "life assurance", "term life", "whole life",
+                  "endowment", "annuity", "unit linked", "ulip", "group life",
+                  "critical illness", "income protection", "pension", "group benefits"]
+  designation: ["actuary", "underwriter", "claims adjudicator", "policy servicing",
+                "agent", "financial advisor", "insurance advisor"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "independent director", "board member"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Managing Director"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Actuary"
+      - "Chief Underwriting Officer"
+      - "Chief Risk Officer"
+      - "CRO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief actuary", "chief underwriting", "chief risk", "\\bcro\\b",
+               "chief operating", "\\bcoo\\b", "managing director",
+               "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CRO: "Chief Risk Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Actuarial"
+      - "VP Underwriting"
+      - "VP Claims"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Principal Actuary"
+      - "Senior Actuary"
+      - "Head of Underwriting"
+      - "Head of Claims"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "principal actuary", "senior actuary", "head of underwriting",
+               "head of claims"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Actuarial Director"
+      - "Underwriting Director"
+      - "Claims Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Appointed Actuary"
+    canonical:
+      - "Senior Manager"
+      - "Appointed Actuary"
+      - "Consulting Actuary"
+      - "Senior Underwriting Manager"
+      - "Senior Claims Manager"
+    patterns: ["senior manager", "appointed actuary", "consulting actuary",
+               "senior underwriting manager", "senior claims manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Actuary / Senior Underwriter"
+    canonical:
+      - "Manager"
+      - "Actuary"
+      - "Senior Underwriter"
+      - "Claims Manager"
+      - "Underwriting Manager"
+      - "Product Manager"
+    patterns: ["\\bmanager\\b", "\\bactuary\\b(?! chief)(?! principal)(?! appointed)",
+               "senior underwriter"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Underwriter / Advisor"
+    canonical:
+      - "Senior Analyst"
+      - "Underwriter"
+      - "Senior Financial Advisor"
+      - "Actuarial Analyst"
+      - "Senior Claims Adjudicator"
+    patterns: ["senior analyst", "\\bunderwriter\\b(?! senior)(?! chief)",
+               "actuarial analyst", "senior claims adjudicator"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Agent / Coordinator"
+    canonical:
+      - "Analyst"
+      - "Insurance Agent"
+      - "Financial Advisor"
+      - "Claims Adjudicator"
+      - "Policy Servicing Officer"
+      - "Coordinator"
+      - "Associate"
+    patterns: ["\\banalyst\\b(?! senior)(?! actuarial)", "insurance agent",
+               "financial advisor(?! senior)", "claims adjudicator(?! senior)",
+               "policy servicing", "\\bcoordinator\\b", "\\bassociate\\b(?! vice)"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate Trainee"
+    canonical:
+      - "Intern"
+      - "Graduate Trainee"
+      - "Actuarial Trainee"
+      - "Management Trainee"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "graduate trainee", "actuarial trainee",
+               "management trainee", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Actuarial"
+    keywords: [actuarial, "product pricing", "reserving", "risk modelling",
+               "mortality", "morbidity", "valuation"]
+    secondaries:
+      - name: "Pricing & Product Development"
+        keywords: ["product pricing", "product development", "pricing actuarial",
+                   "new product", "benefit design"]
+      - name: "Reserving & Valuation"
+        keywords: [reserving, valuation, "liability valuation", "ifrs 17",
+                   "actuarial reporting"]
+
+  - primary: "Underwriting"
+    keywords: [underwriting, "risk assessment", "life underwriting", "medical underwriting",
+               "reinsurance"]
+    secondaries:
+      - name: "Individual Underwriting"
+        keywords: ["individual underwriting", "personal lines underwriting",
+                   "medical underwriting", "non-medical underwriting"]
+      - name: "Group Underwriting"
+        keywords: ["group underwriting", "group life", "group benefits", "group risk"]
+
+  - primary: "Claims"
+    keywords: [claims, "life claims", "claims adjudication", "death claims",
+               "disability claims"]
+    secondaries:
+      - name: "Individual Claims"
+        keywords: ["individual claims", "death claims", "terminal illness",
+                   "critical illness claims"]
+      - name: "Group Claims"
+        keywords: ["group claims", "disability claims", "income protection claims",
+                   "group life claims"]
+
+  - primary: "Distribution & Sales"
+    keywords: [distribution, sales, agency, "bancassurance", "tied agents",
+               "independent financial advisors", ifa, broker]
+    secondaries:
+      - name: "Agency & Tied Distribution"
+        keywords: [agency, "tied agents", "financial advisors", "sales force"]
+      - name: "Bancassurance & Partnerships"
+        keywords: [bancassurance, "bank partnerships", "broker distribution", ifa]

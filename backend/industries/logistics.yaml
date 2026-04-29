@@ -1,0 +1,208 @@
+id: logistics
+name: "Logistics & Supply Chain"
+sector: Private
+detection_keywords:
+  company: [dhl, fedex, ups, tnt, "db schenker", "kuehne+nagel", "kuhne nagel",
+            "panalpina", "geodis", "ceva logistics", "dsv", "bolloré", "bollore",
+            "maersk logistics", "ch robinson", "expeditors", "xpo logistics",
+            "j.b. hunt", jbhunt, "schneider national", "ryder", "amazon logistics",
+            "blue dart", gati, delhivery, "ekart logistics", "ecom express",
+            "zto express", "yunda", "sf express"]
+  industry_hint: [logistics, "supply chain", "freight forwarding", "3pl", "third party logistics",
+                  "4pl", "last mile", "courier", "express delivery", "warehousing",
+                  "distribution", "freight", "cargo", "transport logistics"]
+  designation: ["logistics manager", "supply chain manager", "freight coordinator",
+                "warehouse manager", "operations manager", "fleet manager",
+                "customs broker", "freight forwarder"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "board member",
+               "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "Chief Supply Chain Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief commercial",
+               "chief supply chain", "\\bpresident\\b(?! vice)", "managing director"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Group Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "group managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Operations"
+      - "VP Logistics"
+      - "Regional Vice President"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP / Country Head"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Country Head"
+      - "Regional Head"
+      - "General Manager"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "country head", "regional head", "general manager"]
+    abbreviations:
+      AVP: "Associate Vice President"
+      GM: "General Manager"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Logistics"
+      - "Director of Operations"
+      - "Director of Supply Chain"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Logistics Manager"
+      - "Senior Operations Manager"
+      - "Senior Supply Chain Manager"
+      - "Senior Warehouse Manager"
+      - "Senior Account Manager"
+    patterns: ["senior manager", "senior logistics manager", "senior operations manager",
+               "senior supply chain manager", "senior warehouse manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager"
+    canonical:
+      - "Manager"
+      - "Logistics Manager"
+      - "Operations Manager"
+      - "Warehouse Manager"
+      - "Fleet Manager"
+      - "Hub Manager"
+      - "Depot Manager"
+      - "Branch Manager"
+      - "Account Manager"
+      - "Customs Manager"
+    patterns: ["\\bmanager\\b", "hub manager", "depot manager", "branch manager",
+               "fleet manager"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Coordinator / Senior Analyst"
+    canonical:
+      - "Senior Logistics Coordinator"
+      - "Senior Operations Coordinator"
+      - "Senior Analyst"
+      - "Senior Planner"
+      - "Senior Freight Coordinator"
+    patterns: ["senior.*coordinator", "senior analyst", "senior planner"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Coordinator / Analyst / Executive"
+    canonical:
+      - "Logistics Coordinator"
+      - "Operations Coordinator"
+      - "Freight Coordinator"
+      - "Analyst"
+      - "Planner"
+      - "Executive"
+      - "Dispatcher"
+      - "Customs Broker"
+    patterns: ["\\bcoordinator\\b", "\\banalyst\\b", "\\bplanner\\b",
+               "\\bdispatcher\\b", "customs broker", "\\bexecutive\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Trainee / Graduate"
+    canonical:
+      - "Intern"
+      - "Trainee"
+      - "Graduate Trainee"
+      - "Management Trainee"
+      - "Apprentice"
+    patterns: ["\\bintern\\b", "\\btrainee\\b", "graduate trainee",
+               "management trainee", "\\bapprentice\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Operations"
+    keywords: [operations, "warehouse operations", "distribution", "hub operations",
+               "last mile", "fulfillment"]
+    secondaries:
+      - name: "Warehouse & Fulfillment"
+        keywords: [warehouse, fulfillment, "distribution center", "dc operations", storage]
+      - name: "Last Mile & Delivery"
+        keywords: ["last mile", delivery, courier, "home delivery", dispatch]
+
+  - primary: "Freight & Forwarding"
+    keywords: [freight, forwarding, "freight forwarding", customs, "air freight",
+               "sea freight", "road freight"]
+    secondaries:
+      - name: "Air & Sea Freight"
+        keywords: ["air freight", "sea freight", "ocean freight", fcl, lcl, airway]
+      - name: "Customs & Compliance"
+        keywords: [customs, "customs brokerage", "trade compliance", "import export",
+                   "tariff classification"]
+
+  - primary: "Commercial & Key Accounts"
+    keywords: [commercial, "key accounts", "business development", "account management",
+               "customer solutions"]
+    secondaries:
+      - name: "Key Account Management"
+        keywords: ["key accounts", "account management", "strategic accounts"]
+      - name: "Business Development"
+        keywords: ["business development", "new business", "sales", "tenders", rfp]
+
+  - primary: "Technology & Analytics"
+    keywords: [technology, analytics, "supply chain analytics", tms, wms, "track and trace"]
+    secondaries:
+      - name: "TMS & WMS Systems"
+        keywords: [tms, wms, "transportation management", "warehouse management", erp]
+      - name: "Analytics & Continuous Improvement"
+        keywords: [analytics, "continuous improvement", kpi, "lean logistics", "six sigma"]

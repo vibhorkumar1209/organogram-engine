@@ -1,0 +1,219 @@
+id: consumer_services
+name: "Consumer Services"
+sector: Private
+detection_keywords:
+  company: [servicemaster, "rollins inc", terminix, "adt security", "alarm.com",
+            "cintas", "aramark", "sodexo", "compass group", "initial services",
+            "rentokil", "ecolab", "stericycle", "brink's", "securitas",
+            "g4s", "allied universal", "pinkerton",
+            "weight watchers", "ww international", "regus", "iwg",
+            "angi", "homeadvisor", "thumbtack", "taskrabbit",
+            "beauty brands", "great clips", "supercuts", "sport clips",
+            "h&r block", "jackson hewitt", "liberty tax"]
+  industry_hint: ["consumer services", "facilities services", "cleaning services",
+                  "security services", "pest control", "personal care services",
+                  "health & wellness services", "repair & maintenance",
+                  "home services", "subscription services", "membership services",
+                  "business services to consumers"]
+  designation: ["service manager", "operations manager", "client services manager",
+                "account manager", "field service manager", "branch manager",
+                "service coordinator", "franchise manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / CEO"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief commercial",
+               "managing director", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Group Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "group managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional Vice President"
+      - "VP Operations"
+      - "VP Sales"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Country Head / GM"
+    canonical:
+      - "Senior Director"
+      - "General Manager"
+      - "Country Manager"
+      - "Associate Vice President"
+      - "AVP"
+      - "Regional Director"
+    patterns: ["senior director", "general manager", "country manager",
+               "associate vice president", "\\bavp\\b", "regional director"]
+    abbreviations:
+      GM: "General Manager"
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Operations"
+      - "Director of Client Services"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Operations Manager"
+      - "Senior Service Manager"
+      - "Senior Client Services Manager"
+      - "Senior Account Manager"
+    patterns: ["senior manager", "senior operations manager",
+               "senior service manager", "senior client services manager",
+               "senior account manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Branch Manager"
+    canonical:
+      - "Manager"
+      - "Branch Manager"
+      - "Service Manager"
+      - "Operations Manager"
+      - "Client Services Manager"
+      - "Account Manager"
+      - "Field Manager"
+      - "Franchise Manager"
+    patterns: ["\\bmanager\\b(?! senior)(?! general)(?! regional)",
+               "branch manager(?! senior)", "field manager",
+               "franchise manager"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Coordinator / Team Leader / Supervisor"
+    canonical:
+      - "Senior Coordinator"
+      - "Team Leader"
+      - "Supervisor"
+      - "Senior Service Coordinator"
+      - "Senior Account Executive"
+    patterns: ["senior coordinator", "team leader", "\\bsupervisor\\b",
+               "senior service coordinator", "senior account executive"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Coordinator / Technician / Service Executive"
+    canonical:
+      - "Coordinator"
+      - "Technician"
+      - "Service Executive"
+      - "Account Executive"
+      - "Service Advisor"
+      - "Customer Service Representative"
+      - "Associate"
+    patterns: ["\\bcoordinator\\b(?! senior)", "\\btechnician\\b",
+               "service executive(?! senior)", "account executive(?! senior)",
+               "service advisor", "customer service representative",
+               "\\bassociate\\b(?! vice)(?! director)"]
+    abbreviations:
+      CSR: "Customer Service Representative"
+
+  - layer: 10
+    label: "Intern / Trainee / Apprentice"
+    canonical:
+      - "Intern"
+      - "Trainee"
+      - "Management Trainee"
+      - "Graduate Trainee"
+      - "Apprentice"
+    patterns: ["\\bintern\\b", "\\btrainee\\b", "management trainee",
+               "graduate trainee", "\\bapprentice\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Operations & Service Delivery"
+    keywords: [operations, "service delivery", "field operations", "service management",
+               "branch operations"]
+    secondaries:
+      - name: "Field Service & Delivery"
+        keywords: ["field service", "service delivery", "field operations",
+                   "on-site service", "field technicians"]
+      - name: "Branch & Regional Operations"
+        keywords: ["branch operations", "regional operations", "franchise operations",
+                   "multi-site management"]
+
+  - primary: "Sales & Client Services"
+    keywords: [sales, "client services", "account management", "business development",
+               "customer retention"]
+    secondaries:
+      - name: "Sales & Business Development"
+        keywords: [sales, "business development", "new client acquisition",
+                   "lead generation"]
+      - name: "Account Management & Retention"
+        keywords: ["account management", "client retention", "customer success",
+                   "renewals", "upsell"]
+
+  - primary: "Quality & Compliance"
+    keywords: [quality, compliance, "health & safety", "service standards",
+               "audit", "training"]
+    secondaries:
+      - name: "Quality & Standards"
+        keywords: [quality, "quality assurance", "service standards",
+                   "continuous improvement", "audit"]
+      - name: "Health, Safety & Compliance"
+        keywords: ["health & safety", "h&s", compliance, regulatory,
+                   "risk management", "environmental"]
+
+  - primary: "Finance & Support"
+    keywords: [finance, hr, "human resources", "customer service", "administration"]
+    secondaries:
+      - name: "Finance & Billing"
+        keywords: [finance, billing, "invoicing", "credit control", accounting]
+      - name: "HR & Talent"
+        keywords: [hr, "human resources", recruitment, "learning & development",
+                   "workforce planning"]

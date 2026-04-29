@@ -1,0 +1,216 @@
+id: transportation
+name: "Transportation & Infrastructure"
+sector: Mixed
+detection_keywords:
+  company: [uber, lyft, "ola cabs", grab, gojek, "didi chuxing",
+            "national rail", amtrak, eurostar, "deutsche bahn", sncf,
+            "transjakarta", "mtr corporation", "singapore mrt", "delhi metro",
+            "london underground", tfl, "transport for london",
+            "gatwick airport", heathrow, "changi airport", "dubai airports",
+            "dpworld", "psa international", "hutchison ports",
+            "man trucks", "volvo trucks", "daf trucks", "mercedes trucks"]
+  industry_hint: [transportation, transport, "passenger transport", "public transport",
+                  "mass transit", rail, aviation, airport, "road transport",
+                  "urban mobility", "ride hailing", "fleet management", port,
+                  "shipping terminal", "road infrastructure"]
+  designation: ["transport planner", "fleet manager", "operations controller",
+                "station manager", "traffic manager", "route planner"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / CEO / Commissioner"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Commissioner"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "\\bcommissioner\\b(?! deputy)",
+               "managing director", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP / Deputy Commissioner"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Deputy Commissioner"
+      - "Group Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "deputy commissioner", "group director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President / Regional CEO"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional Managing Director"
+      - "Divisional Director"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b",
+               "regional managing director", "divisional director"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head of"
+    canonical:
+      - "Senior Director"
+      - "Head of Operations"
+      - "Head of Transport"
+      - "Associate Vice President"
+      - "AVP"
+      - "General Manager"
+      - "Regional General Manager"
+    patterns: ["senior director", "head of operations", "head of transport",
+               "associate vice president", "\\bavp\\b", "general manager"]
+    abbreviations:
+      AVP: "Associate Vice President"
+      GM: "General Manager"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Operations"
+      - "Director of Transport Planning"
+      - "Airport Director"
+      - "Station Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Operations Manager"
+      - "Senior Transport Planner"
+      - "Senior Traffic Manager"
+      - "Senior Fleet Manager"
+    patterns: ["senior manager", "senior operations manager",
+               "senior transport planner", "senior traffic manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Operations Manager"
+    canonical:
+      - "Manager"
+      - "Operations Manager"
+      - "Fleet Manager"
+      - "Station Manager"
+      - "Depot Manager"
+      - "Traffic Manager"
+      - "Route Manager"
+      - "Hub Manager"
+    patterns: ["\\bmanager\\b(?! senior)(?! general)(?! area)",
+               "fleet manager(?! senior)", "station manager(?! senior)",
+               "depot manager", "traffic manager(?! senior)"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Planner / Controller"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Transport Planner"
+      - "Operations Controller"
+      - "Senior Coordinator"
+      - "Control Room Supervisor"
+    patterns: ["senior analyst", "senior transport planner",
+               "operations controller", "senior coordinator",
+               "control room supervisor"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Planner / Coordinator / Driver"
+    canonical:
+      - "Analyst"
+      - "Transport Planner"
+      - "Coordinator"
+      - "Operations Analyst"
+      - "Dispatcher"
+      - "Traffic Analyst"
+    patterns: ["\\banalyst\\b(?! senior)", "transport planner(?! senior)",
+               "\\bcoordinator\\b(?! senior)", "\\bdispatcher\\b",
+               "traffic analyst"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate / Apprentice"
+    canonical:
+      - "Intern"
+      - "Graduate Trainee"
+      - "Apprentice"
+      - "Trainee Planner"
+      - "Management Trainee"
+    patterns: ["\\bintern\\b", "graduate trainee", "\\bapprentice\\b",
+               "trainee planner", "management trainee"]
+    abbreviations: {}
+
+departments:
+  - primary: "Operations & Control"
+    keywords: [operations, "fleet operations", "control center", "traffic management",
+               dispatch, "network operations"]
+    secondaries:
+      - name: "Network Operations & Control"
+        keywords: ["network operations", "control center", "traffic management",
+                   "operations control", "real-time operations"]
+      - name: "Fleet & Asset Management"
+        keywords: ["fleet management", "asset management", "vehicle maintenance",
+                   "rolling stock", "fleet"]
+
+  - primary: "Planning & Infrastructure"
+    keywords: [planning, "transport planning", "network planning", "infrastructure",
+               "engineering", "capital projects"]
+    secondaries:
+      - name: "Transport & Network Planning"
+        keywords: ["transport planning", "network planning", "route planning",
+                   "capacity planning", "service design"]
+      - name: "Infrastructure & Engineering"
+        keywords: [infrastructure, engineering, "civil engineering", "capital projects",
+                   "maintenance engineering"]
+
+  - primary: "Commercial & Customer"
+    keywords: [commercial, "revenue", "customer experience", "marketing",
+               "passenger services", "ticketing"]
+    secondaries:
+      - name: "Commercial & Revenue"
+        keywords: [commercial, revenue, "fare management", "revenue optimization",
+                   ticketing, "distribution"]
+      - name: "Customer Experience"
+        keywords: ["customer experience", "passenger services", "customer service",
+                   "accessibility"]
+
+  - primary: "Finance & Regulatory"
+    keywords: [finance, regulatory, safety, compliance, legal, "government relations"]
+    secondaries:
+      - name: "Finance & Procurement"
+        keywords: [finance, "fp&a", procurement, "financial control", "cost management"]
+      - name: "Safety & Regulatory"
+        keywords: [safety, compliance, regulatory, "health & safety", "risk management"]

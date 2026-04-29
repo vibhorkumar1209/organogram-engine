@@ -1,0 +1,203 @@
+id: agriculture
+name: "Agriculture & Agribusiness"
+sector: Private
+detection_keywords:
+  company: [archer, "archer daniels midland", adm, cargill, bunge, "louis dreyfus",
+            syngenta, corteva, "pioneer seeds", "monsanto", bayer, "fmc corporation",
+            "american vanguard", nutrien, "mosaic company", yara, "cf industries",
+            "john deere", "agco", cnh, "case ih", "new holland agriculture",
+            "dole food", chiquita, "del monte", "fresh del monte", "driscoll's"]
+  industry_hint: [agriculture, agribusiness, "crop science", farming, "animal husbandry",
+                  "crop production", "agrochemicals", "agro-processing", seeds, fertilizers,
+                  "food processing", "commodity trading", "grain trading",
+                  "livestock", horticulture, aquaculture, "precision agriculture"]
+  designation: ["agronomist", "farm manager", "crop scientist", "plant breeder",
+                "commodity trader", "agri buyer", "field agronomist"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Managing Director"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Agricultural Officer"
+      - "Chief Commercial Officer"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief agricultural", "chief commercial",
+               "managing director", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional President"
+      - "Country President"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b", "regional president"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Country Head"
+    canonical:
+      - "Senior Director"
+      - "Country Head"
+      - "Country Manager"
+      - "Associate Vice President"
+      - "AVP"
+      - "General Manager"
+    patterns: ["senior director", "country head", "country manager",
+               "associate vice president", "\\bavp\\b", "general manager"]
+    abbreviations:
+      AVP: "Associate Vice President"
+      GM: "General Manager"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Agronomy"
+      - "Director of Operations"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Lead Agronomist"
+    canonical:
+      - "Senior Manager"
+      - "Senior Agronomist"
+      - "Lead Agronomist"
+      - "Senior Farm Manager"
+      - "Senior Supply Chain Manager"
+    patterns: ["senior manager", "senior agronomist", "lead agronomist",
+               "senior farm manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Farm Manager / Agronomist"
+    canonical:
+      - "Manager"
+      - "Farm Manager"
+      - "Agronomist"
+      - "Territory Manager"
+      - "Area Manager"
+      - "Commodity Trader"
+      - "Procurement Manager"
+    patterns: ["\\bmanager\\b", "farm manager", "\\bagronomist\\b(?! senior)(?! lead)",
+               "territory manager", "area manager", "commodity trader"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Field Officer"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Field Agronomist"
+      - "Senior Research Scientist"
+      - "Senior Buyer"
+    patterns: ["senior analyst", "senior field agronomist", "senior research scientist",
+               "senior buyer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Field Agronomist / Technician"
+    canonical:
+      - "Analyst"
+      - "Field Agronomist"
+      - "Research Scientist"
+      - "Buyer"
+      - "Technician"
+      - "Agricultural Advisor"
+    patterns: ["\\banalyst\\b(?! senior)", "field agronomist(?! senior)",
+               "research scientist(?! senior)", "\\btechnician\\b", "agricultural advisor"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate / Trainee"
+    canonical:
+      - "Intern"
+      - "Graduate Agronomist"
+      - "Graduate Trainee"
+      - "Apprentice"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "graduate agronomist", "graduate trainee",
+               "\\bapprentice\\b", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Agronomy & Crop Science"
+    keywords: [agronomy, "crop science", "plant breeding", seeds, "crop protection",
+               "precision agriculture", "soil science"]
+    secondaries:
+      - name: "Research & Development"
+        keywords: ["plant breeding", "crop research", r&d, "varietal development",
+                   biotechnology, genomics]
+      - name: "Field Agronomy & Technical Services"
+        keywords: ["field agronomy", "technical services", "crop advisory",
+                   "soil management", "precision ag"]
+
+  - primary: "Supply Chain & Trading"
+    keywords: ["supply chain", trading, "commodity trading", procurement,
+               "grain trading", origination, logistics]
+    secondaries:
+      - name: "Commodity Trading & Origination"
+        keywords: ["commodity trading", origination, "grain trading",
+                   "soft commodities", "oilseeds"]
+      - name: "Procurement & Logistics"
+        keywords: [procurement, logistics, "farm inputs", fertilizers, "crop inputs"]
+
+  - primary: "Commercial & Sales"
+    keywords: [commercial, sales, "distribution", "dealer network", "retail agri",
+               "key accounts"]
+    secondaries:
+      - name: "Sales & Distribution"
+        keywords: [sales, distribution, "dealer network", "channel sales",
+                   "key accounts"]
+      - name: "Marketing & Product Management"
+        keywords: [marketing, "product management", "brand marketing",
+                   "market development"]
+
+  - primary: "Operations & Processing"
+    keywords: [operations, processing, "agro-processing", manufacturing, milling,
+               "food processing"]
+    secondaries:
+      - name: "Processing & Manufacturing"
+        keywords: [processing, manufacturing, milling, "food processing", production]
+      - name: "Quality & Food Safety"
+        keywords: ["quality assurance", "food safety", "quality control", certification]

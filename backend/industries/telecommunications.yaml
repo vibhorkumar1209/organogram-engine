@@ -1,0 +1,206 @@
+id: telecommunications
+name: "Telecommunications"
+sector: Private
+detection_keywords:
+  company: [vodafone, verizon, at&t, "t-mobile", tmobile, "deutsche telekom", "orange",
+            "telefonica", "bt group", "bt telecom", "singtel", "airtel", "bharti airtel",
+            "reliance jio", jio, "idea cellular", "vi telecom", "tata communications",
+            "comcast", "charter", "cox", "shaw", "bell canada", "telstra", "ntt", "kddi",
+            "softbank telecom", "sprint", "ericsson", "nokia networks", "huawei",
+            "qualcomm", "cisco telecom"]
+  industry_hint: [telecommunications, telecom, "mobile network", "fixed line", "broadband",
+                  "wireless", "5g", "4g", "lte", "fiber", "cable", "isp",
+                  "internet service provider", "mvno", "network operator", "carrier"]
+  designation: ["network engineer", "rf engineer", "telecom engineer", "spectrum manager",
+                "subscriber manager", "roaming manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "independent director",
+               "board member"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Technology Officer"
+      - "CTO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "Chief Network Officer"
+      - "Chief Marketing Officer"
+      - "CMO"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief technology", "\\bcto\\b", "chief operating", "\\bcoo\\b",
+               "chief commercial", "chief network", "chief marketing", "\\bcmo\\b",
+               "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technology Officer"
+      COO: "Chief Operating Officer"
+      CMO: "Chief Marketing Officer"
+
+  - layer: 2
+    label: "EVP / SVP / Group Director"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Group Director"
+      - "Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "group director", "managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+      MD: "Managing Director"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional Vice President"
+      - "VP Engineering"
+      - "VP Network"
+      - "VP Commercial"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Regional Head"
+      - "Head of"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b", "regional head",
+               "head of "]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Engineering"
+      - "Director of Network"
+      - "Director of Sales"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Network Manager"
+      - "Senior Product Manager"
+      - "Senior Engineering Manager"
+      - "Principal Engineer"
+    patterns: ["senior manager", "senior.*manager", "principal engineer"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Lead Engineer"
+    canonical:
+      - "Manager"
+      - "Network Manager"
+      - "Product Manager"
+      - "Engineering Manager"
+      - "RF Manager"
+      - "Lead Engineer"
+      - "Technical Lead"
+    patterns: ["\\bmanager\\b", "lead engineer", "technical lead"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Senior Specialist"
+    canonical:
+      - "Senior Engineer"
+      - "Senior Network Engineer"
+      - "Senior RF Engineer"
+      - "Senior Specialist"
+      - "Senior Analyst"
+      - "Senior Developer"
+    patterns: ["senior engineer", "senior.*engineer", "senior specialist", "senior analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Analyst / Specialist"
+    canonical:
+      - "Engineer"
+      - "Network Engineer"
+      - "RF Engineer"
+      - "Telecom Engineer"
+      - "Analyst"
+      - "Specialist"
+      - "Developer"
+      - "Technician"
+    patterns: ["\\bengineer\\b", "\\banalyst\\b", "\\bspecialist\\b", "\\btechnician\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate"
+    canonical:
+      - "Intern"
+      - "Graduate Engineer"
+      - "Graduate Trainee"
+      - "Apprentice"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "graduate engineer", "graduate trainee", "\\bapprentice\\b",
+               "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Network & Engineering"
+    keywords: [network, engineering, "rf planning", "network operations", "infrastructure",
+               "5g", "fiber", "noc", "core network"]
+    secondaries:
+      - name: "Network Planning & RF"
+        keywords: ["network planning", "rf planning", "radio frequency", "spectrum", "5g rollout"]
+      - name: "Network Operations & NOC"
+        keywords: ["network operations", "noc", "network monitoring", "operations center",
+                   "fault management"]
+
+  - primary: "Commercial"
+    keywords: [commercial, sales, "enterprise sales", "consumer", "b2b", "b2c",
+               "wholesale", "roaming"]
+    secondaries:
+      - name: "Enterprise & B2B Sales"
+        keywords: ["enterprise sales", "b2b", "corporate accounts", "business sales"]
+      - name: "Consumer & Retail"
+        keywords: [consumer, "retail sales", "b2c", "prepaid", "postpaid"]
+
+  - primary: "Technology & IT"
+    keywords: [technology, it, "information technology", "digital", "software", "platform"]
+    secondaries:
+      - name: "Software & Platform"
+        keywords: [software, platform, "digital services", "app development", api]
+      - name: "IT & Systems"
+        keywords: ["it infrastructure", "systems", "erp", "crm", "bss", "oss"]
+
+  - primary: "Finance & Regulatory"
+    keywords: [finance, regulatory, legal, "spectrum licensing", compliance]
+    secondaries:
+      - name: "Finance & FP&A"
+        keywords: [finance, "fp&a", "financial planning", controlling]
+      - name: "Regulatory & Legal"
+        keywords: [regulatory, legal, "spectrum", "licensing", compliance]

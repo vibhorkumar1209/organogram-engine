@@ -1,0 +1,128 @@
+id: construction
+name: "Construction & Real Estate Development"
+sector: Public
+detection_keywords:
+  company: [construction, builder, developer, infrastructure, "civil engineering",
+            contractor, "project delivery", "bechtel", "skanska", "aecom", "kiewit",
+            "turner construction", "fluor", "jacobs", "wsatkins", "mace", "bouygues",
+            "vinci", "hochtief", "strabag", "laing o'rourke", "kier", "balfour beatty",
+            "taylor wimpey", persimmon, "barratt", "lennar", "pulte", "d.r. horton"]
+  industry_hint: [construction, contractor, developer, infrastructure, "civil engineering",
+                  "project delivery", "epc", "engineering procurement construction",
+                  housebuilding, residential, commercial, "infrastructure delivery"]
+  designation: ["site engineer", "project director", "quantity surveyor",
+                "site manager", "civil engineer", "structural engineer",
+                "ehs manager", "construction manager", "project planner"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Independent Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite / Group Executive"
+    canonical: ["Chief Executive Officer", "Chief Financial Officer", "Chief Operating Officer",
+                "Group Managing Director", "President", "Chief Development Officer"]
+    patterns: ["chief \\w+ officer", "group managing director", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+
+  - layer: 2
+    label: "EVP / Divisional MD"
+    canonical: ["Executive Vice President", "Divisional Managing Director",
+                "Senior Vice President", "Regional Chief Executive", "Group Director"]
+    patterns: ["executive vice president", "\\bevp\\b", "divisional managing director", "senior vice president"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / Regional Director"
+    canonical: ["Vice President", "Regional Director", "General Manager",
+                "Operations Director", "Regional Managing Director"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "regional director", "general manager"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / Programme Director"
+    canonical: ["Senior Director", "Programme Director", "Senior Project Director",
+                "Construction Director", "Commercial Director", "Sector Director"]
+    patterns: ["senior director", "programme director", "construction director", "commercial director"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Project Director"
+    canonical: ["Director", "Project Director", "Site Director", "Operations Manager",
+                "Commercial Manager", "Pre-Construction Director"]
+    patterns: ["\\bdirector\\b", "project director", "site director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Project Manager"
+    canonical: ["Senior Project Manager", "Senior Manager", "Principal Engineer",
+                "Senior Quantity Surveyor", "Senior Site Manager", "Senior Planner"]
+    patterns: ["senior project manager", "senior manager", "senior.*surveyor", "principal engineer"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Project Manager / Site Manager"
+    canonical: ["Project Manager", "Site Manager", "Construction Manager",
+                "Quantity Surveyor", "Planner", "EHS Manager", "Section Manager"]
+    patterns: ["project manager", "site manager", "construction manager", "quantity surveyor", "\\bplanner\\b"]
+    abbreviations:
+      PM: "Project Manager"
+      QS: "Quantity Surveyor"
+
+  - layer: 8
+    label: "Senior Engineer / Senior Surveyor"
+    canonical: ["Senior Civil Engineer", "Senior Structural Engineer",
+                "Senior Quantity Surveyor", "Senior Site Engineer",
+                "Senior MEP Engineer", "Senior Planner", "Senior EHS Advisor"]
+    patterns: ["senior.*engineer", "senior.*surveyor", "senior.*planner"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Surveyor / Analyst"
+    canonical: ["Civil Engineer", "Structural Engineer", "Site Engineer",
+                "Quantity Surveyor", "MEP Engineer", "Planner", "EHS Advisor",
+                "Cost Engineer", "Design Engineer"]
+    patterns: ["\\bengineer\\b", "\\bsurveyor\\b", "\\bplanner\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Apprentice / Trainee"
+    canonical: ["Graduate Engineer", "Graduate Surveyor", "Apprentice", "Trainee",
+                "Site Apprentice", "Construction Trainee"]
+    patterns: ["\\bgraduate\\b", "\\bapprentice\\b", "\\btrainee\\b", "\\bjunior\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Projects & Delivery"
+    keywords: [projects, delivery, "project management", construction, "site management"]
+    secondaries:
+      - name: "Project Management"
+        keywords: ["project management", "programme management", "project controls"]
+      - name: "Site Operations"
+        keywords: ["site management", "construction management", "site supervision"]
+
+  - primary: "Commercial"
+    keywords: [commercial, "quantity surveying", procurement, contracts, estimating]
+    secondaries:
+      - name: "Quantity Surveying"
+        keywords: ["quantity surveying", cost, estimating, "cost control", "bills of quantities"]
+      - name: "Contracts & Legal"
+        keywords: [contracts, "contract management", legal, claims, disputes]
+
+  - primary: "Engineering"
+    keywords: [engineering, design, "structural engineering", "civil engineering", mep]
+    secondaries:
+      - name: "Civil & Structural"
+        keywords: [civil, structural, geotechnical, "ground engineering"]
+      - name: "MEP"
+        keywords: [mechanical, electrical, plumbing, mep, "building services"]

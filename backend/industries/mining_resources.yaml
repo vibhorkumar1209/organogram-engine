@@ -1,0 +1,126 @@
+id: mining_resources
+name: "Mining, Minerals & Natural Resources"
+sector: Public
+detection_keywords:
+  company: [mining, minerals, resources, commodities, metals, "gold mining",
+            "copper mining", "coal mining", "iron ore", bhp, "rio tinto", glencore,
+            "anglo american", "barrick gold", newmont, "freeport mcmoran",
+            "vale", "teck resources", "first quantum", "antofagasta", "boliden",
+            "kinross", "agnico eagle", "coeur mining", "hecla mining"]
+  industry_hint: [mining, minerals, resources, "natural resources", commodities,
+                  metals, extraction, "open pit", underground, "processing plant",
+                  "tailings", "ore processing", metallurgy]
+  designation: ["mine manager", "metallurgist", "geologist", "mining engineer",
+                "processing manager", "site general manager", "exploration manager",
+                "metallurgical engineer", "mine planner"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Independent Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical: ["Chief Executive Officer", "Chief Financial Officer", "Chief Operating Officer",
+                "Chief Technical Officer", "Chief Development Officer",
+                "Chief Sustainability Officer", "President & CEO"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technical Officer"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical: ["Executive Vice President", "Senior Vice President",
+                "Group Executive Mining", "EVP Operations", "SVP Technical"]
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / Regional GM"
+    canonical: ["Vice President", "Regional General Manager", "General Manager Operations",
+                "VP Mining", "VP Exploration", "Country Manager"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "regional general manager"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "General Manager / Site Head"
+    canonical: ["General Manager", "Site General Manager", "Senior Director",
+                "Mine General Manager", "Business Development Manager"]
+    patterns: ["general manager", "site general manager", "senior director", "mine general manager"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Mine Manager"
+    canonical: ["Director", "Mine Manager", "Director Operations", "Director Technical",
+                "Processing Manager", "Exploration Manager"]
+    patterns: ["\\bdirector\\b", "mine manager", "processing manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Principal Engineer"
+    canonical: ["Senior Manager", "Senior Mining Engineer", "Principal Metallurgist",
+                "Senior Geologist", "Principal Engineer", "Senior Mine Planner"]
+    patterns: ["senior manager", "senior mining", "principal metallurgist", "principal engineer"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Shift Boss"
+    canonical: ["Manager", "Mine Planner", "Processing Superintendent",
+                "Shift Superintendent", "Geology Manager", "Metallurgy Manager"]
+    patterns: ["\\bmanager\\b", "mine planner", "superintendent"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Senior Geologist"
+    canonical: ["Senior Mining Engineer", "Senior Geologist", "Senior Metallurgist",
+                "Senior Process Engineer", "Senior Surveyor", "Senior Environmental Engineer"]
+    patterns: ["senior.*engineer", "senior geologist", "senior metallurgist"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Geologist / Analyst"
+    canonical: ["Mining Engineer", "Geologist", "Metallurgist", "Process Engineer",
+                "Mine Planner", "Environmental Engineer", "Safety Officer", "Analyst"]
+    patterns: ["\\bengineer\\b", "\\bgeologist\\b", "\\bmetallurgist\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Technician / Trainee"
+    canonical: ["Graduate Geologist", "Graduate Mining Engineer", "Technician",
+                "Field Technician", "Trainee", "Apprentice", "Graduate"]
+    patterns: ["\\bgraduate\\b", "\\btechnician\\b", "\\btrainee\\b", "\\bapprentice\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Mining & Operations"
+    keywords: [mining, operations, "open pit", underground, "mine planning", "drill & blast"]
+    secondaries:
+      - name: "Open Pit & Underground"
+        keywords: ["open pit", underground, mining operations, "drill and blast", "load and haul"]
+      - name: "Mine Planning"
+        keywords: ["mine planning", "mine design", "resource estimation", scheduling]
+
+  - primary: "Processing"
+    keywords: [processing, metallurgy, mill, plant, "ore processing", "mineral processing"]
+    secondaries:
+      - name: "Metallurgy"
+        keywords: [metallurgy, metallurgical, hydrometallurgy, pyrometallurgy, leaching]
+      - name: "Plant Operations"
+        keywords: ["plant operations", mill, concentrator, "processing plant"]
+
+  - primary: "Exploration"
+    keywords: [exploration, geology, "resource development", drilling, "core logging"]
+    secondaries:
+      - name: "Geology"
+        keywords: [geology, geological, "resource estimation", "reserve estimation"]
+      - name: "Exploration Drilling"
+        keywords: ["exploration drilling", "diamond drilling", geophysics]

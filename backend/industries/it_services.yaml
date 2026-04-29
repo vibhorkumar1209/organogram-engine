@@ -1,0 +1,216 @@
+id: it_services
+name: "IT Services & Outsourcing"
+sector: Private
+detection_keywords:
+  company: [tcs, "tata consultancy", infosys, wipro, hcl, "hcl technologies", "tech mahindra",
+            cognizant, capgemini, "dxc technology", dxc, unisys, "cgi group", cgi,
+            "ntt data", "fujitsu", "atos", "t-systems", "hewlett packard enterprise", hpe,
+            "ibm global services", "accenture technology", "epam", "globant", "endava",
+            hexaware, mphasis, "l&t infotech", ltimindtree, "persistent systems",
+            "coforge", "niit technologies"]
+  industry_hint: ["it services", "it outsourcing", "managed services", "application outsourcing",
+                  "bpo", "business process outsourcing", "ites", "software services",
+                  "technology services", "digital services", "global delivery", "offshore",
+                  "nearshore", "gdc", "global delivery center"]
+  designation: ["delivery manager", "project manager", "program manager", "solution architect",
+                "technical lead", "senior developer", "business analyst", "dgm", "agm",
+                "deputy general manager", "assistant general manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Independent Director"
+      - "Board Member"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "independent director",
+               "board member"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / President"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Technology Officer"
+      - "CTO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Delivery Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief technology", "\\bcto\\b", "chief operating", "\\bcoo\\b",
+               "chief delivery", "\\bpresident\\b(?! vice)", "managing director"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technology Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP / Senior VP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Delivery"
+      - "VP Engineering"
+      - "VP Consulting"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Delivery Head"
+      - "Practice Head"
+      - "Account Head"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "delivery head", "practice head", "account head"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Engineering"
+      - "Engagement Director"
+      - "Practice Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / DGM"
+    canonical:
+      - "Senior Manager"
+      - "Deputy General Manager"
+      - "DGM"
+      - "Senior Delivery Manager"
+      - "Senior Program Manager"
+      - "Senior Project Manager"
+      - "Principal Consultant"
+      - "Principal Architect"
+    patterns: ["senior manager", "deputy general manager", "\\bdgm\\b",
+               "senior delivery manager", "senior program manager", "principal consultant",
+               "principal architect"]
+    abbreviations:
+      DGM: "Deputy General Manager"
+
+  - layer: 7
+    label: "Manager / AGM / Project Manager"
+    canonical:
+      - "Manager"
+      - "Assistant General Manager"
+      - "AGM"
+      - "Project Manager"
+      - "Program Manager"
+      - "Delivery Manager"
+      - "Engagement Manager"
+      - "Solution Architect"
+    patterns: ["\\bmanager\\b(?! senior)(?! deputy)", "assistant general manager", "\\bagm\\b",
+               "project manager", "program manager", "delivery manager",
+               "solution architect"]
+    abbreviations:
+      AGM: "Assistant General Manager"
+      PM: "Project Manager"
+
+  - layer: 8
+    label: "Senior Engineer / Tech Lead / Senior Analyst"
+    canonical:
+      - "Senior Software Engineer"
+      - "Senior Developer"
+      - "Technical Lead"
+      - "Tech Lead"
+      - "Senior Business Analyst"
+      - "Senior Quality Engineer"
+      - "Senior Test Engineer"
+      - "Lead Developer"
+    patterns: ["senior software engineer", "senior developer", "technical lead",
+               "tech lead", "senior business analyst", "senior.*engineer", "lead developer"]
+    abbreviations:
+      TL: "Technical Lead"
+
+  - layer: 9
+    label: "Software Engineer / Analyst / Developer"
+    canonical:
+      - "Software Engineer"
+      - "Developer"
+      - "Business Analyst"
+      - "Quality Engineer"
+      - "Test Engineer"
+      - "Analyst"
+      - "Consultant"
+    patterns: ["software engineer", "\\bdeveloper\\b", "business analyst",
+               "quality engineer", "test engineer", "\\banalyst\\b", "\\bconsultant\\b"]
+    abbreviations:
+      SE: "Software Engineer"
+      BA: "Business Analyst"
+
+  - layer: 10
+    label: "Intern / Trainee / Graduate"
+    canonical:
+      - "Intern"
+      - "Trainee"
+      - "Graduate Engineer"
+      - "Graduate Trainee"
+      - "Junior Developer"
+    patterns: ["\\bintern\\b", "\\btrainee\\b", "graduate engineer", "graduate trainee",
+               "junior developer"]
+    abbreviations: {}
+
+departments:
+  - primary: "Delivery & Engineering"
+    keywords: [delivery, engineering, development, "software development", "application",
+               "managed services"]
+    secondaries:
+      - name: "Application Development & Maintenance"
+        keywords: ["application development", "adm", "maintenance", "enhancement", "support"]
+      - name: "Infrastructure & Cloud"
+        keywords: [infrastructure, cloud, "managed infrastructure", "data center", devops]
+
+  - primary: "Consulting & Solutions"
+    keywords: [consulting, advisory, solutions, "enterprise solutions", sap, oracle, erp]
+    secondaries:
+      - name: "Enterprise Solutions"
+        keywords: ["enterprise solutions", sap, oracle, erp, "business consulting"]
+      - name: "Digital & Analytics"
+        keywords: [digital, analytics, "data analytics", ai, "machine learning", automation]
+
+  - primary: "Sales & Account Management"
+    keywords: [sales, "account management", "business development", "client services", pre-sales]
+    secondaries:
+      - name: "Account Management"
+        keywords: ["account management", "client relationship", "key accounts", "strategic accounts"]
+      - name: "Business Development & Pre-Sales"
+        keywords: ["business development", "pre-sales", "bid management", solutioning]
+
+  - primary: "Finance & Operations"
+    keywords: [finance, operations, hr, "human resources", legal, compliance]
+    secondaries:
+      - name: "Finance & Control"
+        keywords: [finance, "financial control", "fp&a", accounting, billing]
+      - name: "HR & Talent"
+        keywords: [hr, "human resources", talent, "workforce management", recruitment]

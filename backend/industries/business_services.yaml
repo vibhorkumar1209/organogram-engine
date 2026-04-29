@@ -1,0 +1,223 @@
+id: business_services
+name: "Business Services & Outsourcing"
+sector: Private
+detection_keywords:
+  company: [accenture, "ibm services", "capgemini bpo", "wipro bps", "infosys bpo",
+            "tcs bps", "genpact", "exl service", "wns global", "firstsource",
+            "concentrix", "teleperformance", "transcom", "convergys", "alorica",
+            "conduent", "xerox services", "iron mountain", "recall holdings",
+            "hays", "manpower", "manpowergroup", "adecco", "randstad",
+            "kelly services", "robert half", "michael baker", "sgs group",
+            "bureau veritas", "intertek", "tuv", "dnv", "lloyds register"]
+  industry_hint: ["business services", "business process outsourcing", "bpo",
+                  "business process services", "shared services", "managed services",
+                  "outsourcing", "contact center", "call center", "back office",
+                  "document management", "testing inspection certification",
+                  "tic services", "staffing", "recruitment", "hr outsourcing",
+                  "payroll outsourcing", "finance outsourcing"]
+  designation: ["operations manager", "delivery manager", "client service manager",
+                "process lead", "team leader", "quality analyst",
+                "workforce manager", "trainer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Managing Director"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Client Officer"
+      - "Chief Delivery Officer"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief client", "chief delivery",
+               "managing director", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Group Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "group managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Operations"
+      - "VP Delivery"
+      - "VP Client Services"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP / Delivery Head"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Delivery Head"
+      - "Account Head"
+      - "Site Head"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "delivery head", "account head", "site head"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director / Engagement Director"
+    canonical:
+      - "Director"
+      - "Engagement Director"
+      - "Operations Director"
+      - "Client Services Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "engagement director",
+               "operations director", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Operations Manager (Senior)"
+    canonical:
+      - "Senior Manager"
+      - "Senior Operations Manager"
+      - "Senior Delivery Manager"
+      - "Senior Client Services Manager"
+      - "Principal Consultant"
+    patterns: ["senior manager", "senior operations manager",
+               "senior delivery manager", "senior client services manager",
+               "principal consultant"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Operations Manager / Delivery Manager"
+    canonical:
+      - "Manager"
+      - "Operations Manager"
+      - "Delivery Manager"
+      - "Client Services Manager"
+      - "Process Manager"
+      - "Account Manager"
+      - "Workforce Manager"
+    patterns: ["\\bmanager\\b(?! senior)(?! general)", "delivery manager(?! senior)",
+               "process manager", "workforce manager"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Team Leader / Senior Associate / Senior Analyst"
+    canonical:
+      - "Team Leader"
+      - "Senior Associate"
+      - "Senior Analyst"
+      - "Process Lead"
+      - "Senior Quality Analyst"
+      - "Senior Executive"
+    patterns: ["team leader", "senior associate", "senior analyst",
+               "process lead", "senior quality analyst", "senior executive"]
+    abbreviations:
+      TL: "Team Leader"
+
+  - layer: 9
+    label: "Associate / Analyst / Executive / Agent"
+    canonical:
+      - "Associate"
+      - "Analyst"
+      - "Executive"
+      - "Agent"
+      - "Quality Analyst"
+      - "Customer Service Executive"
+      - "Data Entry Executive"
+      - "Process Associate"
+    patterns: ["\\bassociate\\b(?! vice)(?! director)(?! senior)",
+               "\\banalyst\\b(?! senior)(?! quality)",
+               "\\bexecutive\\b(?! senior)(?! chief)",
+               "\\bagent\\b", "quality analyst(?! senior)",
+               "process associate"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Trainee / Graduate"
+    canonical:
+      - "Intern"
+      - "Trainee"
+      - "Graduate Trainee"
+      - "Management Trainee"
+      - "Fresher"
+    patterns: ["\\bintern\\b", "\\btrainee\\b", "graduate trainee",
+               "management trainee", "\\bfresher\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Operations & Delivery"
+    keywords: [operations, delivery, "service delivery", "process operations",
+               "contact center", "call center", "back office"]
+    secondaries:
+      - name: "Contact Center & Front Office"
+        keywords: ["contact center", "call center", "customer support", "help desk",
+                   "front office", "voice operations", "chat support"]
+      - name: "Back Office & Processing"
+        keywords: ["back office", "data processing", "document processing",
+                   "transaction processing", "claims processing"]
+
+  - primary: "Client Services & Account Management"
+    keywords: ["client services", "account management", "client relationship",
+               "contract management", "sla management"]
+    secondaries:
+      - name: "Client Relationship Management"
+        keywords: ["client relationship", "account management", "client success",
+                   "stakeholder management"]
+      - name: "Solutioning & Transitions"
+        keywords: [solutioning, "transition management", "transformation",
+                   "implementation", "change management"]
+
+  - primary: "Quality & Workforce"
+    keywords: [quality, "quality assurance", "workforce management",
+               training, "continuous improvement", "process excellence"]
+    secondaries:
+      - name: "Quality Assurance & Excellence"
+        keywords: ["quality assurance", "quality control", "process excellence",
+                   "lean", "six sigma", "continuous improvement"]
+      - name: "Workforce Management & Training"
+        keywords: ["workforce management", "wfm", training, "learning & development",
+                   "scheduling", "capacity planning"]
+
+  - primary: "Finance & Support"
+    keywords: [finance, hr, "human resources", technology, it, "shared services"]
+    secondaries:
+      - name: "Finance & Billing"
+        keywords: [finance, billing, "revenue recognition", "cost management",
+                   "financial control"]
+      - name: "HR & Recruitment"
+        keywords: [hr, recruitment, "talent acquisition", "bulk hiring",
+                   "attrition management"]

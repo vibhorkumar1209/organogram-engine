@@ -1,0 +1,215 @@
+id: reinsurance
+name: "Reinsurance"
+sector: Private
+detection_keywords:
+  company: ["munich re", "swiss re", "hannover re", "scor", "reinsurance group of america",
+            "rga", "gen re", "general re", "everest re", "transatlantic re",
+            "partner re", "partnerre", "mapfre re", "canada life re",
+            "lloyd's of london", "lloyds", "renaissance re", "renaissancere",
+            "axis capital", "aspen insurance", "platinum underwriters",
+            "odyssey re", "odysseyre", "berkshire hathaway reinsurance",
+            "xL catlin", "aig reinsurance", "axa xl"]
+  industry_hint: [reinsurance, "treaty reinsurance", "facultative reinsurance", "retrocession",
+                  "catastrophe reinsurance", "cat re", "specialty reinsurance",
+                  "life reinsurance", "p&c reinsurance", "excess of loss",
+                  "proportional reinsurance", "quota share", "surplus lines"]
+  designation: ["underwriter", "actuary", "reinsurance underwriter", "treaty underwriter",
+                "claims manager", "catastrophe modeller", "cat modeller",
+                "cedant relationship manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / CEO"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Underwriting Officer"
+      - "CUO"
+      - "Chief Actuary"
+      - "Chief Risk Officer"
+      - "CRO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief underwriting", "\\bcuo\\b", "chief actuary",
+               "chief risk", "\\bcro\\b", "chief operating", "\\bcoo\\b",
+               "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CUO: "Chief Underwriting Officer"
+      CRO: "Chief Risk Officer"
+      COO: "Chief Operating Officer"
+
+  - layer: 2
+    label: "EVP / SVP / Head of Division"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Head of P&C"
+      - "Head of Life Reinsurance"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "head of p&c", "head of life"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President / Senior Underwriter (Lead)"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional Managing Director"
+      - "Lead Underwriter"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b",
+               "regional managing director", "lead underwriter"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP / Senior Treaty Underwriter"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Senior Treaty Underwriter"
+      - "Senior Actuarial Manager"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "senior treaty underwriter", "senior actuarial manager"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director / Treaty Underwriter (Senior)"
+    canonical:
+      - "Director"
+      - "Treaty Underwriter"
+      - "Actuarial Director"
+      - "Portfolio Manager"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "treaty underwriter(?! senior)",
+               "associate director", "portfolio manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior Underwriter / Senior Actuary"
+    canonical:
+      - "Senior Manager"
+      - "Senior Underwriter"
+      - "Senior Actuary"
+      - "Senior Claims Manager"
+      - "Catastrophe Modeller"
+      - "Senior Cat Modeller"
+    patterns: ["senior manager", "senior underwriter", "senior actuary",
+               "senior claims manager", "catastrophe modeller", "senior cat modeller"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Underwriter / Actuary"
+    canonical:
+      - "Manager"
+      - "Underwriter"
+      - "Actuary"
+      - "Claims Manager"
+      - "Cat Modeller"
+      - "Reinsurance Analyst"
+    patterns: ["\\bmanager\\b(?! senior)", "\\bunderwriter\\b(?! senior)(?! lead)(?! treaty)",
+               "\\bactuary\\b(?! senior)(?! chief)", "cat modeller(?! senior)"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Junior Underwriter"
+    canonical:
+      - "Senior Analyst"
+      - "Junior Underwriter"
+      - "Senior Reinsurance Analyst"
+      - "Actuarial Analyst"
+    patterns: ["senior analyst", "junior underwriter", "senior reinsurance analyst",
+               "actuarial analyst(?! senior)"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Associate"
+    canonical:
+      - "Analyst"
+      - "Reinsurance Analyst"
+      - "Associate"
+      - "Junior Analyst"
+    patterns: ["\\banalyst\\b(?! senior)(?! actuarial)(?! reinsurance)",
+               "\\bassociate\\b(?! vice)(?! director)",
+               "junior analyst"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate"
+    canonical:
+      - "Intern"
+      - "Graduate Analyst"
+      - "Actuarial Student"
+      - "Trainee Underwriter"
+      - "Graduate Trainee"
+    patterns: ["\\bintern\\b", "graduate analyst", "actuarial student",
+               "trainee underwriter", "graduate trainee"]
+    abbreviations: {}
+
+departments:
+  - primary: "Underwriting"
+    keywords: [underwriting, "treaty", "facultative", "p&c underwriting",
+               "life reinsurance underwriting", "specialty"]
+    secondaries:
+      - name: "Property & Casualty Underwriting"
+        keywords: ["property underwriting", "casualty underwriting", "treaty p&c",
+                   "facultative", "specialty lines"]
+      - name: "Life & Health Reinsurance"
+        keywords: ["life reinsurance", "health reinsurance", "life underwriting",
+                   "mortality", "longevity"]
+
+  - primary: "Actuarial"
+    keywords: [actuarial, "cat modelling", "catastrophe modelling", "pricing",
+               "reserving", "risk modelling"]
+    secondaries:
+      - name: "Pricing & Cat Modelling"
+        keywords: [pricing, "cat modelling", "catastrophe modelling",
+                   "exposure management", "risk analysis"]
+      - name: "Reserving & Reporting"
+        keywords: [reserving, "actuarial reserving", "financial reporting",
+                   valuation, "solvency ii"]
+
+  - primary: "Claims"
+    keywords: [claims, "reinsurance claims", "large loss", "cat claims",
+               "claims management"]
+    secondaries:
+      - name: "Claims Management & Adjustment"
+        keywords: ["claims management", "claims adjustment", "large loss",
+                   "complex claims"]
+      - name: "Recoveries & Dispute Resolution"
+        keywords: [recoveries, "dispute resolution", "arbitration", "salvage"]
+
+  - primary: "Finance & Risk"
+    keywords: [finance, risk, "enterprise risk", "capital management",
+               "investment", compliance]
+    secondaries:
+      - name: "Finance & Capital"
+        keywords: [finance, "capital management", "financial reporting",
+                   "investment", "treasury"]
+      - name: "Enterprise Risk & Compliance"
+        keywords: ["enterprise risk", compliance, regulatory, "risk management",
+                   "internal audit"]

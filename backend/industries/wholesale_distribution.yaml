@@ -1,0 +1,219 @@
+id: wholesale_distribution
+name: "Wholesale & Distribution"
+sector: Private
+detection_keywords:
+  company: [sysco, "us foods", "performance food group", pfg, "mclane company",
+            "cardinal health", "amerisourcebergen", "mckesson",
+            "genuine parts", "wesco international", "fastenal",
+            "w.w. grainger", "grainger", "msc industrial", "rs components",
+            "electrocomponents", "avnet", "arrow electronics", "td synnex",
+            "ingram micro", "tech data", "d&h distributing",
+            "metro cash carry", "makro", "costco wholesale", "sam's club"]
+  industry_hint: [wholesale, distribution, "cash and carry", "b2b distribution",
+                  "trade distribution", "merchant", "distributor", "wholesaler",
+                  "commodity distribution", "industrial distribution", "food distribution",
+                  "pharmaceutical distribution", "electronic components distribution",
+                  "trade supplies", "bulk buying"]
+  designation: ["purchasing manager", "buyer", "category buyer", "territory sales manager",
+                "key account manager", "warehouse manager", "distribution manager",
+                "trade sales manager"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Managing Director"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "Managing Director"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief commercial",
+               "managing director", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Sales"
+      - "VP Operations"
+      - "VP Procurement"
+      - "Regional Vice President"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Country Manager / GM"
+    canonical:
+      - "Senior Director"
+      - "Country Manager"
+      - "General Manager"
+      - "Associate Vice President"
+      - "AVP"
+      - "Regional General Manager"
+    patterns: ["senior director", "country manager", "general manager",
+               "associate vice president", "\\bavp\\b", "regional general manager"]
+    abbreviations:
+      GM: "General Manager"
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Sales"
+      - "Director of Procurement"
+      - "Director of Operations"
+      - "Category Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Category Manager"
+      - "Senior Purchasing Manager"
+      - "Senior Sales Manager"
+      - "Senior Operations Manager"
+      - "Senior Key Account Manager"
+    patterns: ["senior manager", "senior category manager", "senior purchasing manager",
+               "senior sales manager", "senior operations manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Buyer"
+    canonical:
+      - "Manager"
+      - "Category Manager"
+      - "Purchasing Manager"
+      - "Buyer"
+      - "Sales Manager"
+      - "Territory Manager"
+      - "Branch Manager"
+      - "Warehouse Manager"
+      - "Key Account Manager"
+    patterns: ["\\bmanager\\b(?! senior)(?! general)(?! regional)",
+               "\\bbuyer\\b(?! senior)", "territory manager", "branch manager",
+               "warehouse manager(?! senior)"]
+    abbreviations:
+      KAM: "Key Account Manager"
+
+  - layer: 8
+    label: "Senior Analyst / Senior Buyer / Senior Executive"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Buyer"
+      - "Senior Sales Executive"
+      - "Senior Trade Coordinator"
+      - "Senior Procurement Analyst"
+    patterns: ["senior analyst", "senior buyer", "senior sales executive",
+               "senior.*coordinator", "senior procurement analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Sales Executive / Coordinator"
+    canonical:
+      - "Analyst"
+      - "Sales Executive"
+      - "Trade Executive"
+      - "Procurement Analyst"
+      - "Coordinator"
+      - "Associate"
+      - "Account Executive"
+    patterns: ["\\banalyst\\b(?! senior)", "sales executive(?! senior)",
+               "trade executive", "\\bcoordinator\\b(?! senior)",
+               "\\bassociate\\b(?! vice)(?! director)", "account executive(?! senior)"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Trainee / Graduate"
+    canonical:
+      - "Intern"
+      - "Trainee"
+      - "Graduate Trainee"
+      - "Management Trainee"
+      - "Apprentice"
+    patterns: ["\\bintern\\b", "\\btrainee\\b", "graduate trainee",
+               "management trainee", "\\bapprentice\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Sales & Commercial"
+    keywords: [sales, commercial, "key accounts", "territory sales", "trade sales",
+               "national accounts", "regional sales"]
+    secondaries:
+      - name: "Key Account & National Sales"
+        keywords: ["key accounts", "national accounts", "strategic accounts",
+                   "major accounts"]
+      - name: "Field Sales & Territory"
+        keywords: ["field sales", "territory sales", "regional sales",
+                   "trade sales", "van sales"]
+
+  - primary: "Buying & Procurement"
+    keywords: [buying, procurement, "category management", "purchasing",
+               "supplier management", "sourcing"]
+    secondaries:
+      - name: "Category Management & Buying"
+        keywords: ["category management", buying, "range selection",
+                   "product range", "assortment"]
+      - name: "Procurement & Supplier Relations"
+        keywords: [procurement, "supplier management", "supplier relations",
+                   sourcing, "vendor management"]
+
+  - primary: "Operations & Warehousing"
+    keywords: [operations, warehousing, "distribution", "logistics", "supply chain",
+               "inventory", "fulfillment"]
+    secondaries:
+      - name: "Warehouse & Distribution"
+        keywords: [warehouse, "distribution center", "picking", "packing",
+                   "goods in", "goods out", dispatch]
+      - name: "Inventory & Supply Chain"
+        keywords: [inventory, "stock management", "demand planning",
+                   "replenishment", "supply chain"]
+
+  - primary: "Finance & Administration"
+    keywords: [finance, administration, hr, "credit control", "accounts"]
+    secondaries:
+      - name: "Finance & Credit"
+        keywords: [finance, "credit control", "accounts receivable",
+                   "accounts payable", accounting]
+      - name: "HR & Admin"
+        keywords: [hr, "human resources", "payroll", administration, "compliance"]

@@ -1,0 +1,126 @@
+id: it_hardware
+name: "IT Hardware & Semiconductors"
+sector: Public
+detection_keywords:
+  company: [semiconductor, "integrated circuits", chip, processor, hardware, server,
+            networking, storage, display, intel, amd, nvidia, qualcomm, broadcom,
+            dell, hp, "hewlett packard", cisco, "seagate", "western digital",
+            micron, samsung, tsmc, asml, "texas instruments", "analog devices",
+            "applied materials", "lam research", marvell, "arm holdings"]
+  industry_hint: [semiconductor, "it hardware", chip, processor, "integrated circuit",
+                  hardware, server, networking, storage, "data center hardware",
+                  "memory", "display technology", "fabless", foundry]
+  designation: ["chip designer", "vlsi engineer", "hardware engineer",
+                "process engineer", "fab engineer", "product engineer",
+                "verification engineer", "physical design engineer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Independent Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical: ["Chief Executive Officer", "Chief Financial Officer", "Chief Technology Officer",
+                "Chief Operating Officer", "Chief Strategy Officer", "President & CEO"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CTO: "Chief Technology Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical: ["Executive Vice President", "Senior Vice President", "Group Vice President",
+                "Senior Vice President Engineering", "EVP & General Manager"]
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical: ["Vice President", "Vice President Engineering", "General Manager",
+                "VP Hardware Engineering", "VP Product", "VP Manufacturing"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical: ["Senior Director", "Senior Director Engineering", "Associate Vice President",
+                "Senior Director Product Management", "Principal Engineer"]
+    patterns: ["senior director", "associate vice president", "\\bavp\\b"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director / Distinguished Engineer"
+    canonical: ["Director", "Director of Engineering", "Director Hardware",
+                "Distinguished Engineer", "Director Product Management"]
+    patterns: ["\\bdirector\\b", "distinguished engineer"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior Staff Engineer"
+    canonical: ["Senior Manager", "Senior Engineering Manager", "Senior Staff Engineer",
+                "Senior Principal Engineer", "Group Manager"]
+    patterns: ["senior manager", "senior engineering manager", "senior staff engineer", "group manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Staff Engineer"
+    canonical: ["Engineering Manager", "Hardware Engineering Manager", "Staff Engineer",
+                "Manager", "Design Manager"]
+    patterns: ["engineering manager", "\\bmanager\\b", "staff engineer"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior IC / Lead"
+    canonical: ["Senior Hardware Engineer", "Senior Chip Designer", "Senior VLSI Engineer",
+                "Senior Process Engineer", "Tech Lead", "Senior Verification Engineer",
+                "Senior Physical Design Engineer"]
+    patterns: ["senior.*engineer", "tech lead", "senior.*designer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Designer"
+    canonical: ["Hardware Engineer", "Chip Designer", "VLSI Engineer",
+                "Process Engineer", "Product Engineer", "Verification Engineer",
+                "Physical Design Engineer", "CAD Engineer", "Test Engineer"]
+    patterns: ["\\bengineer\\b", "\\bdesigner\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical: ["Graduate Engineer", "Intern", "Junior Engineer", "New Grad",
+                "Engineering Intern", "Hardware Intern"]
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\bjunior\\b", "new grad"]
+    abbreviations: {}
+
+departments:
+  - primary: "Engineering"
+    keywords: [engineering, hardware, "chip design", semiconductor, vlsi, "physical design"]
+    secondaries:
+      - name: "Hardware Design"
+        keywords: ["hardware design", "chip design", vlsi, rtl, "digital design", "analog design"]
+      - name: "Manufacturing & Process"
+        keywords: [manufacturing, process, fab, foundry, "yield engineering", "test engineering"]
+      - name: "Verification & Validation"
+        keywords: [verification, validation, "design verification", emulation, simulation]
+
+  - primary: "Product Management"
+    keywords: ["product management", "product planning", "product marketing", roadmap]
+    secondaries:
+      - name: "Product Planning"
+        keywords: ["product planning", roadmap, "product strategy", "market requirements"]
+
+  - primary: "Operations"
+    keywords: [operations, "supply chain", manufacturing, "test operations", "customer engineering"]
+    secondaries:
+      - name: "Supply Chain"
+        keywords: ["supply chain", procurement, "contract manufacturing", logistics]

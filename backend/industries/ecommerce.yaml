@@ -1,0 +1,233 @@
+id: ecommerce
+name: "E-Commerce & Online Retail"
+sector: Private
+detection_keywords:
+  company: [amazon, ebay, alibaba, "jd.com", "shopify", "flipkart", "myntra", "meesho",
+            "nykaa", "zomato", "swiggy", "dunzo", "blinkit", "zepto",
+            "lazada", "shopee", "tokopedia", "bukalapak", "grab",
+            "mercadolibre", "mercado libre", "etsy", "wayfair", "chewy",
+            "zalando", "asos", "boohoo", "shein", "temu", "wish",
+            "instacart", "doordash", "uber eats", "rappi"]
+  industry_hint: ["e-commerce", "ecommerce", "online retail", "marketplace", "direct to consumer",
+                  "d2c", "dtc", "digital commerce", "omnichannel", "quick commerce",
+                  "q-commerce", "hyperlocal", "social commerce", "dropshipping",
+                  "platform economy", "digital marketplace"]
+  designation: ["growth manager", "category manager", "marketplace manager",
+                "seller success manager", "digital marketing manager",
+                "ui/ux designer", "product manager", "data analyst"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Co-Founder"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Technology Officer"
+      - "CTO"
+      - "Chief Product Officer"
+      - "CPO"
+      - "Chief Marketing Officer"
+      - "CMO"
+      - "Chief Operations Officer"
+      - "COO"
+      - "Co-Founder"
+      - "Founder"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief technology", "\\bcto\\b", "chief product", "\\bcpo\\b",
+               "chief marketing", "\\bcmo\\b", "chief oper", "\\bcoo\\b",
+               "co.?founder", "\\bfounder\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technology Officer"
+      CPO: "Chief Product Officer"
+      CMO: "Chief Marketing Officer"
+      COO: "Chief Operations Officer"
+
+  - layer: 2
+    label: "SVP / VP (Senior)"
+    canonical:
+      - "Senior Vice President"
+      - "SVP"
+      - "Executive Vice President"
+      - "EVP"
+      - "Managing Director"
+    patterns: ["senior vice president", "\\bsvp\\b", "executive vice president", "\\bevp\\b",
+               "managing director"]
+    abbreviations:
+      SVP: "Senior Vice President"
+      EVP: "Executive Vice President"
+      MD: "Managing Director"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "VP Engineering"
+      - "VP Product"
+      - "VP Growth"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / Head of"
+    canonical:
+      - "Senior Director"
+      - "Head of Growth"
+      - "Head of Product"
+      - "Head of Engineering"
+      - "Head of Marketing"
+      - "Head of Operations"
+      - "Associate Vice President"
+      - "AVP"
+    patterns: ["senior director", "head of growth", "head of product",
+               "head of engineering", "head of marketing", "head of operations",
+               "associate vice president", "\\bavp\\b"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Product"
+      - "Director of Engineering"
+      - "Director of Growth"
+      - "Director of Operations"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior PM"
+    canonical:
+      - "Senior Manager"
+      - "Senior Product Manager"
+      - "Senior Engineering Manager"
+      - "Senior Marketing Manager"
+      - "Senior Category Manager"
+      - "Senior Growth Manager"
+    patterns: ["senior manager", "senior product manager", "senior.*manager"]
+    abbreviations:
+      SPM: "Senior Product Manager"
+
+  - layer: 7
+    label: "Manager / Product Manager / Engineering Manager"
+    canonical:
+      - "Manager"
+      - "Product Manager"
+      - "Engineering Manager"
+      - "Marketing Manager"
+      - "Category Manager"
+      - "Growth Manager"
+      - "Marketplace Manager"
+      - "Operations Manager"
+    patterns: ["\\bmanager\\b", "product manager(?! senior)", "engineering manager(?! senior)",
+               "category manager(?! senior)", "growth manager(?! senior)"]
+    abbreviations:
+      PM: "Product Manager"
+
+  - layer: 8
+    label: "Senior Engineer / Senior Analyst / Senior Designer"
+    canonical:
+      - "Senior Software Engineer"
+      - "Senior Frontend Engineer"
+      - "Senior Backend Engineer"
+      - "Senior Analyst"
+      - "Senior Data Analyst"
+      - "Senior UX Designer"
+      - "Technical Lead"
+    patterns: ["senior.*engineer", "senior analyst", "senior data analyst",
+               "senior.*designer", "technical lead"]
+    abbreviations:
+      TL: "Technical Lead"
+
+  - layer: 9
+    label: "Engineer / Analyst / Designer"
+    canonical:
+      - "Software Engineer"
+      - "Frontend Engineer"
+      - "Data Analyst"
+      - "Business Analyst"
+      - "UX Designer"
+      - "Growth Analyst"
+      - "Category Analyst"
+      - "Associate"
+    patterns: ["software engineer", "frontend engineer", "data analyst(?! senior)",
+               "business analyst(?! senior)", "ux designer(?! senior)", "growth analyst",
+               "\\bassociate\\b(?! vice)(?! director)"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Trainee / Fresher"
+    canonical:
+      - "Intern"
+      - "Graduate Intern"
+      - "Trainee"
+      - "Management Trainee"
+      - "Fresher"
+    patterns: ["\\bintern\\b", "graduate intern", "\\btrainee\\b",
+               "management trainee", "\\bfresher\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Product & Engineering"
+    keywords: [product, engineering, "software engineering", "platform", "technology",
+               "mobile", "web", "app"]
+    secondaries:
+      - name: "Product Management"
+        keywords: ["product management", "product roadmap", "product strategy",
+                   "feature development"]
+      - name: "Engineering & Platform"
+        keywords: [engineering, "backend", "frontend", "platform engineering",
+                   "mobile engineering", devops, infrastructure]
+
+  - primary: "Growth & Marketing"
+    keywords: [growth, marketing, "digital marketing", "performance marketing",
+               "user acquisition", seo, sem, "paid media"]
+    secondaries:
+      - name: "Performance Marketing"
+        keywords: ["performance marketing", "paid media", sem, "paid social",
+                   "user acquisition", "growth hacking"]
+      - name: "Brand & Content Marketing"
+        keywords: ["brand marketing", "content marketing", seo, "social media",
+                   "influencer", "organic growth"]
+
+  - primary: "Marketplace & Category"
+    keywords: [marketplace, category, "seller management", "seller success",
+               "buyer experience", "catalog"]
+    secondaries:
+      - name: "Category Management"
+        keywords: ["category management", "buyer", "merchandising", "assortment",
+                   "pricing", "catalog management"]
+      - name: "Seller Success & Partnerships"
+        keywords: ["seller success", "seller management", "vendor management",
+                   "third party", "marketplace partnerships"]
+
+  - primary: "Operations & Logistics"
+    keywords: [operations, logistics, "fulfillment", "last mile", "supply chain",
+               "warehouse", "customer service"]
+    secondaries:
+      - name: "Fulfillment & Logistics"
+        keywords: [fulfillment, logistics, "last mile", warehouse, "supply chain",
+                   "delivery operations"]
+      - name: "Customer Service & Experience"
+        keywords: ["customer service", "customer experience", "cx", "customer support",
+                   "returns", "refunds"]

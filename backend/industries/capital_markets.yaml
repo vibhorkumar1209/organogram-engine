@@ -1,0 +1,191 @@
+id: capital_markets
+name: "Capital Markets & Investment Banking"
+sector: Private
+detection_keywords:
+  company: ["goldman sachs", "morgan stanley", "jp morgan", "jpmorgan", "lehman",
+            "merrill lynch", "bank of america securities", "credit suisse", "ubs",
+            "deutsche bank", "barclays capital", "citi", "citigroup", "nomura",
+            "jefferies", "lazard", "evercore", "moelis", "rothschild", "houlihan lokey",
+            "blackstone", "kkr", "carlyle", "apollo", "warburg pincus", "tpg",
+            "citadel", "two sigma", "renaissance", "bridgewater", "d.e. shaw",
+            "drw", "jane street", "virtu", "flow traders"]
+  industry_hint: ["investment banking", "capital markets", "equities", "fixed income",
+                  "derivatives", "trading", "prime brokerage", "asset management",
+                  "private equity", "hedge fund", "securities", "ib", "ibd",
+                  "sales & trading", "structured products"]
+  designation: ["analyst", "associate", "vice president", "director", "managing director",
+                "executive director", "partner", "portfolio manager", "trader"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Senior Partner / Non-Executive"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Senior Partner"
+      - "Founding Partner"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "board member",
+               "senior partner", "founding partner"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Global Head"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Risk Officer"
+      - "CRO"
+      - "Global Head"
+      - "President"
+      - "Partner"
+      - "Co-Head"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief risk officer", "\\bcro\\b", "global head", "\\bpresident\\b(?! vice)",
+               "\\bpartner\\b", "co.?head"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CRO: "Chief Risk Officer"
+
+  - layer: 2
+    label: "EVP / Group Managing Director"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Group Managing Director"
+      - "Senior Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "group managing director",
+               "senior managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+
+  - layer: 3
+    label: "Managing Director"
+    canonical:
+      - "Managing Director"
+      - "MD"
+    patterns: ["managing director", "\\bmd\\b(?! &)"]
+    abbreviations:
+      MD: "Managing Director"
+
+  - layer: 4
+    label: "Executive Director / Senior Vice President"
+    canonical:
+      - "Executive Director"
+      - "Senior Vice President"
+      - "SVP"
+      - "ED"
+    patterns: ["executive director", "senior vice president", "\\bsvp\\b", "\\bed\\b"]
+    abbreviations:
+      ED: "Executive Director"
+      SVP: "Senior Vice President"
+
+  - layer: 5
+    label: "Director / First Vice President"
+    canonical:
+      - "Director"
+      - "First Vice President"
+      - "FVP"
+      - "Senior Director"
+    patterns: ["\\bdirector\\b(?! executive)", "first vice president", "\\bfvp\\b",
+               "senior director"]
+    abbreviations:
+      FVP: "First Vice President"
+
+  - layer: 6
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Senior Associate"
+    patterns: ["(?<!associate )(?<!assistant )(?<!executive )(?<!first )vice president",
+               "(?<!associate )(?<!assistant )(?<!executive )(?<!first )\\bvp\\b",
+               "senior associate"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 7
+    label: "Associate"
+    canonical:
+      - "Associate"
+      - "Senior Analyst"
+      - "Officer"
+    patterns: ["\\bassociate\\b(?! vice)(?! partner)(?! director)", "senior analyst",
+               "\\bofficer\\b"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Analyst / Junior Associate"
+    canonical:
+      - "Analyst"
+      - "Financial Analyst"
+      - "Research Analyst"
+      - "Junior Associate"
+      - "Investment Analyst"
+    patterns: ["\\banalyst\\b(?! senior)", "financial analyst", "research analyst",
+               "investment analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Junior Analyst / Graduate"
+    canonical:
+      - "Junior Analyst"
+      - "Graduate Analyst"
+      - "Graduate Associate"
+      - "Entry Level Analyst"
+    patterns: ["junior analyst", "graduate analyst", "graduate associate", "entry.?level analyst"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Summer Analyst"
+    canonical:
+      - "Intern"
+      - "Summer Analyst"
+      - "Summer Associate"
+      - "Off-Cycle Intern"
+      - "Industrial Placement"
+    patterns: ["\\bintern\\b", "summer analyst", "summer associate", "off.?cycle intern",
+               "industrial placement"]
+    abbreviations: {}
+
+departments:
+  - primary: "Investment Banking Division"
+    keywords: [ibd, "investment banking", "m&a", "mergers", "acquisitions", "advisory",
+               "ecm", "dcm", "leveraged finance"]
+    secondaries:
+      - name: "M&A Advisory"
+        keywords: ["m&a", "mergers and acquisitions", "advisory", "strategic advisory"]
+      - name: "Equity Capital Markets"
+        keywords: ["ecm", "equity capital markets", "ipo", "rights issue", "equity issuance"]
+      - name: "Debt Capital Markets & Leveraged Finance"
+        keywords: ["dcm", "debt capital markets", "leveraged finance", "high yield", "loans"]
+
+  - primary: "Sales & Trading"
+    keywords: ["sales and trading", "equities", "fixed income", "rates", "credit",
+               "commodities", "derivatives", "fx", "prime brokerage"]
+    secondaries:
+      - name: "Equities"
+        keywords: [equities, "equity sales", "equity trading", "equity derivatives", "prime brokerage"]
+      - name: "Fixed Income, Currencies & Commodities"
+        keywords: ["fixed income", "rates", "credit trading", "fx", "commodities", "ficc"]
+
+  - primary: "Research"
+    keywords: [research, "equity research", "credit research", "macro research",
+               "sector research", "analyst"]
+    secondaries:
+      - name: "Equity Research"
+        keywords: ["equity research", "sector coverage", "stock coverage", "buy-side research"]
+      - name: "Credit & Macro Research"
+        keywords: ["credit research", "macro research", "rates research", "economics"]
+
+  - primary: "Risk Management"
+    keywords: [risk, "market risk", "credit risk", "operational risk", "risk management"]
+    secondaries:
+      - name: "Market & Credit Risk"
+        keywords: ["market risk", "credit risk", "counterparty risk", "var", "risk analytics"]
+      - name: "Compliance & Regulatory Risk"
+        keywords: [compliance, regulatory, "aml", "kyc", "financial crime"]

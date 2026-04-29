@@ -1,0 +1,200 @@
+id: consumer_products
+name: "Consumer Products & FMCG"
+sector: Private
+detection_keywords:
+  company: [unilever, "procter & gamble", p&g, nestle, "colgate-palmolive", colgate,
+            "henkel", "reckitt", "kimberly-clark", "church & dwight", "kraft heinz",
+            "general mills", danone, "campbell soup", "hershey", mondelez, "l'oreal",
+            "beiersdorf", "estee lauder", "johnson & johnson", "j&j", fmcg, cpg]
+  industry_hint: [fmcg, "fast-moving consumer goods", "consumer packaged goods", cpg,
+                  "consumer products", "consumer goods", "personal care", "home care",
+                  "food & beverage", "household products"]
+  designation: ["brand manager", "category manager", "trade marketing", "key account manager",
+                "shopper marketing", "consumer insights"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Chairman"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b", "board member",
+               "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Marketing Officer"
+      - "CMO"
+      - "Chief Supply Chain Officer"
+      - "Chief Commercial Officer"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief marketing", "\\bcmo\\b", "chief supply chain", "chief commercial",
+               "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CMO: "Chief Marketing Officer"
+      CCO: "Chief Commercial Officer"
+
+  - layer: 2
+    label: "Executive Vice President / Global VP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Global Vice President"
+      - "Senior Vice President"
+      - "SVP"
+      - "Group Vice President"
+    patterns: ["executive vice president", "\\bevp\\b", "global vice president",
+               "senior vice president", "\\bsvp\\b", "group vice president"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP Marketing"
+      - "VP Sales"
+      - "VP Supply Chain"
+      - "VP Finance"
+      - "Regional President"
+    patterns: ["(?<!associate )(?<!assistant )vice president", "(?<!associate )(?<!assistant )\\bvp\\b",
+               "regional president"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "General Manager"
+      - "Country Manager"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "general manager", "country manager"]
+    abbreviations:
+      AVP: "Associate Vice President"
+      GM: "General Manager"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Marketing Director"
+      - "Sales Director"
+      - "Category Director"
+      - "Trade Marketing Director"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Brand Manager"
+      - "Senior Category Manager"
+      - "Senior Marketing Manager"
+      - "Senior Trade Marketing Manager"
+      - "Senior Key Account Manager"
+    patterns: ["senior manager", "senior brand manager", "senior category manager",
+               "senior marketing manager", "senior.*manager"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Brand Manager"
+    canonical:
+      - "Manager"
+      - "Brand Manager"
+      - "Category Manager"
+      - "Marketing Manager"
+      - "Trade Marketing Manager"
+      - "Key Account Manager"
+      - "Shopper Marketing Manager"
+      - "Consumer Insights Manager"
+    patterns: ["\\bmanager\\b", "brand manager", "category manager", "key account manager",
+               "shopper marketing", "consumer insights manager"]
+    abbreviations:
+      KAM: "Key Account Manager"
+
+  - layer: 8
+    label: "Senior Analyst / Assistant Manager"
+    canonical:
+      - "Senior Analyst"
+      - "Assistant Manager"
+      - "Senior Brand Executive"
+      - "Senior Trade Executive"
+      - "Senior Consumer Insights Analyst"
+    patterns: ["senior analyst", "assistant manager", "senior.*executive", "senior.*analyst"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Executive"
+    canonical:
+      - "Analyst"
+      - "Brand Executive"
+      - "Marketing Executive"
+      - "Trade Executive"
+      - "Consumer Insights Analyst"
+      - "Category Analyst"
+      - "Sales Executive"
+      - "Associate"
+    patterns: ["\\banalyst\\b", "\\bexecutive\\b", "\\bassociate\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate Trainee"
+    canonical:
+      - "Intern"
+      - "Graduate Trainee"
+      - "Management Trainee"
+      - "Summer Intern"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "graduate trainee", "management trainee", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Marketing & Brand"
+    keywords: [marketing, brand, "brand management", "consumer marketing", "product marketing"]
+    secondaries:
+      - name: "Brand Management"
+        keywords: ["brand management", "brand development", "brand equity"]
+      - name: "Consumer Insights & Research"
+        keywords: ["consumer insights", "market research", "consumer research", "shopper insights"]
+
+  - primary: "Commercial / Sales"
+    keywords: [commercial, sales, "key accounts", "trade marketing", "modern trade", "traditional trade"]
+    secondaries:
+      - name: "Key Account Management"
+        keywords: ["key accounts", "kam", "national accounts", "modern trade"]
+      - name: "Trade Marketing"
+        keywords: ["trade marketing", "shopper marketing", "channel marketing", "field sales"]
+
+  - primary: "Supply Chain"
+    keywords: ["supply chain", "logistics", "operations", "procurement", "manufacturing"]
+    secondaries:
+      - name: "Demand Planning & Logistics"
+        keywords: ["demand planning", "logistics", "distribution", "warehouse", "inventory"]
+      - name: "Manufacturing & Quality"
+        keywords: [manufacturing, production, quality, "quality assurance", "continuous improvement"]
+
+  - primary: "Finance"
+    keywords: [finance, "financial planning", "fp&a", controlling, accounting]
+    secondaries:
+      - name: "FP&A & Controlling"
+        keywords: ["fp&a", "financial planning", controlling, "business finance"]
+      - name: "Accounting & Treasury"
+        keywords: [accounting, treasury, "accounts payable", "accounts receivable"]

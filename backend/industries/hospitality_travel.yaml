@@ -1,0 +1,217 @@
+id: hospitality_travel
+name: "Hospitality & Travel"
+sector: Private
+detection_keywords:
+  company: [marriott, hilton, hyatt, "intercontinental", ihg, "accor", "starwood",
+            "wyndham", "best western", "four seasons", "ritz carlton", "rosewood",
+            "mandarin oriental", "shangri-la", "taj hotels", "oberoi hotels",
+            "airbnb", "booking.com", "expedia", "hotels.com", "trivago",
+            "emirates", "qatar airways", "british airways", "singapore airlines",
+            "united airlines", "american airlines", "delta", "lufthansa",
+            "carnival", "royal caribbean", "norwegian cruise", "p&o cruises",
+            "thomas cook", "tui", "club med", "kuoni"]
+  industry_hint: [hospitality, hotel, "food & beverage", restaurant, "travel & tourism",
+                  tourism, airline, cruise, "resort", "lodging", "accommodation",
+                  "tour operator", "travel management", "guest services", "front office"]
+  designation: ["hotel manager", "general manager", "front office manager",
+                "f&b manager", "housekeeping manager", "revenue manager",
+                "concierge", "guest relations", "sommelier"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Group CEO"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "Chief Marketing Officer"
+      - "CMO"
+      - "President"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief operating", "\\bcoo\\b", "chief commercial",
+               "chief marketing", "\\bcmo\\b", "\\bpresident\\b(?! vice)"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      COO: "Chief Operating Officer"
+      CMO: "Chief Marketing Officer"
+
+  - layer: 2
+    label: "EVP / SVP / Regional President"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+      - "Regional President"
+      - "Managing Director"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b",
+               "regional president", "managing director"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+      MD: "Managing Director"
+
+  - layer: 3
+    label: "Vice President / Area General Manager"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Area General Manager"
+      - "Regional Vice President"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b",
+               "area general manager"]
+    abbreviations:
+      VP: "Vice President"
+      AGM: "Area General Manager"
+
+  - layer: 4
+    label: "Senior Director / Hotel General Manager"
+    canonical:
+      - "Senior Director"
+      - "General Manager"
+      - "Hotel General Manager"
+      - "Associate Vice President"
+      - "AVP"
+      - "Country Director"
+    patterns: ["senior director", "general manager", "hotel general manager",
+               "associate vice president", "\\bavp\\b", "country director"]
+    abbreviations:
+      GM: "General Manager"
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Operations"
+      - "Director of Sales"
+      - "Director of Revenue"
+      - "Director of Food & Beverage"
+      - "Resident Manager"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "resident manager", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Department Head"
+    canonical:
+      - "Senior Manager"
+      - "Front Office Manager"
+      - "Food & Beverage Manager"
+      - "Revenue Manager"
+      - "Housekeeping Manager"
+      - "Sales Manager"
+      - "Events Manager"
+    patterns: ["senior manager", "front office manager", "food.*beverage manager",
+               "revenue manager", "housekeeping manager", "events manager"]
+    abbreviations:
+      FOM: "Front Office Manager"
+
+  - layer: 7
+    label: "Manager / Supervisor"
+    canonical:
+      - "Manager"
+      - "Restaurant Manager"
+      - "Bar Manager"
+      - "Duty Manager"
+      - "Rooms Division Manager"
+      - "Kitchen Manager"
+      - "Supervisor"
+      - "Head Sommelier"
+    patterns: ["\\bmanager\\b(?! senior)(?! general)(?! area)(?! hotel)(?! front)(?! revenue)",
+               "\\bsupervisor\\b", "duty manager", "head sommelier"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Officer / Team Leader / Chef de Partie"
+    canonical:
+      - "Senior Guest Relations Officer"
+      - "Senior Receptionist"
+      - "Team Leader"
+      - "Chef de Partie"
+      - "Senior Concierge"
+      - "Senior Sales Executive"
+    patterns: ["senior.*officer", "team leader", "chef de partie",
+               "senior concierge", "senior.*executive"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Officer / Executive / Concierge"
+    canonical:
+      - "Guest Relations Officer"
+      - "Receptionist"
+      - "Front Desk Agent"
+      - "Concierge"
+      - "Sales Executive"
+      - "Reservations Agent"
+      - "Commis Chef"
+    patterns: ["guest relations officer", "\\breceptionist\\b", "front desk agent",
+               "\\bconcierge\\b(?! senior)(?! head)", "sales executive", "reservations agent"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Trainee / Apprentice"
+    canonical:
+      - "Intern"
+      - "Hospitality Trainee"
+      - "Management Trainee"
+      - "Apprentice Chef"
+      - "Work Experience"
+    patterns: ["\\bintern\\b", "hospitality trainee", "management trainee",
+               "apprentice chef", "work experience"]
+    abbreviations: {}
+
+departments:
+  - primary: "Rooms & Front Office"
+    keywords: [rooms, "front office", reception, "reservations", "guest services",
+               "housekeeping", "concierge"]
+    secondaries:
+      - name: "Front Office & Reservations"
+        keywords: ["front office", reception, "reservations", "front desk", "check-in"]
+      - name: "Housekeeping & Facilities"
+        keywords: [housekeeping, "rooms division", "laundry", "facilities", "maintenance"]
+
+  - primary: "Food & Beverage"
+    keywords: ["food & beverage", "f&b", restaurant, "kitchen", "culinary", bar, banqueting]
+    secondaries:
+      - name: "Culinary & Kitchen"
+        keywords: [culinary, kitchen, "executive chef", "pastry", "food production"]
+      - name: "Restaurant & Bar"
+        keywords: [restaurant, bar, "dining", "sommelier", "banqueting", "events catering"]
+
+  - primary: "Sales, Marketing & Revenue"
+    keywords: [sales, marketing, "revenue management", "yield", "distribution",
+               "loyalty", "e-commerce"]
+    secondaries:
+      - name: "Sales & Business Development"
+        keywords: [sales, "corporate sales", "group sales", "account management", "mice"]
+      - name: "Revenue Management"
+        keywords: ["revenue management", yield, "rate strategy", "pricing",
+                   "channel management", "ota"]
+
+  - primary: "Finance & HR"
+    keywords: [finance, hr, "human resources", "people & culture", "learning & development"]
+    secondaries:
+      - name: "Finance & Control"
+        keywords: [finance, accounting, "cost control", "night audit", "payroll"]
+      - name: "People & Culture"
+        keywords: ["human resources", "people & culture", "learning & development",
+                   "talent", "employee experience"]

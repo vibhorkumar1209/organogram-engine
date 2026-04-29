@@ -1,0 +1,220 @@
+id: healthcare_insurance
+name: "Health Insurance & Managed Care"
+sector: Mixed
+detection_keywords:
+  company: ["unitedhealth", "united health group", "anthem", "aetna", "cigna",
+            "humana", "centene", "molina healthcare", "wellcare", "cvs health",
+            "kaiser permanente", "blue cross", "blue shield", "bcbs",
+            "bupa", "axa health", "aviva health", "vitality health",
+            "nhs england", "medibank", "hcf", "bhi health",
+            "apollo health", "star health", "niva bupa",
+            "medic lux", "signal iduna"]
+  industry_hint: ["health insurance", "medical insurance", "managed care", "health benefits",
+                  "payer", "payor", "hmo", "ppo", "epo", "mco", "managed care organization",
+                  "health plan", "dental insurance", "vision insurance",
+                  "employee benefits", "group health", "individual health",
+                  "medicaid", "medicare", "ndis", "nhs"]
+  designation: ["claims processor", "medical reviewer", "utilization manager",
+                "care coordinator", "benefits administrator", "actuarial analyst",
+                "network manager", "credentialing specialist"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive Director"
+    canonical:
+      - "Chairman"
+      - "Non-Executive Director"
+      - "Board Member"
+      - "Independent Director"
+    patterns: ["\\bchairman\\b", "non.?executive director", "\\bned\\b",
+               "board member", "independent director"]
+    abbreviations:
+      NED: "Non-Executive Director"
+
+  - layer: 1
+    label: "C-Suite / Managing Director"
+    canonical:
+      - "Chief Executive Officer"
+      - "CEO"
+      - "Chief Financial Officer"
+      - "CFO"
+      - "Chief Medical Officer"
+      - "CMO"
+      - "Chief Actuary"
+      - "Chief Operating Officer"
+      - "COO"
+      - "Chief Commercial Officer"
+      - "President"
+      - "Managing Director"
+    patterns: ["chief executive", "\\bceo\\b", "chief financial", "\\bcfo\\b",
+               "chief medical", "\\bcmo\\b(?! marketing)", "chief actuary",
+               "chief operating", "\\bcoo\\b", "chief commercial",
+               "\\bpresident\\b(?! vice)", "managing director"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CFO: "Chief Financial Officer"
+      CMO: "Chief Medical Officer"
+      COO: "Chief Operating Officer"
+      MD: "Managing Director"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical:
+      - "Executive Vice President"
+      - "EVP"
+      - "Senior Vice President"
+      - "SVP"
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "Vice President"
+    canonical:
+      - "Vice President"
+      - "VP"
+      - "Regional President"
+    patterns: ["(?<!associate )(?<!assistant )vice president",
+               "(?<!associate )(?<!assistant )\\bvp\\b", "regional president"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director / AVP"
+    canonical:
+      - "Senior Director"
+      - "Associate Vice President"
+      - "AVP"
+      - "Medical Director"
+      - "Actuarial Director"
+      - "Network Director"
+    patterns: ["senior director", "associate vice president", "\\bavp\\b",
+               "medical director", "actuarial director", "network director"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director"
+    canonical:
+      - "Director"
+      - "Director of Claims"
+      - "Director of Network"
+      - "Director of Medical Management"
+      - "Associate Director"
+    patterns: ["\\bdirector\\b", "associate director"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Senior Medical Manager"
+    canonical:
+      - "Senior Manager"
+      - "Senior Claims Manager"
+      - "Senior Utilization Manager"
+      - "Senior Network Manager"
+      - "Senior Care Manager"
+      - "Principal Actuary"
+    patterns: ["senior manager", "senior claims manager", "senior utilization manager",
+               "senior network manager", "principal actuary"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Medical Manager / Utilization Manager"
+    canonical:
+      - "Manager"
+      - "Claims Manager"
+      - "Utilization Management Manager"
+      - "Care Manager"
+      - "Network Manager"
+      - "Benefits Manager"
+      - "Actuary"
+    patterns: ["\\bmanager\\b(?! senior)", "claims manager(?! senior)",
+               "utilization management manager", "care manager(?! senior)",
+               "\\bactuary\\b(?! senior)(?! chief)(?! principal)"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Analyst / Senior Coordinator / Case Manager"
+    canonical:
+      - "Senior Analyst"
+      - "Senior Claims Analyst"
+      - "Senior Benefits Coordinator"
+      - "Case Manager"
+      - "Clinical Case Manager"
+      - "Actuarial Analyst"
+    patterns: ["senior analyst", "senior claims analyst", "senior benefits coordinator",
+               "case manager(?! senior)", "actuarial analyst(?! senior)"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Analyst / Coordinator / Claims Processor"
+    canonical:
+      - "Analyst"
+      - "Claims Analyst"
+      - "Benefits Coordinator"
+      - "Claims Processor"
+      - "Utilization Review Analyst"
+      - "Network Analyst"
+      - "Associate"
+    patterns: ["\\banalyst\\b(?! senior)(?! actuarial)(?! claims)",
+               "\\bcoordinator\\b(?! senior)", "claims processor",
+               "utilization review analyst", "network analyst",
+               "\\bassociate\\b(?! vice)(?! director)"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Intern / Graduate / Trainee"
+    canonical:
+      - "Intern"
+      - "Graduate Trainee"
+      - "Management Trainee"
+      - "Actuarial Trainee"
+      - "Trainee"
+    patterns: ["\\bintern\\b", "graduate trainee", "management trainee",
+               "actuarial trainee", "\\btrainee\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Medical Management"
+    keywords: ["medical management", "utilization management", "care management",
+               "disease management", "clinical programs"]
+    secondaries:
+      - name: "Utilization Management"
+        keywords: ["utilization management", "prior authorization",
+                   "concurrent review", "discharge planning"]
+      - name: "Care Management & Population Health"
+        keywords: ["care management", "population health", "disease management",
+                   "complex case management", "wellness programs"]
+
+  - primary: "Claims"
+    keywords: [claims, "claims adjudication", "claims processing",
+               "medical claims", "pharmacy claims"]
+    secondaries:
+      - name: "Claims Processing & Adjudication"
+        keywords: ["claims processing", "claims adjudication", "auto adjudication",
+                   "claims payment"]
+      - name: "Claims Audit & Recovery"
+        keywords: ["claims audit", "fraud waste abuse", "fwa", "recovery",
+                   "subrogation", "claims integrity"]
+
+  - primary: "Network & Provider Relations"
+    keywords: [network, "provider relations", "provider contracting",
+               "credentialing", "network development"]
+    secondaries:
+      - name: "Provider Contracting & Credentialing"
+        keywords: ["provider contracting", "credentialing", "network adequacy",
+                   "reimbursement rates"]
+      - name: "Provider Relations & Engagement"
+        keywords: ["provider relations", "provider engagement",
+                   "value-based care", "accountable care"]
+
+  - primary: "Actuarial & Finance"
+    keywords: [actuarial, finance, "financial reporting", "medical economics",
+               "rate filing", "trend analysis"]
+    secondaries:
+      - name: "Actuarial & Medical Economics"
+        keywords: [actuarial, "medical economics", "rate development", "trend",
+                   "reserving", "pricing"]
+      - name: "Finance & FP&A"
+        keywords: [finance, "fp&a", "financial planning", "revenue cycle",
+                   "premium billing"]

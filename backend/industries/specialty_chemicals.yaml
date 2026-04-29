@@ -1,0 +1,126 @@
+id: specialty_chemicals
+name: "Specialty Chemicals & Materials"
+sector: Public
+detection_keywords:
+  company: [chemicals, "specialty chemicals", materials, coatings, adhesives,
+            "advanced materials", basf, "dow chemical", "dupont", evonik,
+            "lanxess", "arkema", "solvay", "huntsman", "eastman chemical",
+            "cabot corporation", "h.b. fuller", "ppg industries", "sherwin-williams",
+            "croda", "elementis", "ineos", "celanese", "cytec", "lubrizol"]
+  industry_hint: ["specialty chemicals", chemicals, coatings, adhesives, materials,
+                  "advanced materials", polymers, resins, "surface treatment",
+                  "chemical manufacturing", formulations, "performance chemicals"]
+  designation: ["chemist", "research chemist", "applications engineer", "technical sales",
+                "formulation chemist", "process chemist", "polymer scientist",
+                "product development chemist", "regulatory affairs chemist"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Supervisory Board Member", "Board Member"]
+    patterns: ["chairman", "non.?exec", "supervisory board", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical: ["Chief Executive Officer", "Chief Financial Officer", "Chief Technology Officer",
+                "Chief Operating Officer", "Chief Commercial Officer", "President & CEO"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CTO: "Chief Technology Officer"
+      CFO: "Chief Financial Officer"
+      CCO: "Chief Commercial Officer"
+
+  - layer: 2
+    label: "EVP / SVP / Segment President"
+    canonical: ["Executive Vice President", "Senior Vice President", "Segment President",
+                "Business Group President", "EVP Technology", "SVP R&D"]
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b", "segment president"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical: ["Vice President", "General Manager", "Global Business Director",
+                "VP R&D", "VP Commercial", "VP Technology"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "general manager"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / Global Product Manager"
+    canonical: ["Senior Director", "Global Product Manager", "R&D Director",
+                "Senior Application Manager", "Associate Vice President"]
+    patterns: ["senior director", "global product manager", "\\bavp\\b"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director / Head of"
+    canonical: ["Director", "Head of R&D", "Head of Commercial", "Product Line Director",
+                "Technology Director", "Manufacturing Director"]
+    patterns: ["\\bdirector\\b", "head of \\w+"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Principal Scientist"
+    canonical: ["Senior Manager", "Principal Scientist", "Senior Research Scientist",
+                "Senior Applications Engineer", "Senior Product Manager"]
+    patterns: ["senior manager", "principal scientist", "senior research", "senior.*scientist"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Research Scientist"
+    canonical: ["Manager", "Research Manager", "Applications Manager",
+                "Product Manager", "Technical Service Manager", "Lab Manager"]
+    patterns: ["\\bmanager\\b", "\\bscientist\\b"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Chemist / Senior Scientist"
+    canonical: ["Senior Research Chemist", "Senior Applications Engineer",
+                "Senior Formulation Chemist", "Senior Scientist", "Senior Polymer Scientist"]
+    patterns: ["senior.*chemist", "senior.*scientist", "senior.*engineer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Chemist / Scientist / Engineer"
+    canonical: ["Research Chemist", "Applications Engineer", "Formulation Chemist",
+                "Polymer Scientist", "Process Chemist", "Product Development Chemist",
+                "Analytical Chemist", "Technical Sales Specialist"]
+    patterns: ["\\bchemist\\b", "\\bscientist\\b", "\\bengineer\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Lab Technician / Intern"
+    canonical: ["Graduate Chemist", "Lab Technician", "Intern", "Junior Chemist",
+                "Research Intern", "Trainee"]
+    patterns: ["\\bgraduate\\b", "lab technician", "\\bintern\\b", "\\bjunior\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "R&D"
+    keywords: ["r&d", research, technology, innovation, formulation, "new product development"]
+    secondaries:
+      - name: "Research"
+        keywords: [research, "fundamental research", "applied research", discovery]
+      - name: "Formulation & Applications"
+        keywords: [formulation, "applications engineering", "technical service", "customer formulation"]
+
+  - primary: "Commercial"
+    keywords: [commercial, sales, marketing, "business development", "technical sales"]
+    secondaries:
+      - name: "Sales"
+        keywords: [sales, "technical sales", "account management", "business development"]
+      - name: "Marketing"
+        keywords: [marketing, "product marketing", "market development", "segment marketing"]
+
+  - primary: "Operations"
+    keywords: [operations, manufacturing, production, supply chain, quality, safety]
+    secondaries:
+      - name: "Manufacturing"
+        keywords: [manufacturing, production, "chemical plant", "process operations"]
+      - name: "Quality & HSSE"
+        keywords: [quality, hsse, "health and safety", environment, regulatory]

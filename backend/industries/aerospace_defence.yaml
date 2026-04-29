@@ -1,0 +1,136 @@
+id: aerospace_defence
+name: "Aerospace & Defence"
+sector: Public
+detection_keywords:
+  company: [aerospace, defence, defense, aviation, "military systems", munitions,
+            boeing, airbus, lockheed, raytheon, bae, northrop, "general dynamics",
+            "l3 technologies", safran, thales, "rolls-royce", "ge aviation",
+            "leonardo drs", textron, "curtiss-wright"]
+  industry_hint: [aerospace, defence, defense, aviation, "military", "space systems",
+                  "missile systems", "unmanned systems", "satellite", "propulsion",
+                  "avionics", "defence contractor"]
+  designation: ["program manager", "systems engineer", "avionics engineer",
+                "chief engineer", "principal engineer", "defense program director",
+                "flight test engineer", "mission systems engineer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Independent Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical: ["Chief Executive Officer", "Chief Operating Officer", "Chief Financial Officer",
+                "Chief Technology Officer", "Chief Strategy Officer",
+                "President & CEO", "President"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      COO: "Chief Operating Officer"
+      CFO: "Chief Financial Officer"
+      CTO: "Chief Technology Officer"
+
+  - layer: 2
+    label: "EVP / Division President"
+    canonical: ["Executive Vice President", "Group Vice President", "Division President",
+                "Senior Vice President", "Business Area President"]
+    patterns: ["executive vice president", "\\bevp\\b", "division president", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / General Manager"
+    canonical: ["Vice President", "General Manager", "Programme Director",
+                "Chief Engineer", "Group Managing Director"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bgm\\b", "programme director", "\\bvp\\b"]
+    abbreviations:
+      VP: "Vice President"
+      GM: "General Manager"
+
+  - layer: 4
+    label: "Senior Director / Programme Manager"
+    canonical: ["Senior Director", "Senior Programme Manager", "Director of Engineering",
+                "Associate Vice President", "Senior Program Director"]
+    patterns: ["senior director", "senior programme", "senior program director"]
+    abbreviations:
+      AVP: "Associate Vice President"
+
+  - layer: 5
+    label: "Director / Programme Manager"
+    canonical: ["Director", "Programme Manager", "Program Manager", "Capture Manager",
+                "Business Development Director", "Systems Engineering Director"]
+    patterns: ["\\bdirector\\b", "programme manager", "program manager", "capture manager"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager / Chief Engineer"
+    canonical: ["Senior Manager", "Senior Systems Engineer", "Chief Systems Engineer",
+                "Senior Project Manager", "Deputy Programme Manager", "Senior Principal Engineer"]
+    patterns: ["senior manager", "senior systems engineer", "deputy programme", "senior principal"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Project Manager"
+    canonical: ["Manager", "Project Manager", "Systems Engineer Lead",
+                "Engineering Manager", "Mission Systems Manager"]
+    patterns: ["\\bmanager\\b", "project manager", "engineering manager"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Lead Engineer"
+    canonical: ["Senior Systems Engineer", "Senior Software Engineer", "Senior Avionics Engineer",
+                "Senior Mechanical Engineer", "Lead Engineer", "Principal Engineer",
+                "Staff Engineer", "Senior Flight Test Engineer"]
+    patterns: ["senior.*engineer", "lead engineer", "principal engineer", "staff engineer"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Analyst"
+    canonical: ["Systems Engineer", "Software Engineer", "Mechanical Engineer",
+                "Electrical Engineer", "Avionics Engineer", "Flight Test Engineer",
+                "Quality Engineer", "Structural Engineer", "Analyst"]
+    patterns: ["\\bengineer\\b", "\\banalyst\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Apprentice / Intern"
+    canonical: ["Graduate Engineer", "Apprentice", "Intern", "Junior Engineer",
+                "Engineering Trainee", "Graduate Analyst"]
+    patterns: ["\\bgraduate\\b", "\\bapprentice\\b", "\\bintern\\b", "\\bjunior\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "Engineering"
+    keywords: [engineering, "systems engineering", avionics, propulsion, "structures", mechanical, software]
+    secondaries:
+      - name: "Systems Engineering"
+        keywords: ["systems engineering", "systems integration", avionics, "mission systems"]
+      - name: "Mechanical & Structural"
+        keywords: [mechanical, structural, "aerostructures", composite, "propulsion engineering"]
+      - name: "Software & Embedded"
+        keywords: ["software engineering", embedded, firmware, "flight software", avionics]
+
+  - primary: "Programmes"
+    keywords: ["programme management", "program management", capture, contracts, "bid management"]
+    secondaries:
+      - name: "Programme Management"
+        keywords: ["programme manager", "program manager", "programme office", "program office"]
+      - name: "Capture & Bids"
+        keywords: [capture, bids, "business winning", "proposal management"]
+
+  - primary: "Operations"
+    keywords: [operations, manufacturing, production, "supply chain", quality, "test & evaluation"]
+    secondaries:
+      - name: "Manufacturing"
+        keywords: [manufacturing, production, assembly, fabrication]
+      - name: "Quality Assurance"
+        keywords: [quality, "quality assurance", "quality control", inspection, "airworthiness"]
+
+  - primary: "Strategy & Business Development"
+    keywords: [strategy, "business development", "market development", "strategic planning"]
+    secondaries:
+      - name: "Business Development"
+        keywords: ["business development", "strategic partnerships", "market development"]

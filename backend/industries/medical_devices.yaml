@@ -1,0 +1,130 @@
+id: medical_devices
+name: "Medical Devices & Diagnostics"
+sector: Public
+detection_keywords:
+  company: ["medical devices", diagnostics, medtech, medtronic, stryker, "boston scientific",
+            "johnson & johnson medical", "j&j medtech", becton, "bd", abbott,
+            "edwards lifesciences", zimmer, "smith+nephew", "hologic", "natus",
+            "philips healthcare", "ge healthcare", "siemens healthineers", danaher,
+            "thermo fisher", roper, idexx, haemonetics, "invacare"]
+  industry_hint: ["medical devices", medtech, diagnostics, "medical equipment",
+                  "surgical instruments", "imaging systems", "in vitro diagnostics",
+                  "point of care", "cardiovascular devices", "orthopedics", "neurology devices"]
+  designation: ["regulatory affairs", "clinical affairs", "quality engineer",
+                "r&d engineer", "biomedical engineer", "clinical specialist",
+                "field clinical engineer", "product development engineer"]
+
+hierarchy:
+  - layer: 0
+    label: "Board / Non-Executive"
+    canonical: ["Chairman", "Non-Executive Director", "Independent Director", "Board Member"]
+    patterns: ["chairman", "non.?exec", "independent director", "board member"]
+    abbreviations: {}
+
+  - layer: 1
+    label: "C-Suite"
+    canonical: ["Chief Executive Officer", "Chief Financial Officer", "Chief Medical Officer",
+                "Chief Technology Officer", "Chief Operating Officer",
+                "Chief Scientific Officer", "President & CEO"]
+    patterns: ["chief \\w+ officer", "\\bpresident\\b"]
+    abbreviations:
+      CEO: "Chief Executive Officer"
+      CMO: "Chief Medical Officer"
+      CSO: "Chief Scientific Officer"
+      CTO: "Chief Technology Officer"
+
+  - layer: 2
+    label: "EVP / SVP"
+    canonical: ["Executive Vice President", "Senior Vice President", "President Global Business",
+                "Group Vice President", "SVP R&D", "EVP Clinical Affairs"]
+    patterns: ["executive vice president", "\\bevp\\b", "senior vice president", "\\bsvp\\b"]
+    abbreviations:
+      EVP: "Executive Vice President"
+      SVP: "Senior Vice President"
+
+  - layer: 3
+    label: "VP / Franchise Head"
+    canonical: ["Vice President", "VP R&D", "Vice President Quality",
+                "VP Regulatory Affairs", "VP Clinical", "VP Operations",
+                "Vice President Commercial", "Franchise Head"]
+    patterns: ["(?<!associate )(?<!assistant )vice president", "\\bvp\\b", "franchise head"]
+    abbreviations:
+      VP: "Vice President"
+
+  - layer: 4
+    label: "Senior Director"
+    canonical: ["Senior Director", "Senior Director R&D", "Senior Director Quality",
+                "Associate Vice President", "Senior Director Regulatory",
+                "Senior Director Clinical"]
+    patterns: ["senior director", "associate vice president", "\\bavp\\b"]
+    abbreviations: {}
+
+  - layer: 5
+    label: "Director"
+    canonical: ["Director", "Director R&D", "Director Quality", "Director Regulatory Affairs",
+                "Director Clinical Affairs", "Director Operations"]
+    patterns: ["\\bdirector\\b"]
+    abbreviations: {}
+
+  - layer: 6
+    label: "Senior Manager"
+    canonical: ["Senior Manager", "Principal Scientist", "Senior Principal Engineer",
+                "Senior Regulatory Affairs Manager", "Senior Quality Manager",
+                "Senior Clinical Specialist"]
+    patterns: ["senior manager", "principal scientist", "senior principal"]
+    abbreviations: {}
+
+  - layer: 7
+    label: "Manager / Project Lead"
+    canonical: ["Manager", "R&D Manager", "Quality Manager", "Regulatory Affairs Manager",
+                "Clinical Affairs Manager", "Project Manager", "Product Development Manager"]
+    patterns: ["\\bmanager\\b", "project manager"]
+    abbreviations: {}
+
+  - layer: 8
+    label: "Senior Engineer / Scientist"
+    canonical: ["Senior R&D Engineer", "Senior Quality Engineer", "Senior Biomedical Engineer",
+                "Senior Scientist", "Senior Regulatory Affairs Specialist",
+                "Senior Clinical Specialist", "Senior Manufacturing Engineer"]
+    patterns: ["senior.*engineer", "senior.*scientist", "senior.*specialist"]
+    abbreviations: {}
+
+  - layer: 9
+    label: "Engineer / Specialist / Analyst"
+    canonical: ["R&D Engineer", "Quality Engineer", "Regulatory Affairs Specialist",
+                "Biomedical Engineer", "Clinical Specialist", "Manufacturing Engineer",
+                "Field Clinical Engineer", "Analyst"]
+    patterns: ["\\bengineer\\b", "\\bspecialist\\b", "\\banalyst\\b"]
+    abbreviations: {}
+
+  - layer: 10
+    label: "Graduate / Intern"
+    canonical: ["Graduate Engineer", "Intern", "Junior Engineer", "Junior Scientist",
+                "Clinical Intern", "R&D Intern"]
+    patterns: ["\\bgraduate\\b", "\\bintern\\b", "\\bjunior\\b"]
+    abbreviations: {}
+
+departments:
+  - primary: "R&D"
+    keywords: ["r&d", "research", "product development", "engineering", "innovation"]
+    secondaries:
+      - name: "Product Development"
+        keywords: ["product development", "new product", "design engineering", "mechanical design"]
+      - name: "Research"
+        keywords: [research, "clinical research", "pre-clinical", "scientific research"]
+
+  - primary: "Regulatory & Quality"
+    keywords: ["regulatory affairs", "quality", "clinical affairs", "compliance"]
+    secondaries:
+      - name: "Regulatory Affairs"
+        keywords: ["regulatory affairs", "510k", "pma", "ce marking", "submissions"]
+      - name: "Quality"
+        keywords: ["quality assurance", "quality control", "quality systems", "capa", "audit"]
+
+  - primary: "Commercial"
+    keywords: [commercial, sales, "clinical sales", marketing, "market access"]
+    secondaries:
+      - name: "Sales & Clinical"
+        keywords: [sales, "clinical specialist", "field clinical", "field sales"]
+      - name: "Marketing"
+        keywords: [marketing, "product marketing", "market development", "physician education"]
