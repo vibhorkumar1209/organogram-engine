@@ -37,6 +37,63 @@ from nlp_engine import NLPEngine, ClassificationResult
 
 logger = logging.getLogger(__name__)
 
+# ── Country-code → region mapping (shared with organogram v2 NLP agent) ──────
+# Imported lazily so the module loads even if organogram package is absent.
+def _get_country_code_to_region() -> dict[str, str]:
+    try:
+        from organogram.agents.nlp_agent import COUNTRY_CODE_TO_REGION
+        return COUNTRY_CODE_TO_REGION
+    except ImportError:
+        return {}
+
+_COUNTRY_CODE_TO_REGION: dict[str, str] = {}   # populated on first use
+
+
+def _region_from_country_code(code: str) -> Optional[str]:
+    """Return engine region string for an ISO-2 country code, or None."""
+    global _COUNTRY_CODE_TO_REGION
+    if not _COUNTRY_CODE_TO_REGION:
+        _COUNTRY_CODE_TO_REGION = _get_country_code_to_region()
+    return _COUNTRY_CODE_TO_REGION.get((code or "").strip().upper())
+
+
+# ── Vendor level → engine layer mapping ─────────────────────────────────────
+def _get_vendor_level_map() -> dict[str, int]:
+    try:
+        from organogram.utils.vendor_mapper import VENDOR_LEVEL_MAP
+        return VENDOR_LEVEL_MAP
+    except ImportError:
+        return {}
+
+_VENDOR_LEVEL_MAP: dict[str, int] = {}   # populated on first use
+
+
+def _layer_from_vendor_level(vendor_level: str) -> Optional[int]:
+    """Map a vendor JOB_LEVEL string to an engine layer int, or None."""
+    global _VENDOR_LEVEL_MAP
+    if not _VENDOR_LEVEL_MAP:
+        _VENDOR_LEVEL_MAP = _get_vendor_level_map()
+    return _VENDOR_LEVEL_MAP.get((vendor_level or "").strip().lower())
+
+
+# ── Vendor function → engine function mapping ────────────────────────────────
+def _get_vendor_function_map() -> dict[str, str]:
+    try:
+        from organogram.utils.vendor_mapper import VENDOR_FUNCTION_MAP
+        return VENDOR_FUNCTION_MAP
+    except ImportError:
+        return {}
+
+_VENDOR_FUNCTION_MAP: dict[str, str] = {}   # populated on first use
+
+
+def _dept_from_vendor_function(vendor_function: str) -> Optional[str]:
+    """Map a vendor JOB_FUNCTION string to an engine department string, or None."""
+    global _VENDOR_FUNCTION_MAP
+    if not _VENDOR_FUNCTION_MAP:
+        _VENDOR_FUNCTION_MAP = _get_vendor_function_map()
+    return _VENDOR_FUNCTION_MAP.get((vendor_function or "").strip().lower())
+
 # ─────────────────────────────────────────────────────────────────
 # COMPOUND TITLE SPLITTING
 # ─────────────────────────────────────────────────────────────────
@@ -269,25 +326,52 @@ class InferenceEngine:
         self.nlp = get_nlp()
 
     def classify_record(self, record: dict) -> ClassifiedRecord:
-        """Classify a single raw record dict."""
-        # Extract fields
-        designation    = _get(record, "Designation")
-        company        = _get(record, "Company")
-        industry_hint  = _get(record, "Industry_Hint")
-        location       = _get(record, "Location")
-        linkedin_url   = _get(record, "LinkedInURL")
-        full_name      = _extract_name(record)
+        """
+        Classify a single raw record dict.
 
-        # ── ProTrail ProfileLevel: strongest available signal ──────────────
-        profile_level  = _get(record, "ProfileLevel")
-        raw_dept       = _get(record, "Department")   # freeform dept string
-        pl_result      = _lookup_profile_level(profile_level)
+        Field priority (highest → lowest):
+          Title      : Designation / JOB_TITLE  >  linkedin_headline
+          Company    : Company  >  job_org_linkedin_url slug  >  email_domain
+          Region     : job_country_code  >  country_code  >  Location text
+          Function   : ProfileLevel  >  vendor_function (JOB_FUNCTION)  >  NLP
+          Layer      : ProfileLevel  >  vendor_level (JOB_LEVEL)  >  NLP
+          Industry   : Industry_Hint  >  linkedin_industry
+        """
+        # ── Title ─────────────────────────────────────────────────────────
+        designation = _get(record, "Designation") or _get(record, "linkedin_headline") or ""
 
-        # Enrich industry_hint with ProfileLevel-derived hint
+        # ── Company ───────────────────────────────────────────────────────
+        company = _get(record, "Company") or ""
+        if not company:
+            org_url = _get(record, "job_org_linkedin_url") or ""
+            if org_url:
+                slug = org_url.rstrip("/").split("/")[-1]
+                company = slug.replace("-", " ").title()
+        if not company:
+            email_dom = _get(record, "email_domain") or ""
+            if email_dom:
+                company = email_dom.split(".")[0].title()
+
+        # ── Industry hint ─────────────────────────────────────────────────
+        industry_hint = _get(record, "Industry_Hint") or _get(record, "linkedin_industry") or ""
+
+        # ── Location (legacy text string) ─────────────────────────────────
+        location = (_get(record, "Location")
+                    or _get(record, "job_country")
+                    or _get(record, "country_name") or "")
+
+        linkedin_url = _get(record, "LinkedInURL") or ""
+        full_name    = _extract_name(record)
+
+        # ── ProTrail ProfileLevel ─────────────────────────────────────────
+        profile_level = _get(record, "ProfileLevel")
+        raw_dept      = _get(record, "Department")
+        pl_result     = _lookup_profile_level(profile_level)
+
         if pl_result and not industry_hint:
             industry_hint = pl_result[1]
 
-        # NLP classification (use enriched hint)
+        # ── NLP classification ────────────────────────────────────────────
         result: ClassificationResult = self.nlp.classify(
             designation=designation,
             company=company,
@@ -295,40 +379,63 @@ class InferenceEngine:
             location=location,
         )
 
-        # ── Apply ProfileLevel overrides (high-confidence structured data) ──
         dept_primary   = result.dept_primary
         dept_secondary = result.dept_secondary
         dept_tertiary  = result.dept_tertiary
         layer          = result.layer
 
+        # ── Override 1: ProfileLevel (highest priority structured signal) ──
         if pl_result:
             pl_dept, _pl_hint, pl_layer = pl_result
-            # Override dept_primary with ProfileLevel-derived value when NLP
-            # fell back to "General" or the ProfileLevel is more specific
             if result.dept_primary in ("General",) or pl_dept != "General":
                 dept_primary = pl_dept
-            # Override layer only when ProfileLevel forces a specific seniority
             if pl_layer is not None and result.match_method in ("fallback",):
                 layer = pl_layer
 
-        # ── Use raw Department field to refine secondary/tertiary ──────────
+        # ── Override 2: vendor_function (JOB_FUNCTION) ───────────────────
+        # Applied when NLP had no rule match (fallback) OR dept is unresolved.
+        vendor_function = _get(record, "vendor_function") or ""
+        if vendor_function and (
+            dept_primary in ("General", "Unclassified", "")
+            or result.match_method == "fallback"
+        ):
+            mapped_fn = _dept_from_vendor_function(vendor_function)
+            if mapped_fn:
+                dept_primary = mapped_fn
+                logger.debug(f"vendor_function override: '{vendor_function}' → {mapped_fn}")
+
+        # ── Override 3: vendor_level (JOB_LEVEL) ─────────────────────────
+        # Applied when NLP fell back to a low-confidence guess.
+        vendor_level = _get(record, "vendor_level") or ""
+        if vendor_level and result.match_method in ("fallback",):
+            mapped_layer = _layer_from_vendor_level(vendor_level)
+            if mapped_layer is not None:
+                layer = mapped_layer
+                logger.debug(f"vendor_level override: '{vendor_level}' → L{mapped_layer}")
+
+        # ── Department refinement from free-text Department field ──────────
         if raw_dept and raw_dept.lower() not in ("nan", "none", ""):
             refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
-            # Only apply refined result when it resolves to the same primary dept
-            # (or when refined has no primary opinion). Prevents cross-dept
-            # contamination where e.g. "Sales Operations" text causes Finance
-            # to appear as a secondary of Marketing.
             if refined[0] == dept_primary or not refined[0]:
                 if refined[1] and not dept_secondary:
                     dept_secondary = refined[1]
                 if refined[2] and not dept_tertiary:
                     dept_tertiary = refined[2]
 
-        # Sector
+        # ── Sector ────────────────────────────────────────────────────────
         sector = self.nlp.classify_sector(company, designation, industry_hint)
 
-        # Region
-        region = self.nlp.classify_region(location)
+        # ── Region — country code wins over text parsing ──────────────────
+        # Priority: JOB_LOCATION_COUNTRY_CODE > COUNTRY_CODE > Location text
+        region: Optional[str] = None
+        for code_field in ("job_country_code", "country_code"):
+            code = _get(record, code_field) or ""
+            if code:
+                region = _region_from_country_code(code)
+                if region:
+                    break
+        if not region:
+            region = self.nlp.classify_region(location)
 
         return ClassifiedRecord(
             id=str(uuid.uuid4()),
@@ -338,7 +445,7 @@ class InferenceEngine:
             linkedin_url=linkedin_url,
             location=location,
             sector=sector,
-            region=region,
+            region=region or "Global",
             layer=layer,
             dept_primary=dept_primary,
             dept_secondary=dept_secondary,

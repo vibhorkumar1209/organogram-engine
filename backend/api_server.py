@@ -20,53 +20,104 @@ from structural_engine import build_from_records, OrganogramDAG, OrganogramDB
 # ─── Flexible column name mapping ────────────
 # Maps any common column variant → canonical field name
 COLUMN_ALIASES: dict[str, str] = {
-    # FirstName
+    # ── Name fields ──────────────────────────────────────────────────────
     "firstname": "FirstName", "first_name": "FirstName",
     "first name": "FirstName", "given name": "FirstName",
     "givenname": "FirstName", "fname": "FirstName",
-    # LastName
+
     "lastname": "LastName", "last_name": "LastName",
     "last name": "LastName", "surname": "LastName",
     "family name": "LastName", "lname": "LastName",
-    # Designation
+
+    # Vendor FULL_NAME (preferred over first+last when present)
+    "full_name": "FullName", "full name": "FullName", "fullname": "FullName",
+    "name": "FullName", "contact name": "FullName",
+    "person name": "FullName", "employee name": "FullName",
+
+    # ── Title / Designation ──────────────────────────────────────────────
+    # JOB_TITLE is the primary vendor title column
+    "job_title": "Designation", "job title": "Designation", "jobtitle": "Designation",
     "designation": "Designation", "title": "Designation",
-    "job title": "Designation", "jobtitle": "Designation",
     "position": "Designation", "role": "Designation",
     "job role": "Designation", "current title": "Designation",
-    "currenttitle": "Designation", "headline": "Designation",
-    "current position": "Designation",
-    # Company
-    "company": "Company", "company name": "Company",
+    "currenttitle": "Designation", "current position": "Designation",
+
+    # ── Company ──────────────────────────────────────────────────────────
+    "company": "Company", "company name": "Company", "company_name": "Company",
     "companyname": "Company", "organization": "Company",
     "organisation": "Company", "employer": "Company",
     "current company": "Company", "currentcompany": "Company",
     "account": "Company", "firm": "Company",
-    # LinkedInURL
+
+    # ── LinkedIn / profile URL ───────────────────────────────────────────
     "linkedinurl": "LinkedInURL", "linkedin url": "LinkedInURL",
     "linkedin": "LinkedInURL", "linkedin profile": "LinkedInURL",
-    "profile url": "LinkedInURL", "profileurl": "LinkedInURL",
-    "url": "LinkedInURL",
-    # Location
-    "location": "Location", "city": "Location",
-    "country": "Location", "region": "Location",
-    "office location": "Location", "officelocation": "Location",
-    "geography": "Location", "geo": "Location",
-    "based in": "Location", "basedin": "Location",
-    # Industry_Hint
+    "linkedin_url": "LinkedInURL", "profile url": "LinkedInURL",
+    "profileurl": "LinkedInURL", "url": "LinkedInURL",
+
+    # ── Location (legacy single-string field) ────────────────────────────
+    "location": "Location", "office location": "Location",
+    "officelocation": "Location", "geography": "Location",
+    "geo": "Location", "based in": "Location", "basedin": "Location",
+
+    # ── Industry / Sector ────────────────────────────────────────────────
     "industry_hint": "Industry_Hint", "industry": "Industry_Hint",
     "sector": "Industry_Hint", "domain": "Industry_Hint",
     "vertical": "Industry_Hint", "industry hint": "Industry_Hint",
     "industryhint": "Industry_Hint",
-    # ProTrail ProfileLevel — treated as strong industry/dept signal
+
+    # ── ProTrail ProfileLevel ────────────────────────────────────────────
     "profilelevel": "ProfileLevel", "profile level": "ProfileLevel",
     "profile_level": "ProfileLevel",
-    # ProTrail raw department field
+
+    # ── Department ───────────────────────────────────────────────────────
     "department": "Department", "dept": "Department",
+
+    # ── Vendor job-location fields (primary region-routing signals) ──────
+    # JOB_LOCATION_COUNTRY_CODE is the most authoritative region signal.
+    "job_location_country_code":   "job_country_code",
+    "job_location_country":        "job_country",
+    "job_location_country_region": "job_country_region",
+    "job_location_continent":      "job_continent",
+    "job_location_state":          "job_state",
+    "job_location_state_code":     "job_state",
+    "job_location_city":           "job_city",
+
+    # Person-level geography fallbacks (used when job-location is blank)
+    "country_code":   "country_code",
+    "country_name":   "country_name",
+    "country_region": "country_region",
+    "continent":      "continent",
+    "state_code":     "state_code",
+    "state_name":     "state_name",
+    "city":           "city",
+
+    # ── Vendor pre-classification ────────────────────────────────────────
+    "job_function": "vendor_function",
+    "job_level":    "vendor_level",
+    "persona":      "vendor_persona",
+
+    # ── LinkedIn enrichment fields ───────────────────────────────────────
+    # LINKEDIN_HEADLINE is used as a title fallback when JOB_TITLE is empty.
+    "linkedin_headline": "linkedin_headline",
+    "linkedin_industry": "linkedin_industry",
+
+    # ── Org-level fallback identifiers ───────────────────────────────────
+    # JOB_ORG_LINKEDIN_URL is used to infer company name when no Company column.
+    "job_org_linkedin_url": "job_org_linkedin_url",
+    "email_domain":         "email_domain",
 }
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Remap DataFrame columns to canonical schema names."""
+    """
+    Remap DataFrame columns to canonical schema names.
+
+    Priority for name: FullName (FULL_NAME) > FirstName+LastName.
+    Priority for title: Designation (JOB_TITLE) > linkedin_headline.
+    Priority for company: Company > job_org_linkedin_url > email_domain.
+    Priority for location/region: job_country_code > job_country > Location.
+    """
     rename_map = {}
     for col in df.columns:
         key = re.sub(r"[^a-z0-9 _]", "", str(col).lower().strip())
@@ -76,11 +127,19 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
-    # Synthesize FullName → FirstName/LastName if only full name exists
+    # ── Name synthesis ────────────────────────────────────────────────
+    # 1. FullName present → split into First + Last
+    if "FullName" in df.columns:
+        if "FirstName" not in df.columns or "LastName" not in df.columns:
+            parts = df["FullName"].astype(str).str.strip().str.split(n=1, expand=True)
+            if "FirstName" not in df.columns:
+                df["FirstName"] = parts[0]
+            if "LastName" not in df.columns:
+                df["LastName"] = parts[1] if parts.shape[1] > 1 else ""
+    # 2. No name columns at all → try any remaining full-name-like column
     if "FirstName" not in df.columns and "LastName" not in df.columns:
-        for full_col in ["name", "full name", "fullname", "contact name",
-                         "person name", "employee name"]:
-            key = re.sub(r"[^a-z0-9 ]", "", full_col)
+        for alias in ["contact name", "person name", "employee name"]:
+            key = re.sub(r"[^a-z0-9 ]", "", alias)
             match = next((c for c in df.columns
                           if re.sub(r"[^a-z0-9 ]", "", c.lower()) == key), None)
             if match:
@@ -88,6 +147,56 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df["FirstName"] = parts[0]
                 df["LastName"]  = parts[1] if parts.shape[1] > 1 else ""
                 break
+
+    # ── Title fallback: LINKEDIN_HEADLINE when JOB_TITLE is blank ────
+    # Strip " at [Company]" suffix that LinkedIn appends to headlines
+    # e.g. "Service Engineer at Recorders & Medicare Systems" → "Service Engineer"
+    if "linkedin_headline" in df.columns:
+        df["linkedin_headline"] = (
+            df["linkedin_headline"].astype(str)
+            .str.replace(r"\s+at\s+.+$", "", regex=True)
+            .str.strip()
+        )
+    if "Designation" in df.columns and "linkedin_headline" in df.columns:
+        mask = df["Designation"].isna() | (df["Designation"].astype(str).str.strip() == "")
+        df.loc[mask, "Designation"] = df.loc[mask, "linkedin_headline"]
+    elif "linkedin_headline" in df.columns and "Designation" not in df.columns:
+        df["Designation"] = df["linkedin_headline"]
+
+    # ── Company fallback: job_org_linkedin_url → slug, email_domain → domain ─
+    if "Company" not in df.columns or df["Company"].isna().all():
+        if "job_org_linkedin_url" in df.columns:
+            def _slug_to_name(url: str) -> str:
+                url = str(url or "").strip()
+                if not url:
+                    return ""
+                slug = url.rstrip("/").split("/")[-1]
+                return slug.replace("-", " ").title()
+            df["Company"] = df["job_org_linkedin_url"].apply(_slug_to_name)
+    if "Company" in df.columns:
+        mask = df["Company"].isna() | (df["Company"].astype(str).str.strip() == "")
+        if "email_domain" in df.columns:
+            df.loc[mask, "Company"] = df.loc[mask, "email_domain"].apply(
+                lambda d: str(d or "").split(".")[0].title() if d else ""
+            )
+
+    # ── Location synthesis: prefer job_country > city, country_name ──
+    if "Location" not in df.columns:
+        loc_parts = []
+        for col in ["job_city", "city", "job_country", "country_name"]:
+            if col in df.columns:
+                loc_parts.append(col)
+                break  # use first available as the Location string
+        if loc_parts:
+            df["Location"] = df[loc_parts[0]].astype(str).str.strip()
+
+    # ── Industry fallback: LINKEDIN_INDUSTRY when Industry_Hint is blank ─
+    if "linkedin_industry" in df.columns:
+        if "Industry_Hint" not in df.columns:
+            df["Industry_Hint"] = df["linkedin_industry"]
+        else:
+            mask = df["Industry_Hint"].isna() | (df["Industry_Hint"].astype(str).str.strip() == "")
+            df.loc[mask, "Industry_Hint"] = df.loc[mask, "linkedin_industry"]
 
     return df
 
