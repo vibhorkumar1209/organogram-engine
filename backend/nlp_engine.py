@@ -844,20 +844,11 @@ class LayerClassifier:
         company: str = "",
     ) -> tuple[int, float, str]:
         """
-        Full classification pipeline + LLM fallback for unresolved titles.
-        Calls self.classify() first; if confidence <= 0.35 (no rule matched),
-        delegates to Claude Haiku for a one-shot seniority guess.
+        Title classification via overlay → YAML → pattern → fallback.
+        LLM is NOT used here — it is reserved exclusively for Board of
+        Directors and Executive Management enrichment (llm_fetch_leadership).
         """
-        layer, conf, method = self.classify(raw_designation, industry, overlay_region, archetype_id)
-        if conf <= 0.35:
-            try:
-                from llm_fallback import llm_classify_layer
-                llm_layer = llm_classify_layer(raw_designation, industry_hint, company)
-                if llm_layer is not None:
-                    return llm_layer, 0.72, "llm"
-            except Exception as exc:
-                logger.debug(f"LLM fallback import/call failed: {exc}")
-        return layer, conf, method
+        return self.classify(raw_designation, industry, overlay_region, archetype_id)
 
 
 # ─────────────────────────────────────────────────────────────────
