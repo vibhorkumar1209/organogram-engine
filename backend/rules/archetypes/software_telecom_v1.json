@@ -1,0 +1,610 @@
+{
+  "archetype_id": "software_telecom",
+  "version": 1,
+  "name": "Software & Telecom",
+  "industries": [
+    "Software",
+    "High Tech / Technology",
+    "Telecommunications",
+    "Media & Entertainment"
+  ],
+  "common_sub_industries": [
+    "Enterprise SaaS",
+    "Consumer Internet",
+    "Cloud Infrastructure",
+    "Cybersecurity",
+    "Developer Tools",
+    "AI / ML Platform",
+    "Mobile Network Operator",
+    "Cable / Broadband",
+    "Tower Co",
+    "Streaming / OTT",
+    "Studios / Production",
+    "Gaming"
+  ],
+  "departments": [
+    "Engineering",
+    "Product Management",
+    "Design / UX",
+    "Strategy",
+    "Sales",
+    "Customer Success",
+    "Marketing",
+    "Growth",
+    "Operations",
+    "Network Operations (Telco)",
+    "Content (Media)",
+    "Data / ML",
+    "Finance",
+    "HR / People",
+    "Legal",
+    "IT / Security",
+    "BizOps"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Engineering": [
+      {
+        "level": 1,
+        "title": "Chief Technology Officer"
+      },
+      {
+        "level": 2,
+        "title": "SVP Engineering"
+      },
+      {
+        "level": 3,
+        "title": "VP Engineering"
+      },
+      {
+        "level": 4,
+        "title": "Senior Engineering Director / Distinguished Engineer"
+      },
+      {
+        "level": 5,
+        "title": "Engineering Director / Principal Engineer"
+      },
+      {
+        "level": 6,
+        "title": "Senior Engineering Manager / Senior Staff Engineer"
+      },
+      {
+        "level": 7,
+        "title": "Engineering Manager / Staff Engineer"
+      },
+      {
+        "level": 8,
+        "title": "Tech Lead / Senior Software Engineer II"
+      },
+      {
+        "level": 9,
+        "title": "Senior Software Engineer"
+      },
+      {
+        "level": 10,
+        "title": "Software Engineer"
+      }
+    ],
+    "Product Management": [
+      {
+        "level": 1,
+        "title": "Chief Product Officer"
+      },
+      {
+        "level": 2,
+        "title": "SVP Product"
+      },
+      {
+        "level": 3,
+        "title": "VP Product"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Product / Group PM"
+      },
+      {
+        "level": 5,
+        "title": "Director Product / Principal PM"
+      },
+      {
+        "level": 6,
+        "title": "Senior Product Manager"
+      },
+      {
+        "level": 7,
+        "title": "Product Manager"
+      },
+      {
+        "level": 8,
+        "title": "Associate Product Manager"
+      },
+      {
+        "level": 9,
+        "title": "APM Intern"
+      },
+      {
+        "level": 10,
+        "title": "Product Analyst"
+      }
+    ],
+    "Design": [
+      {
+        "level": 1,
+        "title": "Chief Design Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Design"
+      },
+      {
+        "level": 3,
+        "title": "Senior Design Director"
+      },
+      {
+        "level": 4,
+        "title": "Design Director / Principal Designer"
+      },
+      {
+        "level": 5,
+        "title": "Senior Design Manager / Staff Designer"
+      },
+      {
+        "level": 6,
+        "title": "Design Manager / Senior Designer"
+      },
+      {
+        "level": 7,
+        "title": "Designer"
+      },
+      {
+        "level": 8,
+        "title": "Junior Designer"
+      },
+      {
+        "level": 9,
+        "title": "Design Intern"
+      },
+      {
+        "level": 10,
+        "title": "UX Researcher"
+      }
+    ],
+    "Sales": [
+      {
+        "level": 1,
+        "title": "Chief Revenue Officer / CSO"
+      },
+      {
+        "level": 2,
+        "title": "EVP Sales"
+      },
+      {
+        "level": 3,
+        "title": "VP Sales / RVP"
+      },
+      {
+        "level": 4,
+        "title": "Senior Sales Director / Area VP"
+      },
+      {
+        "level": 5,
+        "title": "Sales Director / Regional Sales Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Sales Manager"
+      },
+      {
+        "level": 7,
+        "title": "Sales Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Account Executive"
+      },
+      {
+        "level": 9,
+        "title": "Account Executive"
+      },
+      {
+        "level": 10,
+        "title": "SDR / BDR"
+      }
+    ],
+    "Customer Success": [
+      {
+        "level": 1,
+        "title": "Chief Customer Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Customer Success"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director CS"
+      },
+      {
+        "level": 4,
+        "title": "Director CS"
+      },
+      {
+        "level": 5,
+        "title": "Senior CS Manager"
+      },
+      {
+        "level": 6,
+        "title": "CS Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior CSM"
+      },
+      {
+        "level": 8,
+        "title": "Customer Success Manager"
+      },
+      {
+        "level": 9,
+        "title": "CS Associate"
+      },
+      {
+        "level": 10,
+        "title": "Customer Support Specialist"
+      }
+    ],
+    "Marketing": [
+      {
+        "level": 1,
+        "title": "Chief Marketing Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Marketing"
+      },
+      {
+        "level": 3,
+        "title": "VP Marketing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Marketing Director"
+      },
+      {
+        "level": 5,
+        "title": "Marketing Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Marketing Manager"
+      },
+      {
+        "level": 7,
+        "title": "Marketing Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Marketing Specialist"
+      },
+      {
+        "level": 9,
+        "title": "Marketing Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Marketing Coordinator"
+      }
+    ],
+    "Data / ML": [
+      {
+        "level": 1,
+        "title": "Chief Data Officer / Chief AI Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Data / VP AI"
+      },
+      {
+        "level": 3,
+        "title": "Senior Data Director / Distinguished ML Engineer"
+      },
+      {
+        "level": 4,
+        "title": "Director Data Science / Principal Data Scientist"
+      },
+      {
+        "level": 5,
+        "title": "Senior Data Science Manager / Staff Data Scientist"
+      },
+      {
+        "level": 6,
+        "title": "Data Science Manager / Senior Data Scientist"
+      },
+      {
+        "level": 7,
+        "title": "Senior Data Scientist / ML Engineer"
+      },
+      {
+        "level": 8,
+        "title": "Data Scientist"
+      },
+      {
+        "level": 9,
+        "title": "Data Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Data Analyst"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5,
+      "Senior Director": 4,
+      "Distinguished Engineer": 3,
+      "Principal Engineer": 4,
+      "Staff Engineer": 6,
+      "Fellow": 2
+    },
+    "UK": {
+      "Director": 1,
+      "VP": 4,
+      "Managing Director": 2
+    },
+    "India": {
+      "AVP": 4,
+      "Director": 5,
+      "GM": 4,
+      "DGM": 6,
+      "AGM": 7,
+      "Senior Manager": 6,
+      "Distinguished Engineer": 3,
+      "Principal Engineer": 4,
+      "Staff Engineer": 6
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "執行役員": 3,
+      "部長": 5,
+      "シニアエンジニア": 9
+    },
+    "Singapore": {
+      "VP": 4,
+      "Director": 5
+    },
+    "Israel": {
+      "VP R&D": 3,
+      "Director": 5,
+      "Group Manager": 6,
+      "Team Leader": 8
+    }
+  },
+  "atypical_roles": [
+    "Distinguished Engineer",
+    "Fellow",
+    "Principal Engineer",
+    "Staff Engineer",
+    "Senior Staff Engineer",
+    "Group Product Manager (GPM)",
+    "Principal Product Manager",
+    "Chief AI Officer",
+    "Chief Data Officer",
+    "VP Engineering"
+  ],
+  "notes": [
+    "Tech IC ladder runs in parallel to mgmt: Engineer → Sr Engineer → Staff → Sr Staff → Principal → Distinguished → Fellow.",
+    "Distinguished Engineer ≈ VP-level; Fellow ≈ SVP-level.",
+    "Director in US Tech is generally Level 5, NOT Level 1 (UK) or Level 6 (India IT Services)."
+  ]
+}

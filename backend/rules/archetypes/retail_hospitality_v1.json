@@ -1,0 +1,552 @@
+{
+  "archetype_id": "retail_hospitality",
+  "version": 1,
+  "name": "Retail & Hospitality",
+  "industries": [
+    "Retail",
+    "Wholesale / Distribution",
+    "Hospitality / Travel",
+    "Consumer Services",
+    "Ecommerce"
+  ],
+  "common_sub_industries": [
+    "Mass Retail",
+    "Specialty Retail",
+    "Luxury Retail",
+    "Grocery",
+    "QSR / Fast Food",
+    "Casual Dining",
+    "Hotels & Resorts",
+    "Cruise / Airlines",
+    "Pure-play Ecommerce",
+    "Marketplace",
+    "Distributors",
+    "Travel Tech / OTA"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Operations / Store Ops",
+    "Merchandising / Buying",
+    "Marketing",
+    "Digital / Ecommerce",
+    "Supply Chain",
+    "Loss Prevention",
+    "Customer Experience",
+    "HR",
+    "Legal",
+    "IT",
+    "Compliance"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Stores Officer / COO"
+      },
+      {
+        "level": 2,
+        "title": "EVP Operations"
+      },
+      {
+        "level": 3,
+        "title": "VP Operations"
+      },
+      {
+        "level": 4,
+        "title": "Senior Regional Director"
+      },
+      {
+        "level": 5,
+        "title": "Regional Director / Regional Vice President"
+      },
+      {
+        "level": 6,
+        "title": "District Manager / Area Manager"
+      },
+      {
+        "level": 7,
+        "title": "Store Manager / Hotel General Manager"
+      },
+      {
+        "level": 8,
+        "title": "Assistant Store Manager"
+      },
+      {
+        "level": 9,
+        "title": "Department Lead"
+      },
+      {
+        "level": 10,
+        "title": "Store Associate"
+      }
+    ],
+    "Merchandising": [
+      {
+        "level": 1,
+        "title": "Chief Merchandising Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Merchandising"
+      },
+      {
+        "level": 3,
+        "title": "VP Merchandising"
+      },
+      {
+        "level": 4,
+        "title": "Senior Merchandise Director"
+      },
+      {
+        "level": 5,
+        "title": "Merchandise Director / DMM"
+      },
+      {
+        "level": 6,
+        "title": "Senior Buyer / Senior Merchandise Manager"
+      },
+      {
+        "level": 7,
+        "title": "Buyer / Merchandise Manager"
+      },
+      {
+        "level": 8,
+        "title": "Associate Buyer"
+      },
+      {
+        "level": 9,
+        "title": "Senior Merchandise Planner"
+      },
+      {
+        "level": 10,
+        "title": "Merchandise Planner"
+      }
+    ],
+    "Marketing": [
+      {
+        "level": 1,
+        "title": "Chief Marketing Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Marketing"
+      },
+      {
+        "level": 3,
+        "title": "VP Marketing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Marketing Director"
+      },
+      {
+        "level": 5,
+        "title": "Marketing Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Marketing Manager"
+      },
+      {
+        "level": 7,
+        "title": "Marketing Manager"
+      },
+      {
+        "level": 8,
+        "title": "Marketing Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Marketing Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Marketing Coordinator"
+      }
+    ],
+    "Digital / Ecommerce": [
+      {
+        "level": 1,
+        "title": "Chief Digital Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Digital"
+      },
+      {
+        "level": 3,
+        "title": "VP Ecommerce"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Digital"
+      },
+      {
+        "level": 5,
+        "title": "Director Ecommerce"
+      },
+      {
+        "level": 6,
+        "title": "Senior Ecommerce Manager"
+      },
+      {
+        "level": 7,
+        "title": "Ecommerce Manager"
+      },
+      {
+        "level": 8,
+        "title": "Ecommerce Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Ecommerce Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Ecommerce Analyst"
+      }
+    ],
+    "Supply Chain": [
+      {
+        "level": 1,
+        "title": "Chief Supply Chain Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Supply Chain"
+      },
+      {
+        "level": 3,
+        "title": "VP Supply Chain"
+      },
+      {
+        "level": 4,
+        "title": "Senior Supply Chain Director"
+      },
+      {
+        "level": 5,
+        "title": "Supply Chain Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Supply Chain Manager"
+      },
+      {
+        "level": 7,
+        "title": "Supply Chain Manager"
+      },
+      {
+        "level": 8,
+        "title": "DC / Warehouse Manager"
+      },
+      {
+        "level": 9,
+        "title": "Senior Supply Chain Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Supply Chain Analyst"
+      }
+    ],
+    "Customer Experience": [
+      {
+        "level": 1,
+        "title": "Chief Customer Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Customer Experience"
+      },
+      {
+        "level": 3,
+        "title": "Senior CX Director"
+      },
+      {
+        "level": 4,
+        "title": "CX Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior CX Manager"
+      },
+      {
+        "level": 6,
+        "title": "CX Manager"
+      },
+      {
+        "level": 7,
+        "title": "CX Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior CX Specialist"
+      },
+      {
+        "level": 9,
+        "title": "CX Specialist"
+      },
+      {
+        "level": 10,
+        "title": "Customer Service Representative"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5,
+      "Regional Vice President": 4
+    },
+    "UK": {
+      "Director": 1,
+      "Managing Director": 2,
+      "Regional Director": 4
+    },
+    "Germany": {
+      "Geschäftsführer": 2,
+      "Bereichsleiter": 4
+    },
+    "France": {
+      "Directeur Général": 1,
+      "Directeur Régional": 4
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "店長 (Tenchō)": 7
+    },
+    "India": {
+      "AVP": 4,
+      "GM": 4,
+      "DGM": 6,
+      "AGM": 7
+    },
+    "China": {
+      "总裁": 1,
+      "区域经理 (Qūyù Jīnglǐ)": 6
+    },
+    "SEA": {
+      "Country Manager": 3,
+      "Regional Director": 4
+    }
+  },
+  "atypical_roles": [
+    "Chief Stores Officer",
+    "Chief Merchandising Officer",
+    "Chief Customer Officer",
+    "DMM (Divisional Merchandise Manager)",
+    "GMM (General Merchandise Manager)",
+    "Hotel General Manager",
+    "Cluster General Manager"
+  ]
+}

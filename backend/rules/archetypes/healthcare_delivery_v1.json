@@ -1,0 +1,580 @@
+{
+  "archetype_id": "healthcare_delivery",
+  "version": 1,
+  "name": "Healthcare Delivery",
+  "industries": [
+    "Healthcare Providers"
+  ],
+  "common_sub_industries": [
+    "Acute Care Hospital",
+    "Academic Medical Center",
+    "Multi-specialty Hospital Chain",
+    "Single-specialty Hospital",
+    "Ambulatory Surgical Center",
+    "Diagnostic Chain",
+    "Long-term Care",
+    "Home Healthcare",
+    "Telemedicine"
+  ],
+  "departments": [
+    "Strategy",
+    "Finance",
+    "Clinical Operations",
+    "Nursing",
+    "Medical Affairs",
+    "Quality & Patient Safety",
+    "Pharmacy",
+    "Patient Services",
+    "Operations / Facilities",
+    "HR",
+    "Legal",
+    "IT / EHR",
+    "Compliance / HIPAA",
+    "Revenue Cycle Management",
+    "Marketing",
+    "Research"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Clinical Operations": [
+      {
+        "level": 1,
+        "title": "Chief Medical Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy CMO / SVP Medical"
+      },
+      {
+        "level": 3,
+        "title": "VP Medical Affairs / Department Chair"
+      },
+      {
+        "level": 4,
+        "title": "Senior Medical Director"
+      },
+      {
+        "level": 5,
+        "title": "Medical Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Attending Physician"
+      },
+      {
+        "level": 7,
+        "title": "Attending Physician"
+      },
+      {
+        "level": 8,
+        "title": "Senior Resident / Fellow"
+      },
+      {
+        "level": 9,
+        "title": "Resident"
+      },
+      {
+        "level": 10,
+        "title": "Intern"
+      }
+    ],
+    "Nursing": [
+      {
+        "level": 1,
+        "title": "Chief Nursing Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy CNO / SVP Nursing"
+      },
+      {
+        "level": 3,
+        "title": "VP Nursing"
+      },
+      {
+        "level": 4,
+        "title": "Senior Nursing Director"
+      },
+      {
+        "level": 5,
+        "title": "Director of Nursing"
+      },
+      {
+        "level": 6,
+        "title": "Senior Nurse Manager"
+      },
+      {
+        "level": 7,
+        "title": "Nurse Manager"
+      },
+      {
+        "level": 8,
+        "title": "Charge Nurse"
+      },
+      {
+        "level": 9,
+        "title": "Senior Registered Nurse"
+      },
+      {
+        "level": 10,
+        "title": "Registered Nurse"
+      }
+    ],
+    "Quality": [
+      {
+        "level": 1,
+        "title": "Chief Quality & Safety Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Quality"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Quality"
+      },
+      {
+        "level": 4,
+        "title": "Quality Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Quality Manager"
+      },
+      {
+        "level": 6,
+        "title": "Quality Manager"
+      },
+      {
+        "level": 7,
+        "title": "Quality Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Quality Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Quality Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Quality Coordinator"
+      }
+    ],
+    "Pharmacy": [
+      {
+        "level": 1,
+        "title": "Chief Pharmacy Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Pharmacy"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Pharmacy"
+      },
+      {
+        "level": 4,
+        "title": "Pharmacy Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior Pharmacy Manager"
+      },
+      {
+        "level": 6,
+        "title": "Pharmacy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Lead Pharmacist"
+      },
+      {
+        "level": 8,
+        "title": "Senior Pharmacist"
+      },
+      {
+        "level": 9,
+        "title": "Pharmacist"
+      },
+      {
+        "level": 10,
+        "title": "Pharmacy Technician"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Operating Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Operations"
+      },
+      {
+        "level": 3,
+        "title": "VP Operations"
+      },
+      {
+        "level": 4,
+        "title": "Senior Hospital Administrator"
+      },
+      {
+        "level": 5,
+        "title": "Hospital Administrator / VP Hospital"
+      },
+      {
+        "level": 6,
+        "title": "Senior Operations Manager"
+      },
+      {
+        "level": 7,
+        "title": "Operations Manager"
+      },
+      {
+        "level": 8,
+        "title": "Operations Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Operations Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Operations Analyst"
+      }
+    ],
+    "Revenue Cycle": [
+      {
+        "level": 1,
+        "title": "Chief Revenue Cycle Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Revenue Cycle"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director RCM"
+      },
+      {
+        "level": 4,
+        "title": "RCM Director"
+      },
+      {
+        "level": 5,
+        "title": "Senior RCM Manager"
+      },
+      {
+        "level": 6,
+        "title": "RCM Manager"
+      },
+      {
+        "level": 7,
+        "title": "RCM Lead"
+      },
+      {
+        "level": 8,
+        "title": "Senior Billing Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Billing Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Coder"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ],
+    "Compliance": [
+      {
+        "level": 1,
+        "title": "Chief Compliance Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Compliance"
+      },
+      {
+        "level": 3,
+        "title": "VP Compliance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Compliance"
+      },
+      {
+        "level": 5,
+        "title": "Director Compliance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Compliance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Compliance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Compliance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Compliance Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Compliance Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "VP": 3,
+      "Director": 5,
+      "Department Chair": 3,
+      "Attending": 6
+    },
+    "UK": {
+      "Consultant": 5,
+      "Registrar": 8,
+      "Senior House Officer": 9,
+      "Foundation Doctor": 9,
+      "Trust CEO": 1
+    },
+    "India": {
+      "Medical Director": 4,
+      "HOD": 4,
+      "Consultant": 5,
+      "Senior Resident": 8,
+      "Junior Resident": 9
+    },
+    "Australia": {
+      "Staff Specialist": 5,
+      "Registrar": 8,
+      "Resident Medical Officer": 9
+    }
+  },
+  "atypical_roles": [
+    "Chief Medical Officer",
+    "Chief Nursing Officer",
+    "Chief Quality Officer",
+    "Department Chair",
+    "Attending Physician",
+    "Hospital CEO",
+    "Trust CEO (UK)",
+    "Medical Director"
+  ]
+}

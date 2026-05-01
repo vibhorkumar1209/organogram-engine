@@ -870,6 +870,315 @@ async def get_public_company(
 
 
 # ─────────────────────────────────────────────
+# V2 — 5-Agent Organogram Pipeline
+# ─────────────────────────────────────────────
+#
+# POST /v2/pipeline
+#   Runs the full 5-agent pipeline (Parser → NLP → Reconciler) directly
+#   from a JSON payload. Returns a CanonicalOrganogram JSON.
+#
+# GET  /v2/promote
+#   Runs the nightly LedgerPromoter against the corrections ledger
+#   and returns the PromotionReport summary.
+
+from pydantic import BaseModel as _BaseModel
+from typing import Any as _Any, Optional as _Optional, List as _List
+
+_BACKEND_ROOT = Path(__file__).resolve().parent
+_RULES_DIR    = _BACKEND_ROOT / "rules"
+_LEDGER_PATH  = _BACKEND_ROOT / "output" / "corrections_ledger.jsonl"
+
+
+class V2PersonRecord(_BaseModel):
+    """Minimal representation of a person record for the v2 pipeline."""
+    name: str = ""
+    title: str = ""
+    company: str = ""
+    source_url: str = ""
+    department: _Optional[str] = None
+    geography: _Optional[str] = None
+    tenure: _Optional[str] = None
+    reports_to_name: _Optional[str] = None
+    subsidiary: _Optional[str] = None
+    vendor_function: _Optional[str] = None
+    vendor_level: _Optional[str] = None
+    vendor_persona: _Optional[str] = None
+    job_country: _Optional[str] = None
+    job_country_code: _Optional[str] = None
+    job_country_region: _Optional[str] = None
+    job_continent: _Optional[str] = None
+    job_state: _Optional[str] = None
+    job_city: _Optional[str] = None
+    job_org_linkedin_url: _Optional[str] = None
+    email_domain: _Optional[str] = None
+    linkedin_industry: _Optional[str] = None
+    linkedin_headline: _Optional[str] = None
+
+
+class V2LeaderRecord(_BaseModel):
+    name: str
+    title: str
+    source_url: str = ""
+    source_type: str = "firm_website"
+    is_board: bool = False
+    immutable: bool = True
+
+
+class V2PipelineRequest(_BaseModel):
+    firm: str
+    industry: str
+    org_type: str = "Private"
+    client_archetype: str = "Enterprise"
+    geography_scope: str = "Global"
+    sub_industry: _Optional[str] = None
+    default_region: str = "USA"
+    records: _List[V2PersonRecord]
+    leaders: _List[V2LeaderRecord] = []
+
+
+@app.post("/v2/pipeline")
+async def v2_pipeline(req: V2PipelineRequest):
+    """
+    Run the 5-agent Adaptive Organogram Engine pipeline.
+
+    Accepts person records + optional authoritative leaders in JSON.
+    Returns a CanonicalOrganogram with functional, geographic, and
+    legal-entity views — plus node-level metadata (level, function,
+    region, matched rule, inference note).
+
+    The overlay is the 481-row rules/region_overlay.csv (Africa +
+    Russia/CIS added in v2), backed by 12 archetype JSON files.
+    """
+    try:
+        from organogram.utils.rule_loader import RuleLibrary
+        from organogram.agents.nlp_agent import LinkedInNLPAgent
+        from organogram.agents.reconciler_agent import ReconcilerAgent
+        from organogram.utils.translator import make_google_translator
+        from organogram.schemas.types import (
+            PersonRecord, AuthoritativeLeader,
+        )
+    except ImportError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"organogram package not available: {exc}")
+
+    if not _RULES_DIR.exists():
+        raise HTTPException(status_code=500,
+                            detail="rules/ directory not found in backend")
+
+    # 1 — Load rule library
+    try:
+        rules = RuleLibrary(_RULES_DIR)
+    except Exception as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to load rules: {exc}")
+
+    archetype_data = rules.archetype_for_industry(req.industry)
+    if not archetype_data:
+        supported = list(rules.archetypes.keys())
+        raise HTTPException(
+            status_code=422,
+            detail=f"No archetype for industry '{req.industry}'. "
+                   f"Supported archetype IDs: {supported}",
+        )
+    archetype_id = archetype_data["archetype_id"]
+
+    # 2 — Convert pydantic records → dataclasses
+    persons = [
+        PersonRecord(
+            name=r.name, title=r.title, company=r.company,
+            source_url=r.source_url, department=r.department,
+            geography=r.geography, tenure=r.tenure,
+            reports_to_name=r.reports_to_name, subsidiary=r.subsidiary,
+            vendor_function=r.vendor_function, vendor_level=r.vendor_level,
+            vendor_persona=r.vendor_persona,
+            job_country=r.job_country, job_country_code=r.job_country_code,
+            job_country_region=r.job_country_region,
+            job_continent=r.job_continent, job_state=r.job_state,
+            job_city=r.job_city,
+            job_org_linkedin_url=r.job_org_linkedin_url,
+            email_domain=r.email_domain,
+            linkedin_industry=r.linkedin_industry,
+            linkedin_headline=r.linkedin_headline,
+        )
+        for r in req.records
+    ]
+    leaders = [
+        AuthoritativeLeader(
+            name=L.name, title=L.title, source_url=L.source_url,
+            source_type=L.source_type, is_board=L.is_board,
+            immutable=L.immutable,
+        )
+        for L in req.leaders
+    ]
+
+    # 3 — Agent 3: NLP classification
+    try:
+        translator = make_google_translator()
+        nlp = LinkedInNLPAgent(
+            rules=rules,
+            archetype_id=archetype_id,
+            sub_industry=req.sub_industry,
+            default_region=req.default_region,
+            translator=translator,
+        )
+        normalized = nlp.normalize_all(persons)
+    except Exception as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"NLP agent error: {exc}")
+
+    # 4 — Agent 4: Reconciler
+    try:
+        reconciler = ReconcilerAgent(
+            rules=rules,
+            firm=req.firm,
+            industry=req.industry,
+            org_type=req.org_type,
+            client_archetype=req.client_archetype,
+            geography_scope=req.geography_scope,
+            sub_industry=req.sub_industry,
+        )
+        organogram_result = reconciler.reconcile(leaders, normalized)
+    except Exception as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Reconciler error: {exc}")
+
+    classified = sum(1 for n in normalized if n.function != "Unclassified")
+    return {
+        "status": "ok",
+        "archetype_id": archetype_id,
+        "overlay_rows_loaded": len(rules.overlay_rows),
+        "persons_ingested": len(persons),
+        "persons_classified": classified,
+        "nodes_built": len(organogram_result.nodes),
+        "organogram": organogram_result.to_dict(),
+    }
+
+
+@app.get("/v2/promote")
+async def v2_promote(
+    threshold: int = Query(default=20, ge=1),
+    dry_run: bool = Query(default=True),
+):
+    """
+    Run the §13 nightly LedgerPromoter against corrections_ledger.jsonl.
+
+    - **threshold**: min corrections per pattern to trigger promotion (default 20).
+    - **dry_run**: if true (default), compute report without writing files.
+
+    Returns a PromotionReport with counts of promoted / skipped rules.
+    """
+    try:
+        from organogram.utils.ledger_promoter import LedgerPromoter
+    except ImportError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"organogram package not available: {exc}")
+
+    if not _LEDGER_PATH.exists():
+        return {
+            "status": "no_ledger",
+            "detail": "No corrections ledger found. POST corrections via the SDK first.",
+            "ledger_path": str(_LEDGER_PATH),
+        }
+
+    promoter = LedgerPromoter()
+    report = promoter.promote(
+        ledger_path=_LEDGER_PATH,
+        rules_dir=_RULES_DIR,
+        threshold=threshold,
+        dry_run=dry_run,
+    )
+    return {
+        "status": "ok",
+        "dry_run": dry_run,
+        "threshold": threshold,
+        "total_corrections": report.total_corrections,
+        "eligible_keys": report.eligible_keys,
+        "promoted": report.promoted,
+        "already_in_overlay": report.already_in_overlay,
+        "no_consensus": report.no_consensus,
+        "promoted_rules": [
+            {
+                "archetype": r.archetype, "region": r.region,
+                "sub_industry": r.sub_industry, "title_native": r.title_native,
+                "title_en": r.title_en, "level": r.corrected_level,
+                "function": r.corrected_function,
+                "correction_count": r.correction_count,
+                "analyst_ids": r.analyst_ids,
+            }
+            for r in report.promoted_rules
+        ],
+        "no_consensus_patterns": [
+            {
+                "archetype": s.archetype, "region": s.region,
+                "sub_industry": s.sub_industry, "title_native": s.title_native,
+                "correction_count": s.correction_count,
+                "disagreements": s.disagreements,
+            }
+            for s in report.skipped_no_consensus
+        ],
+        "summary": report.summary_text(),
+    }
+
+
+@app.post("/v2/corrections")
+async def v2_add_correction(correction: dict):
+    """
+    Append a single analyst correction to the corrections ledger (§13).
+
+    Accepts a JSON body matching the CorrectionRecord schema.
+    Required fields: node_id, firm, archetype, archetype_version, region,
+    original_title_native, original_title_en, original_level,
+    original_function, corrected_level, corrected_function, analyst_id.
+    Optional: sub_industry, corrected_reports_to_id, correction_reason.
+    """
+    try:
+        from organogram.utils.corrections_ledger import CorrectionsLedger, CorrectionRecord
+    except ImportError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"organogram package not available: {exc}")
+
+    required = [
+        "node_id", "firm", "archetype", "archetype_version", "region",
+        "original_title_native", "original_title_en", "original_level",
+        "original_function", "corrected_level", "corrected_function", "analyst_id",
+    ]
+    missing = [f for f in required if f not in correction]
+    if missing:
+        raise HTTPException(status_code=422,
+                            detail=f"Missing required fields: {missing}")
+
+    try:
+        record = CorrectionRecord.from_dict(correction)
+        ledger = CorrectionsLedger(_LEDGER_PATH)
+        ledger.append(record)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {
+        "status": "ok",
+        "node_id": record.node_id,
+        "composite_key": list(record.composite_key),
+        "ledger_path": str(_LEDGER_PATH),
+    }
+
+
+@app.get("/v2/corrections/summary")
+async def v2_corrections_summary():
+    """Return a summary of the corrections ledger (totals, by archetype, top patterns)."""
+    try:
+        from organogram.utils.corrections_ledger import CorrectionsLedger
+    except ImportError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"organogram package not available: {exc}")
+
+    ledger = CorrectionsLedger(_LEDGER_PATH)
+    if not _LEDGER_PATH.exists():
+        return {"total_corrections": 0, "unique_title_patterns": 0,
+                "by_archetype": {}, "by_region": {}, "top_patterns": []}
+    return ledger.summary()
+
+
+# ─────────────────────────────────────────────
 # ENTRY
 # ─────────────────────────────────────────────
 if __name__ == "__main__":

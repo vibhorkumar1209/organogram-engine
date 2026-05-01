@@ -1,0 +1,479 @@
+{
+  "archetype_id": "professional_it_services",
+  "version": 1,
+  "name": "Professional & IT Services",
+  "industries": [
+    "IT Services",
+    "Business Services / Professional Services"
+  ],
+  "common_sub_industries": [
+    "Tier-1 IT Services (TCS/Infy/Wipro scale)",
+    "Mid-tier IT Services",
+    "Boutique Consulting",
+    "Big-4 Consulting",
+    "Strategy Consulting (MBB)",
+    "Engineering Services / ER&D",
+    "BPO / KPO",
+    "Audit & Assurance",
+    "Tax Advisory",
+    "Legal Services"
+  ],
+  "departments": [
+    "Delivery",
+    "Sales / Account Management",
+    "Practice / Consulting",
+    "Solutioning / Pre-sales",
+    "Strategy",
+    "Finance",
+    "Marketing",
+    "HR / People",
+    "Legal",
+    "IT",
+    "Quality",
+    "L&D",
+    "Innovation / Centers of Excellence"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Delivery": [
+      {
+        "level": 1,
+        "title": "Chief Delivery Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Delivery / President — Delivery"
+      },
+      {
+        "level": 3,
+        "title": "SVP Delivery"
+      },
+      {
+        "level": 4,
+        "title": "Senior VP Delivery"
+      },
+      {
+        "level": 5,
+        "title": "VP Delivery / Delivery Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Delivery Manager / Senior Manager"
+      },
+      {
+        "level": 7,
+        "title": "Delivery Manager / Project Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Tech Lead / Module Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Software Engineer"
+      },
+      {
+        "level": 10,
+        "title": "Software Engineer"
+      }
+    ],
+    "Practice / Consulting": [
+      {
+        "level": 1,
+        "title": "Senior Partner / Managing Partner"
+      },
+      {
+        "level": 2,
+        "title": "Partner"
+      },
+      {
+        "level": 3,
+        "title": "Principal / Associate Partner"
+      },
+      {
+        "level": 4,
+        "title": "Director / Senior Engagement Manager"
+      },
+      {
+        "level": 5,
+        "title": "Engagement Manager"
+      },
+      {
+        "level": 6,
+        "title": "Senior Manager"
+      },
+      {
+        "level": 7,
+        "title": "Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Consultant"
+      },
+      {
+        "level": 9,
+        "title": "Consultant"
+      },
+      {
+        "level": 10,
+        "title": "Analyst"
+      }
+    ],
+    "Sales": [
+      {
+        "level": 1,
+        "title": "Chief Sales Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Sales"
+      },
+      {
+        "level": 3,
+        "title": "SVP Sales / Group Account VP"
+      },
+      {
+        "level": 4,
+        "title": "Senior Client Partner / Senior VP Accounts"
+      },
+      {
+        "level": 5,
+        "title": "Client Partner / Account Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior Account Manager"
+      },
+      {
+        "level": 7,
+        "title": "Account Manager"
+      },
+      {
+        "level": 8,
+        "title": "Senior Business Development Manager"
+      },
+      {
+        "level": 9,
+        "title": "BDM"
+      },
+      {
+        "level": 10,
+        "title": "Inside Sales"
+      }
+    ],
+    "Solutioning / Pre-sales": [
+      {
+        "level": 1,
+        "title": "Chief Solutions Officer"
+      },
+      {
+        "level": 2,
+        "title": "VP Solutions"
+      },
+      {
+        "level": 3,
+        "title": "Senior Director Solutions"
+      },
+      {
+        "level": 4,
+        "title": "Director Solutions / Senior Solution Architect"
+      },
+      {
+        "level": 5,
+        "title": "Senior Solution Architect"
+      },
+      {
+        "level": 6,
+        "title": "Solution Architect"
+      },
+      {
+        "level": 7,
+        "title": "Senior Pre-sales Manager"
+      },
+      {
+        "level": 8,
+        "title": "Pre-sales Manager"
+      },
+      {
+        "level": 9,
+        "title": "Senior Pre-sales Consultant"
+      },
+      {
+        "level": 10,
+        "title": "Pre-sales Consultant"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ],
+    "IT": [
+      {
+        "level": 1,
+        "title": "Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP IT"
+      },
+      {
+        "level": 3,
+        "title": "VP IT"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director IT"
+      },
+      {
+        "level": 5,
+        "title": "Director IT"
+      },
+      {
+        "level": 6,
+        "title": "Senior IT Manager"
+      },
+      {
+        "level": 7,
+        "title": "IT Manager"
+      },
+      {
+        "level": 8,
+        "title": "IT Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior IT Analyst"
+      },
+      {
+        "level": 10,
+        "title": "IT Analyst"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "Senior Partner": 1,
+      "Partner": 2,
+      "Principal": 3,
+      "Director": 5,
+      "Manager": 7,
+      "Senior Consultant": 8,
+      "Consultant": 9
+    },
+    "UK": {
+      "Partner": 2,
+      "Director": 3,
+      "Senior Manager": 5,
+      "Manager": 7,
+      "Associate Director": 4,
+      "Engagement Manager": 5
+    },
+    "India": {
+      "President": 2,
+      "EVP": 2,
+      "SVP": 3,
+      "VP": 3,
+      "AVP": 4,
+      "Senior Director": 4,
+      "Director": 6,
+      "Senior Manager": 6,
+      "Manager": 7,
+      "Module Lead": 8,
+      "Tech Lead": 8,
+      "Senior Software Engineer": 9,
+      "Software Engineer": 10,
+      "Programmer Analyst": 10,
+      "Trainee": 10
+    },
+    "Singapore / SEA": {
+      "Managing Director": 2,
+      "Partner": 2,
+      "Director": 4,
+      "Manager": 7
+    },
+    "Japan": {
+      "代表取締役": 1,
+      "パートナー (Pātonā)": 2,
+      "シニアマネージャー": 5
+    }
+  },
+  "atypical_roles": [
+    "Senior Partner",
+    "Managing Partner",
+    "Partner",
+    "Principal",
+    "Engagement Manager",
+    "Client Partner",
+    "Account Director",
+    "Senior Director — Delivery",
+    "Module Lead",
+    "Tech Lead"
+  ],
+  "notes": [
+    "Indian IT Services has the most depth — Director can be Level 6 (mid-mgr), AVP is Level 4, AGM is Level 7.",
+    "Consulting (MBB / Big-4) has Partner/Principal hierarchy — Partner = Level 2, Principal = Level 3, Engagement Manager = Level 5."
+  ]
+}

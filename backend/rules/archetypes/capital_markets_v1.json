@@ -1,0 +1,613 @@
+{
+  "archetype_id": "capital_markets",
+  "version": 1,
+  "name": "Capital Markets",
+  "industries": [
+    "Financial Markets / Capital Markets / Investments"
+  ],
+  "common_sub_industries": [
+    "Bulge-bracket Investment Bank",
+    "Boutique Investment Bank",
+    "Asset Manager (Long-only)",
+    "Hedge Fund",
+    "Private Equity",
+    "Venture Capital",
+    "Sovereign Wealth Fund",
+    "Pension Fund",
+    "Family Office",
+    "Stock Exchange",
+    "Custodian",
+    "Securities Broker",
+    "Market Infrastructure"
+  ],
+  "departments": [
+    "Investment Banking",
+    "Sales & Trading",
+    "Equity Research",
+    "Fixed Income Research",
+    "Asset Management",
+    "Wealth Management",
+    "Risk",
+    "Compliance",
+    "Operations / Middle Office",
+    "Strategy",
+    "Finance",
+    "Technology",
+    "HR",
+    "Legal",
+    "Internal Audit"
+  ],
+  "function_level_cascade": {
+    "Strategy": [
+      {
+        "level": 1,
+        "title": "Chief Executive Officer"
+      },
+      {
+        "level": 2,
+        "title": "Chief Strategy Officer"
+      },
+      {
+        "level": 3,
+        "title": "VP Strategy"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Strategy"
+      },
+      {
+        "level": 5,
+        "title": "Director Strategy"
+      },
+      {
+        "level": 6,
+        "title": "Senior Strategy Manager"
+      },
+      {
+        "level": 7,
+        "title": "Strategy Manager"
+      },
+      {
+        "level": 8,
+        "title": "Strategy Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Strategy Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Strategy Analyst"
+      }
+    ],
+    "Finance": [
+      {
+        "level": 1,
+        "title": "Chief Financial Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Finance"
+      },
+      {
+        "level": 3,
+        "title": "VP Finance"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Finance"
+      },
+      {
+        "level": 5,
+        "title": "Director Finance"
+      },
+      {
+        "level": 6,
+        "title": "Senior Finance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Finance Manager"
+      },
+      {
+        "level": 8,
+        "title": "Finance Lead"
+      },
+      {
+        "level": 9,
+        "title": "Senior Financial Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Financial Analyst"
+      }
+    ],
+    "Investment Banking": [
+      {
+        "level": 1,
+        "title": "Chairman / Head of Investment Banking"
+      },
+      {
+        "level": 2,
+        "title": "Co-Head of IB / Vice Chairman"
+      },
+      {
+        "level": 3,
+        "title": "Group Head / Managing Director (MD)"
+      },
+      {
+        "level": 4,
+        "title": "Executive Director (ED) / Senior MD"
+      },
+      {
+        "level": 5,
+        "title": "Director / Principal"
+      },
+      {
+        "level": 6,
+        "title": "Vice President (VP) — Investment Banking"
+      },
+      {
+        "level": 7,
+        "title": "Associate"
+      },
+      {
+        "level": 8,
+        "title": "Senior Analyst (Year 3)"
+      },
+      {
+        "level": 9,
+        "title": "Analyst (Year 2)"
+      },
+      {
+        "level": 10,
+        "title": "Analyst (Year 1)"
+      }
+    ],
+    "Sales & Trading": [
+      {
+        "level": 1,
+        "title": "Head of Markets / Global Head"
+      },
+      {
+        "level": 2,
+        "title": "Co-Head Sales & Trading"
+      },
+      {
+        "level": 3,
+        "title": "Managing Director (MD) — Trading Desk Head"
+      },
+      {
+        "level": 4,
+        "title": "Executive Director / Senior Trader"
+      },
+      {
+        "level": 5,
+        "title": "Director / Senior Trader"
+      },
+      {
+        "level": 6,
+        "title": "Vice President — Trader"
+      },
+      {
+        "level": 7,
+        "title": "Associate Trader"
+      },
+      {
+        "level": 8,
+        "title": "Senior Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Trader / Trading Assistant"
+      }
+    ],
+    "Asset Management": [
+      {
+        "level": 1,
+        "title": "CIO / Head of Asset Management"
+      },
+      {
+        "level": 2,
+        "title": "Co-CIO / Deputy CIO"
+      },
+      {
+        "level": 3,
+        "title": "Managing Director — Portfolio Management"
+      },
+      {
+        "level": 4,
+        "title": "Senior Portfolio Manager"
+      },
+      {
+        "level": 5,
+        "title": "Portfolio Manager"
+      },
+      {
+        "level": 6,
+        "title": "Associate Portfolio Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior Research Analyst"
+      },
+      {
+        "level": 8,
+        "title": "Research Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Junior Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Investment Associate"
+      }
+    ],
+    "Equity Research": [
+      {
+        "level": 1,
+        "title": "Head of Equity Research"
+      },
+      {
+        "level": 2,
+        "title": "Co-Head Research"
+      },
+      {
+        "level": 3,
+        "title": "Managing Director — Senior Equity Analyst"
+      },
+      {
+        "level": 4,
+        "title": "Director — Equity Analyst (Senior)"
+      },
+      {
+        "level": 5,
+        "title": "Equity Analyst (Lead Sector)"
+      },
+      {
+        "level": 6,
+        "title": "Vice President — Equity Analyst"
+      },
+      {
+        "level": 7,
+        "title": "Associate Analyst"
+      },
+      {
+        "level": 8,
+        "title": "Senior Research Associate"
+      },
+      {
+        "level": 9,
+        "title": "Research Associate"
+      },
+      {
+        "level": 10,
+        "title": "Junior Research Associate"
+      }
+    ],
+    "Risk": [
+      {
+        "level": 1,
+        "title": "Chief Risk Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy CRO"
+      },
+      {
+        "level": 3,
+        "title": "Managing Director — Risk"
+      },
+      {
+        "level": 4,
+        "title": "Director — Risk"
+      },
+      {
+        "level": 5,
+        "title": "Risk VP"
+      },
+      {
+        "level": 6,
+        "title": "Risk Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior Risk Analyst"
+      },
+      {
+        "level": 8,
+        "title": "Risk Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Junior Risk Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Risk Associate"
+      }
+    ],
+    "Compliance": [
+      {
+        "level": 1,
+        "title": "Chief Compliance Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy CCO"
+      },
+      {
+        "level": 3,
+        "title": "MD — Compliance"
+      },
+      {
+        "level": 4,
+        "title": "Director — Compliance"
+      },
+      {
+        "level": 5,
+        "title": "Compliance VP"
+      },
+      {
+        "level": 6,
+        "title": "Compliance Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior Compliance Officer"
+      },
+      {
+        "level": 8,
+        "title": "Compliance Officer"
+      },
+      {
+        "level": 9,
+        "title": "Compliance Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Junior Compliance Analyst"
+      }
+    ],
+    "Operations": [
+      {
+        "level": 1,
+        "title": "Chief Operating Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy COO"
+      },
+      {
+        "level": 3,
+        "title": "MD — Operations"
+      },
+      {
+        "level": 4,
+        "title": "Director — Operations"
+      },
+      {
+        "level": 5,
+        "title": "Operations VP"
+      },
+      {
+        "level": 6,
+        "title": "Operations Manager"
+      },
+      {
+        "level": 7,
+        "title": "Senior Operations Analyst"
+      },
+      {
+        "level": 8,
+        "title": "Operations Analyst"
+      },
+      {
+        "level": 9,
+        "title": "Junior Analyst"
+      },
+      {
+        "level": 10,
+        "title": "Operations Associate"
+      }
+    ],
+    "Technology": [
+      {
+        "level": 1,
+        "title": "CTO / Chief Information Officer"
+      },
+      {
+        "level": 2,
+        "title": "Deputy CTO"
+      },
+      {
+        "level": 3,
+        "title": "MD — Technology"
+      },
+      {
+        "level": 4,
+        "title": "Director — Technology"
+      },
+      {
+        "level": 5,
+        "title": "Technology VP"
+      },
+      {
+        "level": 6,
+        "title": "Senior Software Engineer"
+      },
+      {
+        "level": 7,
+        "title": "Software Engineer"
+      },
+      {
+        "level": 8,
+        "title": "Junior Software Engineer"
+      },
+      {
+        "level": 9,
+        "title": "Senior Quant"
+      },
+      {
+        "level": 10,
+        "title": "Quant Developer"
+      }
+    ],
+    "HR": [
+      {
+        "level": 1,
+        "title": "Chief Human Resources Officer"
+      },
+      {
+        "level": 2,
+        "title": "EVP Human Resources"
+      },
+      {
+        "level": 3,
+        "title": "VP Human Resources"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director HR"
+      },
+      {
+        "level": 5,
+        "title": "HR Director"
+      },
+      {
+        "level": 6,
+        "title": "Senior HR Manager"
+      },
+      {
+        "level": 7,
+        "title": "HR Manager"
+      },
+      {
+        "level": 8,
+        "title": "HR Business Partner"
+      },
+      {
+        "level": 9,
+        "title": "Senior HR Analyst"
+      },
+      {
+        "level": 10,
+        "title": "HR Analyst"
+      }
+    ],
+    "Legal": [
+      {
+        "level": 1,
+        "title": "General Counsel"
+      },
+      {
+        "level": 2,
+        "title": "Deputy General Counsel"
+      },
+      {
+        "level": 3,
+        "title": "VP Legal"
+      },
+      {
+        "level": 4,
+        "title": "Senior Director Legal"
+      },
+      {
+        "level": 5,
+        "title": "Director Legal"
+      },
+      {
+        "level": 6,
+        "title": "Senior Counsel"
+      },
+      {
+        "level": 7,
+        "title": "Counsel"
+      },
+      {
+        "level": 8,
+        "title": "Senior Attorney"
+      },
+      {
+        "level": 9,
+        "title": "Attorney"
+      },
+      {
+        "level": 10,
+        "title": "Paralegal"
+      }
+    ]
+  },
+  "region_overrides": {
+    "USA": {
+      "MD": 3,
+      "Managing Director": 3,
+      "ED": 4,
+      "Executive Director": 4,
+      "Director": 5,
+      "VP": 6,
+      "Vice President": 6,
+      "Associate": 7,
+      "Senior Analyst": 8,
+      "Analyst": 9
+    },
+    "UK": {
+      "Managing Director": 3,
+      "Executive Director": 4,
+      "Director": 4,
+      "Vice President": 6,
+      "Associate Director": 5
+    },
+    "Singapore": {
+      "Managing Director": 3,
+      "Executive Director": 4,
+      "Director": 5,
+      "Vice President": 6
+    },
+    "Japan": {
+      "代表取締役社長": 1,
+      "マネージング・ディレクター": 3,
+      "ヴァイス・プレジデント": 6
+    },
+    "India": {
+      "Managing Director": 3,
+      "Executive Director": 4,
+      "Vice President": 6,
+      "Associate Director": 5,
+      "AVP": 7,
+      "Senior Manager": 7,
+      "Manager": 8
+    },
+    "Switzerland": {
+      "Managing Director": 3,
+      "Director": 5,
+      "Vice President": 6
+    },
+    "GCC": {
+      "Group CEO": 1,
+      "MD": 3,
+      "Director": 5,
+      "VP": 6
+    }
+  },
+  "atypical_roles": [
+    "Managing Director (MD)",
+    "Executive Director (ED)",
+    "Portfolio Manager",
+    "Senior Portfolio Manager",
+    "Quant Researcher",
+    "Distinguished Engineer (Tech)",
+    "Vice Chairman",
+    "Senior Advisor"
+  ],
+  "notes": [
+    "VP in capital markets is a MID-MANAGER level (Level 6), NOT a senior leader. This is the most common cause of incorrect level inference in this archetype.",
+    "MD (Managing Director) is the senior-leader equivalent (Level 3).",
+    "Analyst → Associate → VP → Director → ED → MD is the canonical IB ladder."
+  ]
+}
