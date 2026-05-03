@@ -220,10 +220,20 @@ _dag: OrganogramDAG | None = None
 _db:  OrganogramDB  | None = None
 
 
+_EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
+                "stats": {"total_nodes": 0, "total_edges": 0,
+                          "people_nodes": 0, "ghost_nodes": 0, "max_depth": 0}}
+
+
 def _require_dag():
+    """Return (dag, db) or raise — callers that prefer empty data use _dag_or_none()."""
     if _dag is None or _db is None:
         raise HTTPException(status_code=400, detail="No dataset loaded. POST /upload first.")
     return _dag, _db
+
+
+def _dag_loaded() -> bool:
+    return _dag is not None and _db is not None
 
 
 # ─────────────────────────────────────────────
@@ -273,7 +283,12 @@ async def upload_file(file: UploadFile = File(...),
     if len(records) > MAX_ROWS:
         records = records[:MAX_ROWS]
 
-    _dag, _db = build_from_records(records, company_name=company_name)
+    try:
+        _dag, _db = build_from_records(records, company_name=company_name)
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500,
+                            detail=f"Pipeline failed: {e}\n{traceback.format_exc()}")
 
     # Report which canonical fields were found
     canonical = {"FirstName", "LastName", "Designation", "Company",
@@ -318,8 +333,11 @@ async def load_demo():
 @app.get("/graph")
 def get_full_graph():
     """Return full node + edge list for the frontend renderer."""
+    if not _dag_loaded():
+        return {**_EMPTY_GRAPH}
     dag, _ = _require_dag()
     return {
+        "loaded": True,
         "nodes": dag.get_flat_nodes(),
         "edges": dag.get_edges(),
         "stats": dag.stats(),
@@ -329,6 +347,8 @@ def get_full_graph():
 @app.get("/tree")
 def get_tree(root: str = Query("root_global"), max_depth: int = Query(20)):
     """Return nested tree JSON rooted at `root`."""
+    if not _dag_loaded():
+        return {"loaded": False, "id": root, "children": []}
     dag, _ = _require_dag()
     tree = dag.get_subtree(root, max_depth=max_depth)
     if not tree:
@@ -339,6 +359,8 @@ def get_tree(root: str = Query("root_global"), max_depth: int = Query(20)):
 @app.get("/subtree")
 def get_subtree_db(root: str = Query("root_global")):
     """Recursive CTE from SQLite — flat list with depth."""
+    if not _dag_loaded():
+        return {"loaded": False, "nodes": []}
     _, db = _require_dag()
     return db.recursive_subtree(root)
 
@@ -346,14 +368,19 @@ def get_subtree_db(root: str = Query("root_global")):
 @app.get("/search")
 def search_nodes(q: str = Query(..., min_length=1)):
     """Full-text search across node labels, sectors, types."""
+    if not _dag_loaded():
+        return {"loaded": False, "results": []}
     _, db = _require_dag()
     return db.search(q)
 
 
 @app.get("/stats")
 def get_stats():
+    if not _dag_loaded():
+        return {"loaded": False, "total_nodes": 0, "total_edges": 0,
+                "people_nodes": 0, "ghost_nodes": 0, "max_depth": 0}
     dag, _ = _require_dag()
-    return dag.stats()
+    return {"loaded": True, **dag.stats()}
 
 
 @app.get("/industries")
@@ -375,6 +402,8 @@ def get_executives(dept_id: str = Query(...)):
     Walk the DAG from dept_id and return all person nodes (sorted by layer),
     skipping ghost/placeholder nodes entirely.
     """
+    if not _dag_loaded():
+        return {"loaded": False, "executives": [], "count": 0}
     dag, _ = _require_dag()
     if dept_id not in dag.G:
         raise HTTPException(status_code=404, detail=f"Node '{dept_id}' not found.")
