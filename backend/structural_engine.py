@@ -36,6 +36,131 @@ NODE_GHOST     = "ghost"
 
 # Accepted top-level (primary) department names.
 # Any name NOT in this set is treated as either a secondary/team name
+# ── Fix 3: Sub-department (dept_secondary) canonical hierarchy ───────────────
+# Maps raw/vendor dept_secondary values → rational sub-department names
+# that fit within the expected parent department hierarchy.
+#
+# Sales parent should produce: Account Management | New Business | Pre-Sales |
+#   Sales Operations | Channel & Partners | Sales & Account Management |
+#   Sales & Commercial | Inside Sales
+# Marketing parent should produce: Brand | Digital Marketing | Content |
+#   Performance Marketing | Product Marketing | Events | Market Research
+# Finance parent: FP&A | Accounting | Treasury | Tax | Internal Audit |
+#   Investor Relations | Financial Reporting
+# etc.
+#
+# Any sub-dept that doesn't fit a rational model is merged into its parent.
+_SUBDEPT_REMAP: dict[str, str] = {
+    # Programme / Project / PMO — never a sub-dept name
+    "programme":                    "",   # merge into parent
+    "programme management":         "",
+    "programme delivery":           "",
+    "project management":           "",
+    "project office":               "",
+    "pmo":                          "",
+    "delivery":                     "",
+    # Generic / non-rational
+    "general":                      "",
+    "admin":                        "",
+    "administration":               "",
+    "support":                      "",
+    "general management":           "",
+    # Sales sub-depts
+    "account management":           "Account Management",
+    "key accounts":                 "Account Management",
+    "strategic accounts":           "Account Management",
+    "enterprise accounts":          "Account Management",
+    "named accounts":               "Account Management",
+    "new business":                 "New Business Development",
+    "new business development":     "New Business Development",
+    "business development":         "New Business Development",
+    "pre-sales":                    "Pre-Sales & Solutioning",
+    "presales":                     "Pre-Sales & Solutioning",
+    "solution engineering":         "Pre-Sales & Solutioning",
+    "sales operations":             "Sales Operations",
+    "sales ops":                    "Sales Operations",
+    "revenue operations":           "Sales Operations",
+    "revops":                       "Sales Operations",
+    "sales enablement":             "Sales Operations",
+    "inside sales":                 "Inside Sales",
+    "telesales":                    "Inside Sales",
+    "channel":                      "Channel & Partners",
+    "channel management":           "Channel & Partners",
+    "channel sales":                "Channel & Partners",
+    "partner management":           "Channel & Partners",
+    "partnerships":                 "Channel & Partners",
+    "commercial":                   "Sales & Commercial",
+    "sales & commercial":           "Sales & Commercial",
+    "sales & account management":   "Sales & Account Management",
+    # Marketing sub-depts
+    "brand":                        "Brand & Communications",
+    "brand management":             "Brand & Communications",
+    "brand & marketing":            "Brand & Communications",
+    "digital marketing":            "Digital & Performance Marketing",
+    "performance marketing":        "Digital & Performance Marketing",
+    "paid media":                   "Digital & Performance Marketing",
+    "seo":                          "Digital & Performance Marketing",
+    "content":                      "Content & Creative",
+    "content marketing":            "Content & Creative",
+    "creative":                     "Content & Creative",
+    "design":                       "Content & Creative",
+    "product marketing":            "Product Marketing",
+    "events":                       "Events & Sponsorship",
+    "market research":              "Market Research & Insights",
+    "consumer insights":            "Market Research & Insights",
+    "trade marketing":              "Trade Marketing",
+    # Finance sub-depts
+    "fp&a":                         "FP&A",
+    "financial planning":           "FP&A",
+    "budgeting":                    "FP&A",
+    "forecasting":                  "FP&A",
+    "accounting":                   "Accounting & Reporting",
+    "financial reporting":          "Accounting & Reporting",
+    "general ledger":               "Accounting & Reporting",
+    "treasury":                     "Treasury",
+    "cash management":              "Treasury",
+    "tax":                          "Tax",
+    "direct tax":                   "Tax",
+    "indirect tax":                 "Tax",
+    "internal audit":               "Internal Audit",
+    "audit":                        "Internal Audit",
+    "investor relations":           "Investor Relations",
+    # HR sub-depts
+    "talent acquisition":           "Talent Acquisition",
+    "recruitment":                  "Talent Acquisition",
+    "learning & development":       "Learning & Development",
+    "l&d":                          "Learning & Development",
+    "training":                     "Learning & Development",
+    "compensation & benefits":      "Compensation & Benefits",
+    "c&b":                          "Compensation & Benefits",
+    "hrbp":                         "HR Business Partnering",
+    "hr business partner":          "HR Business Partnering",
+    "people analytics":             "People Analytics",
+    "workforce planning":           "People Analytics",
+    # Technology sub-depts
+    "infrastructure":               "IT Infrastructure",
+    "it infrastructure":            "IT Infrastructure",
+    "cybersecurity":                "Information Security",
+    "security":                     "Information Security",
+    "information security":         "Information Security",
+    "application development":      "Application Development",
+    "software development":         "Application Development",
+    "enterprise architecture":      "Enterprise Architecture",
+    "data engineering":             "Data Engineering",
+    "data science":                 "Data & Analytics",
+    "analytics":                    "Data & Analytics",
+    # Operations sub-depts
+    "supply chain":                 "Supply Chain",
+    "logistics":                    "Logistics",
+    "warehousing":                  "Logistics",
+    "quality":                      "Quality & Compliance",
+    "quality assurance":            "Quality & Compliance",
+    "hse":                          "Health, Safety & Environment",
+    "health & safety":              "Health, Safety & Environment",
+    "maintenance":                  "Asset & Maintenance",
+    "facilities":                   "Facilities Management",
+}
+
 # or an industry-specific label and gets remapped via _DEPT_REMAP.
 _CANONICAL_PRIMARY: frozenset[str] = frozenset({
     "Board of Management",
@@ -155,35 +280,94 @@ _DEPT_REMAP: dict[str, str] = {
     "service delivery":                 "Operations",
     "facilities":                       "Operations",
     "real estate":                      "Operations",
+    "quality":                          "Operations",
+    "quality assurance":                "Operations",
+    "quality control":                  "Operations",
+    "health & safety":                  "Operations",
+    "hse":                              "Operations",
+    "ehs":                              "Operations",
+    "maintenance":                      "Operations",
+    "technical services":               "Operations",
+    "field services":                   "Operations",
+    "service engineering":              "Engineering",
+    # Programme / Project — Fix 4: "Programme" is not a department
+    "programme":                        "Strategy",
+    "programme management":             "Strategy",
+    "programme management office":      "Strategy",
+    "programme delivery":               "Strategy",
+    "project management":               "Strategy",
+    "project management office":        "Strategy",
+    "pmo":                              "Strategy",
+    "epmo":                             "Strategy",
+    "delivery":                         "Operations",
+    "delivery management":              "Operations",
+    "project delivery":                 "Operations",
+    "project office":                   "Strategy",
+    # Admin / General — non-rational catch-alls
+    "admin":                            "Operations",
+    "administration":                   "Operations",
+    "support":                          "Operations",
+    "shared services":                  "Operations",
+    "business support":                 "Operations",
+    "back office":                      "Operations",
+    "office management":                "Operations",
     # Supply chain
     "logistics":                        "Supply Chain",
     "warehousing":                      "Supply Chain",
     "distribution":                     "Supply Chain",
     "sourcing":                         "Procurement",
+    "indirect procurement":             "Procurement",
+    "direct procurement":               "Procurement",
     # Legal
     "legal & regulatory":               "Legal & Compliance",
     "regulatory":                       "Legal & Compliance",
+    "regulatory affairs":               "Legal & Compliance",
     "compliance & legal":               "Legal & Compliance",
+    "governance":                       "Legal & Compliance",
+    "governance risk & compliance":     "Risk & Compliance",
+    "grc":                              "Risk & Compliance",
     # Risk
     "risk":                             "Risk Management",
     "credit risk":                      "Risk Management",
     "market risk":                      "Risk Management",
+    "operational risk":                 "Risk Management",
     "enterprise risk":                  "Risk Management",
     "risk advisory":                    "Risk Management",
     # R&D
     "r&d":                              "Research & Development",
     "innovation":                       "Research & Development",
     "product & engineering":            "Engineering",
+    "research & development":           "Research & Development",
     # Customer
     "customer service":                 "Customer Experience",
     "customer support":                 "Customer Experience",
     "client services":                  "Customer Experience",
     "client success":                   "Customer Success",
-    # Strategy
+    "after sales":                      "Customer Experience",
+    "after-sales":                      "Customer Experience",
+    "post sales":                       "Customer Experience",
+    "service":                          "Customer Experience",
+    # Strategy / Corporate
     "corporate strategy":               "Strategy",
     "group strategy":                   "Strategy",
     "strategy & corporate development": "Strategy",
     "business strategy":                "Strategy",
+    "transformation":                   "Strategy",
+    "business transformation":          "Strategy",
+    "digital transformation":           "Strategy",
+    "change management":                "Strategy",
+    # Communications / PR
+    "public relations":                 "Communications",
+    "pr":                               "Communications",
+    "corporate communications":         "Communications",
+    "internal communications":          "Communications",
+    "external affairs":                 "Communications",
+    "public affairs":                   "Communications",
+    # Sustainability / ESG
+    "esg":                              "Sustainability",
+    "sustainability & esg":             "Sustainability",
+    "environment":                      "Sustainability",
+    "csr":                              "Sustainability",
 }
 
 
@@ -226,6 +410,27 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
 
     # Ultimate fallback
     return "Operations"
+
+
+def _canonical_subdept(dept_secondary: str) -> str:
+    """
+    Normalize a dept_secondary value using _SUBDEPT_REMAP.
+
+    Returns:
+      - The remapped canonical sub-dept name (e.g. "Account Management")
+      - "" if the sub-dept should be merged into the parent (e.g. "Programme")
+      - The original value stripped if it's not in the remap (pass-through)
+    """
+    if not dept_secondary or not dept_secondary.strip():
+        return ""
+    key = dept_secondary.strip().lower()
+    if key in _SUBDEPT_REMAP:
+        return _SUBDEPT_REMAP[key]   # "" means merge into parent
+    # Partial match for compound names not explicitly listed
+    for remap_key, remap_val in _SUBDEPT_REMAP.items():
+        if remap_key and remap_key in key:
+            return remap_val
+    return dept_secondary.strip()
 
 
 # Department display order — lower number = shown first
@@ -421,8 +626,11 @@ class OrganogramDAG:
         # Enforce canonical department names and layer-based overrides
         # (Board L0 → "Board of Management", C-Suite L1-2 → "Executive Management")
         dept_p = _canonical_dept(rec.dept_primary, rec.layer)
-        dept_s = rec.dept_secondary if rec.layer > 2 else ""
+        dept_s = _canonical_subdept(rec.dept_secondary if rec.layer > 2 else "")
         dept_t = rec.dept_tertiary  if rec.layer > 2 else ""
+        # If sub-dept remapped to "" (merge into parent) treat as no sub-dept
+        if not dept_s:
+            dept_t = ""
 
         leaf_dept_id = self.ensure_department(
             rec.region, rec.sector,

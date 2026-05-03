@@ -37,6 +37,82 @@ from nlp_engine import NLPEngine, ClassificationResult
 
 logger = logging.getLogger(__name__)
 
+# ── Fix 2: Bare department names as designations ─────────────────────────────
+# A title that is ONLY a department/function keyword (e.g. "Sales", "Marketing",
+# "Engineering", "Programme") contains no seniority signal and cannot indicate a
+# department head or team lead. Such records are capped at IC level (L8+).
+# We also remap the dept to the correct canonical name.
+_BARE_DEPT_NAMES: dict[str, str] = {
+    # key (lowercase) → canonical dept name
+    "sales":              "Sales",
+    "marketing":          "Marketing",
+    "engineering":        "Engineering",
+    "operations":         "Operations",
+    "finance":            "Finance",
+    "hr":                 "Human Resources",
+    "human resources":    "Human Resources",
+    "legal":              "Legal",
+    "compliance":         "Compliance",
+    "risk":               "Risk Management",
+    "technology":         "Technology",
+    "it":                 "Technology",
+    "data":               "Data & Analytics",
+    "analytics":          "Data & Analytics",
+    "product":            "Product Management",
+    "procurement":        "Procurement",
+    "manufacturing":      "Manufacturing",
+    "supply chain":       "Supply Chain",
+    "logistics":          "Supply Chain",
+    "audit":              "Internal Audit",
+    "strategy":           "Strategy",
+    "communications":     "Communications",
+    "research":           "Research & Development",
+    "programme":          "Strategy",       # PMO/Programme → Strategy
+    "program":            "Strategy",
+    "project":            "Operations",
+    "support":            "Customer Experience",
+    "administration":     "Operations",
+    "admin":              "Operations",
+    "general":            "Operations",
+    "commercial":         "Sales & Commercial",
+    "business development": "Sales",
+    "customer service":   "Customer Experience",
+    "customer success":   "Customer Success",
+    "quality":            "Operations",
+    "safety":             "Operations",
+    "security":           "Operations",
+}
+
+# Seniority words — if ANY of these appear in the designation the title is NOT bare
+_SENIORITY_WORDS: frozenset[str] = frozenset({
+    "chief", "head", "director", "vp", "vice president", "svp", "evp",
+    "president", "manager", "lead", "senior", "principal", "associate",
+    "analyst", "officer", "executive", "specialist", "engineer", "consultant",
+    "coordinator", "advisor", "partner", "secretary", "administrator",
+    "superintendent", "controller", "ceo", "cfo", "cto", "coo", "cmo",
+    "chro", "cio", "md", "managing", "general manager", "group",
+})
+
+
+def _bare_dept_check(designation: str) -> tuple[Optional[str], bool]:
+    """
+    Returns (canonical_dept, is_bare) for a designation.
+
+    is_bare=True means the title is ONLY a department keyword — no seniority
+    indicator present. The engine will cap such records at L8 (Staff IC).
+    """
+    title_l = designation.strip().lower()
+    if not title_l:
+        return None, False
+    # Is any seniority word present?
+    for sw in _SENIORITY_WORDS:
+        if sw in title_l:
+            return None, False
+    # Does the whole title match a bare dept keyword?
+    if title_l in _BARE_DEPT_NAMES:
+        return _BARE_DEPT_NAMES[title_l], True
+    return None, False
+
 # ── Country-code → region mapping (shared with organogram v2 NLP agent) ──────
 # Imported lazily so the module loads even if organogram package is absent.
 def _get_country_code_to_region() -> dict[str, str]:
@@ -421,6 +497,15 @@ class InferenceEngine:
                     dept_secondary = refined[1]
                 if refined[2] and not dept_tertiary:
                     dept_tertiary = refined[2]
+
+        # ── Fix 2: Bare dept name as designation → IC, not a leader ─────
+        bare_dept, is_bare = _bare_dept_check(designation)
+        if is_bare and bare_dept:
+            dept_primary = bare_dept
+            layer = max(layer, 8)   # floor at Staff/IC — never a head/manager
+            logger.debug(
+                f"Bare dept designation '{designation}' → {bare_dept} L{layer}"
+            )
 
         # ── Sector ────────────────────────────────────────────────────────
         sector = self.nlp.classify_sector(company, designation, industry_hint)

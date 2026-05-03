@@ -210,6 +210,50 @@ app.add_middleware(
 )
 
 
+def _infer_org_name(records: list[dict]) -> str:
+    """
+    Derive the organisation display name from the data itself.
+
+    Priority:
+      1. Most common non-empty Company value across all records.
+      2. Derive from most common email_domain  (rmsindia.com → "Rmsindia")
+      3. Derive from most common job_org_linkedin_url slug
+         (linkedin.com/company/rms-india → "Rms India")
+    Returns "" if nothing found.
+    """
+    from collections import Counter
+
+    def _best(values: list[str]) -> str:
+        cleaned = [v.strip() for v in values if v and str(v).strip()
+                   and str(v).strip().lower() not in ("nan", "none", "")]
+        if not cleaned:
+            return ""
+        return Counter(cleaned).most_common(1)[0][0]
+
+    # 1. Company column
+    companies = [str(r.get("Company", "") or "") for r in records]
+    name = _best(companies)
+    if name:
+        return name
+
+    # 2. email_domain  →  strip TLD, title-case
+    domains = [str(r.get("email_domain", "") or "") for r in records]
+    domain = _best(domains)
+    if domain:
+        # "rmsindia.com" → "Rmsindia", "rms-india.co.in" → "Rms India"
+        stem = domain.split(".")[0]
+        return stem.replace("-", " ").title()
+
+    # 3. job_org_linkedin_url  →  slug → title-case
+    urls = [str(r.get("job_org_linkedin_url", "") or "") for r in records]
+    url = _best(urls)
+    if url:
+        slug = url.rstrip("/").split("/")[-1]
+        return slug.replace("-", " ").title()
+
+    return ""
+
+
 @app.get("/ping")
 def ping():
     """Lightweight wake-up probe — keeps Render from cold-starting on first upload."""
@@ -282,6 +326,11 @@ async def upload_file(file: UploadFile = File(...),
     MAX_ROWS = 500
     if len(records) > MAX_ROWS:
         records = records[:MAX_ROWS]
+
+    # ── Fix 1: auto-derive org name from data when caller used the default ──
+    # Priority: most-common Company value → email_domain → job_org_linkedin_url slug
+    if company_name in ("Organization", "", None):
+        company_name = _infer_org_name(records) or company_name
 
     try:
         _dag, _db = build_from_records(records, company_name=company_name)
