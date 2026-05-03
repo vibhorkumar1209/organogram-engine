@@ -233,7 +233,6 @@ export default function App() {
     setStatus('loading')
     setColWarning(null)
     setPanelDept(null); setPanelExecs(null)
-    const company = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
     const form = new FormData()
     form.append('file', file)
 
@@ -247,7 +246,7 @@ export default function App() {
 
     try {
       const res = await fetch(
-        `${API}/upload?company_name=${encodeURIComponent(company)}`,
+        `${API}/upload`,
         { method: 'POST', body: form }
       )
       clearInterval(tick)

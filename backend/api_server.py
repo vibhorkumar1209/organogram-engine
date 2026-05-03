@@ -327,10 +327,11 @@ async def upload_file(file: UploadFile = File(...),
     if len(records) > MAX_ROWS:
         records = records[:MAX_ROWS]
 
-    # ── Fix 1: auto-derive org name from data when caller used the default ──
-    # Priority: most-common Company value → email_domain → job_org_linkedin_url slug
-    if company_name in ("Organization", "", None):
-        company_name = _infer_org_name(records) or company_name
+    # ── Fix 1: always prefer org name inferred from data ────────────────
+    # Data-derived name (Company col → email_domain → LinkedIn slug) beats
+    # any caller-supplied string (often just the raw filename).
+    inferred = _infer_org_name(records)
+    company_name = inferred or company_name or "Organization"
 
     try:
         _dag, _db = build_from_records(records, company_name=company_name)
