@@ -371,6 +371,62 @@ _DEPT_REMAP: dict[str, str] = {
 }
 
 
+# Maps sub-department concepts that sometimes appear as dept_primary → the
+# correct (parent_primary, sub_dept_label) pair.  Applied in insert_person()
+# only when dept_secondary is otherwise empty, and only for L3+ people.
+_DEPT_ELEVATE: dict[str, tuple[str, str]] = {
+    # ── Sales children ──────────────────────────────────────────────────
+    "sales & account management":       ("Sales", "Account Management"),
+    "sales & commercial":               ("Sales", "Sales & Commercial"),
+    "account management":               ("Sales", "Account Management"),
+    "key account management":           ("Sales", "Account Management"),
+    "inside sales":                     ("Sales", "Inside Sales"),
+    "new business development":         ("Sales", "New Business Development"),
+    "new business":                     ("Sales", "New Business Development"),
+    "pre-sales":                        ("Sales", "Pre-Sales & Solutioning"),
+    "channel & partners":               ("Sales", "Channel & Partners"),
+    "sales operations":                 ("Sales", "Sales Operations"),
+    "commercial":                       ("Sales", "Sales & Commercial"),
+    # ── Marketing children ──────────────────────────────────────────────
+    "customer experience":              ("Marketing", "Customer Experience"),
+    "customer success":                 ("Marketing", "Customer Success"),
+    "brand":                            ("Marketing", "Brand & Communications"),
+    "brand & communications":           ("Marketing", "Brand & Communications"),
+    "digital marketing":                ("Marketing", "Digital Marketing"),
+    "digital & performance marketing":  ("Marketing", "Digital Marketing"),
+    "performance marketing":            ("Marketing", "Digital Marketing"),
+    "market research":                  ("Marketing", "Market Research & Insights"),
+    "consumer insights":                ("Marketing", "Market Research & Insights"),
+    "product marketing":                ("Marketing", "Product Marketing"),
+    "social media":                     ("Marketing", "Digital Marketing"),
+    # ── R&D children ────────────────────────────────────────────────────
+    "research":                         ("Research & Development", "Research"),
+    "innovation":                       ("Research & Development", "Innovation"),
+    "r&d":                              ("Research & Development", "Research"),
+    # ── Technology children ─────────────────────────────────────────────
+    "data & analytics":                 ("Technology", "Data & Analytics"),
+    "cybersecurity":                    ("Technology", "Cybersecurity"),
+    "information security":             ("Technology", "Information Security"),
+    "it infrastructure":                ("Technology", "IT Infrastructure"),
+    "application development":          ("Technology", "Application Development"),
+    # ── Finance children ────────────────────────────────────────────────
+    "treasury":                         ("Finance", "Treasury"),
+    "internal audit":                   ("Finance", "Internal Audit"),
+    "fp&a":                             ("Finance", "FP&A"),
+    # ── HR children ─────────────────────────────────────────────────────
+    "talent acquisition":               ("Human Resources", "Talent Acquisition"),
+    "learning & development":           ("Human Resources", "Learning & Development"),
+    "compensation & benefits":          ("Human Resources", "Compensation & Benefits"),
+    # ── Operations children ─────────────────────────────────────────────
+    "health, safety & environment":     ("Operations", "HSE"),
+    "quality & compliance":             ("Operations", "Quality & Compliance"),
+    "facilities management":            ("Operations", "Facilities"),
+    # ── Legal / Compliance children ─────────────────────────────────────
+    "legal & compliance":               ("Legal", "Compliance"),
+    "risk management":                  ("Legal", "Risk Management"),
+}
+
+
 def _canonical_dept(dept_primary: str, layer: int) -> str:
     """
     Return a canonical primary department name.
@@ -632,6 +688,14 @@ class OrganogramDAG:
         if not dept_s:
             dept_t = ""
 
+        # ── Elevate compound dept names to correct (primary, secondary) ──
+        # e.g. dept_p="Customer Experience" → dept_p="Marketing", dept_s="Customer Experience"
+        #      dept_p="Sales & Account Management" → dept_p="Sales", dept_s="Account Management"
+        if rec.layer > 2 and not dept_s:
+            elevate_key = dept_p.lower()
+            if elevate_key in _DEPT_ELEVATE:
+                dept_p, dept_s = _DEPT_ELEVATE[elevate_key]
+
         leaf_dept_id = self.ensure_department(
             rec.region, rec.sector,
             dept_p, dept_s, dept_t
@@ -663,24 +727,42 @@ class OrganogramDAG:
         # Build ghost chain from layer 4 → rec.layer
         self._insert_with_ghosts(leaf_dept_id, person_id, rec)
 
+    def _real_person_at_layer(self, parent_id: str, target_layer: int) -> Optional[str]:
+        """
+        Return the node_id of the first real (non-ghost) person node that is a
+        direct child of *parent_id* at *target_layer*, or None if not found.
+
+        Used so ghost chains route through actual senior people rather than
+        creating parallel phantom chains alongside them.
+        """
+        for child in self.G.successors(parent_id):
+            attrs = self.G.nodes.get(child, {})
+            if (attrs.get("node_type") == NODE_PERSON
+                    and attrs.get("layer") == target_layer
+                    and not attrs.get("is_ghost", False)):
+                return child
+        return None
+
     def _insert_with_ghosts(self, dept_node: str,
                              person_node: str,
                              rec: ClassifiedRecord):
         """
-        Bridge the department node (depth 3) to the person node
-        by inserting Ghost Nodes for any missing intermediate layers.
-        Person layer range: 4–10 corresponds to org depth 4–10.
+        Bridge the department node (depth 3) to the person node by inserting
+        Ghost Nodes for any missing intermediate layers.
+
+        Key rule: if a real person already occupies an intermediate layer in
+        the chain (e.g. a Director at L5 when inserting a Manager at L7),
+        route THROUGH that person rather than creating a parallel ghost at
+        the same layer.  This ensures Manager reports to Director, not to
+        a phantom "Director / Head ✦" node alongside the real Director.
         """
         person_layer = rec.layer
         start_layer  = 4   # first employee layer after dept tree
 
         if person_layer <= start_layer:
-            # Direct link from dept tertiary → person
             self._ensure_edge(dept_node, person_node)
             return
 
-        # Need to create ghost chain for layers start_layer..(person_layer-1)
-        # Labels reflect: BOD(0) → Exec Mgmt(1) → SVP/EVP(2) → VP(3) → Dir(4-5) → Mgr(6-7) → Staff(8-10)
         GHOST_LABELS = {
             0:  "Board of Directors",
             1:  "Executive Management",
@@ -697,6 +779,12 @@ class OrganogramDAG:
 
         prev = dept_node
         for ghost_layer in range(start_layer, person_layer):
+            # ── Prefer a real senior person at this layer over a ghost ───
+            real = self._real_person_at_layer(prev, ghost_layer)
+            if real:
+                prev = real
+                continue   # no ghost needed — chain through the real person
+
             ghost_id = self._node_id(
                 "ghost", dept_node,
                 rec.dept_primary, rec.dept_secondary,
@@ -885,6 +973,12 @@ def build_from_records(records: list[dict],
                        ) -> tuple[OrganogramDAG, OrganogramDB]:
     engine = InferenceEngine()
     classified = engine.classify_all(records)
+
+    # Insert senior people first so ghost chains can route through them.
+    # A Director (L5) must exist in the DAG before a Manager (L7) is inserted,
+    # otherwise _insert_with_ghosts cannot find the real person at L5 and
+    # creates a parallel ghost chain instead.
+    classified.sort(key=lambda r: r.layer)
 
     dag = OrganogramDAG(company_name=company_name)
     for rec in classified:

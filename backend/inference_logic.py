@@ -113,6 +113,67 @@ def _bare_dept_check(designation: str) -> tuple[Optional[str], bool]:
         return _BARE_DEPT_NAMES[title_l], True
     return None, False
 
+# ── Raw Department field → (primary, secondary) elevation ────────────────────
+# Applied BEFORE NLP classification when the Department column is present.
+# These are compound or sub-dept names that would confuse the NLP keyword
+# matcher, so we short-circuit and set primary+secondary directly.
+_RAW_DEPT_ELEVATE: dict[str, tuple[str, str]] = {
+    # Sales sub-depts
+    "sales & account management":       ("Sales", "Account Management"),
+    "sales & commercial":               ("Sales", "Sales & Commercial"),
+    "account management":               ("Sales", "Account Management"),
+    "key account management":           ("Sales", "Account Management"),
+    "inside sales":                     ("Sales", "Inside Sales"),
+    "new business development":         ("Sales", "New Business Development"),
+    "new business":                     ("Sales", "New Business Development"),
+    "pre-sales":                        ("Sales", "Pre-Sales & Solutioning"),
+    "channel & partners":               ("Sales", "Channel & Partners"),
+    "sales operations":                 ("Sales", "Sales Operations"),
+    "commercial":                       ("Sales", "Sales & Commercial"),
+    # Marketing sub-depts
+    "customer experience":              ("Marketing", "Customer Experience"),
+    "customer success":                 ("Marketing", "Customer Success"),
+    "brand":                            ("Marketing", "Brand & Communications"),
+    "brand & communications":           ("Marketing", "Brand & Communications"),
+    "brand management":                 ("Marketing", "Brand & Communications"),
+    "digital marketing":                ("Marketing", "Digital Marketing"),
+    "performance marketing":            ("Marketing", "Digital Marketing"),
+    "digital & performance marketing":  ("Marketing", "Digital Marketing"),
+    "product marketing":                ("Marketing", "Product Marketing"),
+    "market research":                  ("Marketing", "Market Research & Insights"),
+    "consumer insights":                ("Marketing", "Market Research & Insights"),
+    "social media":                     ("Marketing", "Digital Marketing"),
+    # R&D sub-depts
+    "research":                         ("Research & Development", "Research"),
+    "innovation":                       ("Research & Development", "Innovation"),
+    # HR sub-depts
+    "talent acquisition":               ("Human Resources", "Talent Acquisition"),
+    "talent management":                ("Human Resources", "Talent Acquisition"),
+    "learning & development":           ("Human Resources", "Learning & Development"),
+    "l&d":                              ("Human Resources", "Learning & Development"),
+    "compensation & benefits":          ("Human Resources", "Compensation & Benefits"),
+    "hr business partnering":           ("Human Resources", "HR Business Partnering"),
+    "people analytics":                 ("Human Resources", "People Analytics"),
+    # Finance sub-depts
+    "treasury":                         ("Finance", "Treasury"),
+    "internal audit":                   ("Finance", "Internal Audit"),
+    "fp&a":                             ("Finance", "FP&A"),
+    "financial planning & analysis":    ("Finance", "FP&A"),
+    "accounting":                       ("Finance", "Accounting & Reporting"),
+    # Technology sub-depts
+    "data & analytics":                 ("Technology", "Data & Analytics"),
+    "cybersecurity":                    ("Technology", "Cybersecurity"),
+    "information security":             ("Technology", "Information Security"),
+    "it infrastructure":                ("Technology", "IT Infrastructure"),
+    "application development":          ("Technology", "Application Development"),
+    # Operations sub-depts
+    "health, safety & environment":     ("Operations", "HSE"),
+    "hse":                              ("Operations", "HSE"),
+    "quality & compliance":             ("Operations", "Quality & Compliance"),
+    "quality assurance":                ("Operations", "Quality & Compliance"),
+    "facilities management":            ("Operations", "Facilities"),
+}
+
 # ── Country-code → region mapping (shared with organogram v2 NLP agent) ──────
 # Imported lazily so the module loads even if organogram package is absent.
 def _get_country_code_to_region() -> dict[str, str]:
@@ -490,9 +551,18 @@ class InferenceEngine:
                 logger.debug(f"vendor_level override: '{vendor_level}' → L{mapped_layer}")
 
         # ── Department refinement from free-text Department field ──────────
+        # The Department column is explicit structured data — trust it over
+        # title-derived NLP classification.
+        # Priority 1: exact match in _RAW_DEPT_ELEVATE → sets (primary, secondary)
+        # Priority 2: NLP classify_dept_from_text on the raw dept string
         if raw_dept and raw_dept.lower() not in ("nan", "none", ""):
-            refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
-            if refined[0] == dept_primary or not refined[0]:
+            rd_key = raw_dept.strip().lower()
+            if rd_key in _RAW_DEPT_ELEVATE:
+                dept_primary, dept_secondary = _RAW_DEPT_ELEVATE[rd_key]
+            else:
+                refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
+                if refined[0] and refined[0] not in ("General", "Unclassified", ""):
+                    dept_primary = refined[0]
                 if refined[1] and not dept_secondary:
                     dept_secondary = refined[1]
                 if refined[2] and not dept_tertiary:
