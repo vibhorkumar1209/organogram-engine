@@ -1005,7 +1005,11 @@ def build_from_records(records: list[dict],
     for rec in classified:
         dag.insert_person(rec)
 
-    # Extract primary email domain for website-based leadership research
+    db = OrganogramDB(db_path=db_path)
+    db.upsert_dag(dag)
+
+    # Return classified records and primary domain so the caller can run
+    # leadership enrichment in a background thread without blocking the upload.
     from collections import Counter as _Counter
     _domain_counts = _Counter(
         str(r.get("email_domain", "") or "").strip().lower()
@@ -1015,13 +1019,7 @@ def build_from_records(records: list[dict],
     )
     primary_domain = _domain_counts.most_common(1)[0][0] if _domain_counts else ""
 
-    # Always enrich with website-scraped + LLM-sourced BOD & Executive Management.
-    _enrich_with_llm_leadership(dag, classified, company_name, domain=primary_domain)
-
-    db = OrganogramDB(db_path=db_path)
-    db.upsert_dag(dag)
-
-    return dag, db
+    return dag, db, classified, primary_domain
 
 
 # ─────────────────────────────────────────────

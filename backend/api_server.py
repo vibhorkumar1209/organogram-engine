@@ -7,6 +7,7 @@ import io
 import json
 import re
 import tempfile
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -15,7 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from structural_engine import build_from_records, OrganogramDAG, OrganogramDB
+from structural_engine import (
+    build_from_records, OrganogramDAG, OrganogramDB,
+    _enrich_with_llm_leadership,
+)
 
 # ─── Flexible column name mapping ────────────
 # Maps any common column variant → canonical field name
@@ -334,11 +338,31 @@ async def upload_file(file: UploadFile = File(...),
     company_name = inferred or company_name or "Organization"
 
     try:
-        _dag, _db = build_from_records(records, company_name=company_name)
+        _dag, _db, _classified, _domain = build_from_records(
+            records, company_name=company_name
+        )
     except Exception as e:
         import traceback
         raise HTTPException(status_code=500,
                             detail=f"Pipeline failed: {e}\n{traceback.format_exc()}")
+
+    # ── Leadership enrichment in background — keeps upload fast ──────────────
+    # Scrapes the company website and injects BOD/EM without blocking the response.
+    def _bg_enrich(dag: OrganogramDAG, db: OrganogramDB,
+                   classified: list, co: str, domain: str) -> None:
+        try:
+            _enrich_with_llm_leadership(dag, classified, co, domain=domain)
+            db.upsert_dag(dag)        # refresh SQLite with enriched nodes
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(f"Background enrichment failed: {exc}")
+
+    t = threading.Thread(
+        target=_bg_enrich,
+        args=(_dag, _db, _classified, company_name, _domain),
+        daemon=True,
+    )
+    t.start()
 
     # Report which canonical fields were found
     canonical = {"FirstName", "LastName", "Designation", "Company",
@@ -368,7 +392,9 @@ async def load_demo():
     with open(data_path) as f:
         records = json.load(f)
 
-    _dag, _db = build_from_records(records, company_name="Global Conglomerate Inc.")
+    _dag, _db, _classified, _domain = build_from_records(
+        records, company_name="Global Conglomerate Inc."
+    )
     return {
         "status": "ok",
         "records_ingested": len(records),

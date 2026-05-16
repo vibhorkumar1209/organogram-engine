@@ -38,37 +38,29 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
-# Ordered list of paths to try when looking for leadership info on a website.
+# Ordered by hit-rate: most company sites use one of the first few.
 _LEADERSHIP_PATHS = [
     "/leadership",
-    "/leadership-team",
     "/about/leadership",
-    "/about-us/leadership",
-    "/our-leadership",
-    "/team",
-    "/our-team",
     "/management",
-    "/management-team",
     "/about/management",
-    "/about-us/management",
     "/board-of-directors",
-    "/board",
-    "/about/team",
-    "/about-us/team",
-    "/who-we-are",
+    "/team",
     "/about",
     "/about-us",
 ]
 
-_WEB_TIMEOUT = 8          # seconds per HTTP request
-_MAX_PAGE_CHARS = 6_000   # chars to pass to Claude per page
-_MAX_PAGES = 2            # stop after collecting this many useful pages
+_WEB_TIMEOUT = 4          # seconds per HTTP request (keep low — runs in background)
+_MAX_PAGE_CHARS = 5_000   # chars to pass to Claude per page
+_MAX_PAGES = 1            # one good page is enough
+_TOTAL_BUDGET = 15        # hard cap on total scraping time (seconds)
 
 
 def _fetch_leadership_text(domain: str) -> str:
     """
     Try common leadership/about URLs on *domain* and return concatenated
-    plain-text content from successful responses (max _MAX_PAGES pages).
+    plain-text content from successful responses (max _MAX_PAGES pages,
+    hard-capped at _TOTAL_BUDGET seconds total).
     Returns "" if nothing useful is found or httpx is unavailable.
     """
     try:
@@ -79,6 +71,9 @@ def _fetch_leadership_text(domain: str) -> str:
 
     if not domain:
         return ""
+
+    import time
+    deadline = time.monotonic() + _TOTAL_BUDGET
 
     headers = {
         "User-Agent": (
@@ -99,18 +94,23 @@ def _fetch_leadership_text(domain: str) -> str:
 
     for base in base_candidates:
         for path in _LEADERSHIP_PATHS:
+            if time.monotonic() >= deadline:
+                logger.debug(f"Website scrape budget exhausted for {domain}")
+                break
             url = f"{base}{path}"
             if url in tried:
                 continue
             tried.add(url)
+            remaining = max(1, deadline - time.monotonic())
+            timeout = min(_WEB_TIMEOUT, remaining)
             try:
                 r = httpx.get(url, headers=headers,
-                              timeout=_WEB_TIMEOUT, follow_redirects=True)
+                              timeout=timeout, follow_redirects=True)
                 ct = r.headers.get("content-type", "")
                 if r.status_code != 200 or "text/html" not in ct:
                     continue
                 text = _strip_html(r.text)
-                if len(text) < 300:       # page too thin — probably a redirect stub
+                if len(text) < 300:       # page too thin — redirect stub
                     continue
                 collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
                 logger.debug(f"Scraped leadership page: {url} ({len(text)} chars)")
@@ -119,7 +119,7 @@ def _fetch_leadership_text(domain: str) -> str:
             except Exception as exc:
                 logger.debug(f"Website scrape failed for {url}: {exc}")
                 continue
-        if len(collected) >= _MAX_PAGES:
+        if len(collected) >= _MAX_PAGES or time.monotonic() >= deadline:
             break
 
     return "\n\n---\n\n".join(collected)
