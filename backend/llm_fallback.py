@@ -4,10 +4,17 @@ LLM company leadership enrichment — Board of Directors and Executive Managemen
 Public function:
 
   llm_fetch_leadership(company_name, domain="")
-    Priority 1: Scrape the company's own website (leadership/about/team pages).
-    Priority 2: Fall back to Claude's training-data knowledge of the company.
+    Scrapes the company's own website (leadership/about/team pages) and passes
+    the extracted text to Claude for structured extraction.
+
+    Two extraction strategies per page:
+      1. JSON-LD structured data (<script type="application/ld+json">) —
+         works even for JS-rendered SPAs that embed Person schema server-side.
+      2. Plain-text strip of the rendered HTML.
 
     Returns {"board": [...], "executives": [...]}  each item = {name, title}.
+    Returns {"board": [], "executives": []} if no domain is provided or no
+    useful content is found — no LLM knowledge fallback.
 
 The LLM is NOT used for title classification or seniority inference.
 All NLP classification is fully deterministic (overlay → YAML → pattern → fallback).
@@ -25,10 +32,51 @@ logger = logging.getLogger(__name__)
 # HTML UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _extract_json_ld(html: str) -> str:
+    """
+    Pull text from JSON-LD <script type="application/ld+json"> blocks.
+    Many modern sites embed structured Person/Organization data here even
+    when the visible page is JS-rendered.
+    Returns a flat string of name/title pairs found, or "".
+    """
+    snippets: list[str] = []
+    for match in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, flags=re.DOTALL | re.IGNORECASE
+    ):
+        try:
+            obj = json.loads(match.group(1))
+        except (json.JSONDecodeError, ValueError):
+            continue
+        # Flatten to list of dicts
+        items = obj if isinstance(obj, list) else [obj]
+        for item in items:
+            # Person schemas
+            if item.get("@type") in ("Person", "Employee"):
+                name  = item.get("name", "")
+                title = item.get("jobTitle", "")
+                if name and title:
+                    snippets.append(f"{name} — {title}")
+            # OrganizationRole arrays
+            members = item.get("member", item.get("employee", []))
+            if isinstance(members, list):
+                for m in members:
+                    if isinstance(m, dict):
+                        name  = m.get("name", "")
+                        title = m.get("jobTitle", "")
+                        if name and title:
+                            snippets.append(f"{name} — {title}")
+    return "\n".join(snippets)
+
+
 def _strip_html(html: str) -> str:
     """Strip HTML tags and normalise whitespace. No external deps."""
-    # Remove <script> and <style> blocks entirely
-    html = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
+    # Remove <script> and <style> blocks entirely (but keep ld+json — handled separately)
+    html = re.sub(
+        r"<script(?![^>]+application/ld\+json)[^>]*>.*?</script>",
+        " ", html, flags=re.DOTALL | re.IGNORECASE
+    )
+    html = re.sub(r"<style[^>]*>.*?</style>", " ", html,
                   flags=re.DOTALL | re.IGNORECASE)
     # Remove all remaining tags
     text = re.sub(r"<[^>]+>", " ", html)
@@ -42,18 +90,30 @@ def _strip_html(html: str) -> str:
 _LEADERSHIP_PATHS = [
     "/leadership",
     "/about/leadership",
+    "/about-us/leadership",          # Morgan Stanley, many US banks
+    "/about-us/our-leadership",
     "/management",
     "/about/management",
+    "/executive-team",
+    "/our-team",
     "/board-of-directors",
+    "/about/board-of-directors",
+    "/about-us/board-of-directors",
+    "/governance/board-of-directors",
+    "/investors/governance/board-of-directors",
     "/team",
     "/about",
     "/about-us",
+    "/company/leadership",
+    "/company/management",
+    "/en/about/leadership",          # some multinational sites
+    "/en/about-us/leadership",
 ]
 
-_WEB_TIMEOUT = 4          # seconds per HTTP request (keep low — runs in background)
-_MAX_PAGE_CHARS = 5_000   # chars to pass to Claude per page
-_MAX_PAGES = 1            # one good page is enough
-_TOTAL_BUDGET = 15        # hard cap on total scraping time (seconds)
+_WEB_TIMEOUT = 6          # seconds per HTTP request
+_MAX_PAGE_CHARS = 8_000   # chars to pass to Claude per page
+_MAX_PAGES = 2            # allow up to 2 pages (board + executive may be separate)
+_TOTAL_BUDGET = 25        # hard cap on total scraping time (seconds)
 
 
 def _fetch_leadership_text(domain: str) -> str:
@@ -109,11 +169,33 @@ def _fetch_leadership_text(domain: str) -> str:
                 ct = r.headers.get("content-type", "")
                 if r.status_code != 200 or "text/html" not in ct:
                     continue
-                text = _strip_html(r.text)
-                if len(text) < 300:       # page too thin — redirect stub
+
+                raw_html = r.text
+
+                # Try structured JSON-LD first (works even for JS-heavy SPAs
+                # that embed Person schema server-side)
+                ld_text = _extract_json_ld(raw_html)
+
+                # Plain-text strip
+                text = _strip_html(raw_html)
+
+                # Merge: prefer JSON-LD when visible text is sparse (SPA)
+                if ld_text:
+                    combined = f"{ld_text}\n\n{text[:_MAX_PAGE_CHARS]}"
+                else:
+                    combined = text[:_MAX_PAGE_CHARS]
+
+                # A page is "useful" if either the visible text is substantial
+                # OR we found JSON-LD person data
+                if len(text) < 200 and not ld_text:
+                    logger.debug(f"Page too thin ({len(text)} chars), skipping: {url}")
                     continue
-                collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
-                logger.debug(f"Scraped leadership page: {url} ({len(text)} chars)")
+
+                collected.append(f"[Page: {url}]\n{combined}")
+                logger.debug(
+                    f"Scraped leadership page: {url} "
+                    f"({len(text)} chars text, {len(ld_text)} chars JSON-LD)"
+                )
                 if len(collected) >= _MAX_PAGES:
                     break
             except Exception as exc:
