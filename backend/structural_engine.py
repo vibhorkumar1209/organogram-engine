@@ -588,6 +588,14 @@ class OrganogramDAG:
         if not self.G.has_edge(parent, child):
             self.G.add_edge(parent, child)
 
+    # Governance hierarchy constants (checked in ensure_department)
+    _BOD_NAMES: frozenset = frozenset({
+        "board of management", "board of directors", "board",
+    })
+    _EM_NAMES: frozenset = frozenset({
+        "executive management", "c-suite", "ceo office",
+    })
+
     # ─── Build department layers ──────────────
     def ensure_department(self, region: str, sector: str,
                            dept_p: str, dept_s: str, dept_t: str
@@ -598,15 +606,38 @@ class OrganogramDAG:
         - Secondary is skipped when empty or identical to primary.
         - Tertiary is skipped when empty or identical to secondary/primary.
 
-        Region is NOT a structural node — it is stored as metadata on person
-        cards so it can be shown on the executive card without cluttering the
-        tree.  All departments connect directly to root_global.
+        Governance chain (enforced via parent selection):
+          root_global  [invisible anchor]
+            └── Board of Management   (BOD)
+                  └── Executive Management  (EM, if BOD exists)
+                        └── Finance / HR / Tech / …  (functional depts)
+
+        Region is stored only as metadata on person cards — not as a
+        structural node — so regional orgs merge into one dept branch.
         """
         color = SECTOR_COLORS.get(sector, "#64748B")
 
+        # ── Choose correct parent for primary dept ───────────────────────
+        dp_lower = dept_p.lower()
+        if dp_lower in self._BOD_NAMES:
+            # BOD is a direct child of root
+            parent_id = "root_global"
+        elif dp_lower in self._EM_NAMES:
+            # EM sits under BOD when BOD dept already exists
+            bod_id    = self._node_id("dept", "Board of Management")
+            parent_id = bod_id if bod_id in self.G else "root_global"
+        else:
+            # All functional depts sit under EM → BOD → root (whichever exists)
+            em_id     = self._node_id("dept", "Executive Management")
+            bod_id    = self._node_id("dept", "Board of Management")
+            if em_id in self.G:
+                parent_id = em_id
+            elif bod_id in self.G:
+                parent_id = bod_id
+            else:
+                parent_id = "root_global"
+
         # ── Primary dept (always created) ───────────────────────────────
-        # Node ID excludes region so the same dept (e.g. "Finance") in EMEA
-        # and North America maps to ONE node, not two parallel branches.
         dp_id = self._node_id("dept", dept_p)
         self._ensure_node(dp_id, **{
             "node_id":   dp_id,
@@ -619,7 +650,7 @@ class OrganogramDAG:
             "expanded":  False,
             "metadata":  {"dept_primary": dept_p},
         })
-        self._ensure_edge("root_global", dp_id)
+        self._ensure_edge(parent_id, dp_id)
         leaf = dp_id
 
         # ── Secondary dept (skip if empty or same as primary) ───────────

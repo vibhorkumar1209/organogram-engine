@@ -111,10 +111,11 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
 
     treeLayout(root)
 
-    // ── Bounds ─────────────────────────────────────────────────────────
+    // ── Bounds — exclude the invisible global root ─────────────────────
     let minSX = Infinity, maxSX = -Infinity
     let minSY = Infinity, maxSY = -Infinity
     root.each(d => {
+      if (d.data.node_type === 'global') return   // skip invisible anchor
       const sx = (d as any).y
       const sy = (d as any).x
       if (sx < minSX) minSX = sx
@@ -181,9 +182,9 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       }
     }
 
-    // ── Links ──────────────────────────────────────────────────────────
+    // ── Links — skip edges from the invisible global root ─────────────
     g.selectAll('.org-link')
-      .data(root.links())
+      .data(root.links().filter(d => d.source.data.node_type !== 'global'))
       .join('path')
       .attr('class', 'org-link')
       .attr('d', d3.linkHorizontal<any, any>()
@@ -191,9 +192,9 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
         .y((d: any) => d.x + offY)
       )
 
-    // ── Node groups ────────────────────────────────────────────────────
+    // ── Node groups — skip the invisible global root card ─────────────
     const nodeGroups = g.selectAll('.org-node')
-      .data(root.descendants())
+      .data(root.descendants().filter(d => d.data.node_type !== 'global'))
       .join('g')
       .attr('class', d => {
         let cls = 'org-node'

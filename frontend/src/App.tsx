@@ -143,7 +143,8 @@ export default function App() {
 
   // ── Fetch dept-only structure ──────────────────────────────────────
   const loadDeptStructure = async () => {
-    const res = await fetch(`${API}/tree?root=root_global&max_depth=1`)
+    // max_depth=4 covers:  root(0) → BOD(1) → EM(2) → depts(3) → sub-depts(4)
+    const res = await fetch(`${API}/tree?root=root_global&max_depth=4`)
     if (!res.ok) throw new Error(await res.text())
     const raw: OrgNode = await res.json()
     const filtered = filterToDeptNodes(raw)
@@ -156,41 +157,16 @@ export default function App() {
   const handleNodeClick = useCallback(async (node: OrgNode) => {
     // Synthetic nodes (BOD/EM groups) are pre-expanded — don't interact
     if (node.is_synthetic) return
-    // Person nodes: tooltip only
+    // Person nodes: tooltip only — interaction is through dept panel
     if (node.node_type === 'person') return
+    // Global root is invisible — cannot be clicked
+    if (node.node_type === 'global') return
 
-    const isGlobal = node.node_type === 'global'
     const isDept = node.node_type === 'dept_primary' ||
                    node.node_type === 'dept_secondary' ||
                    node.node_type === 'dept_tertiary'
 
-    if (isGlobal) {
-      // Collapse if already expanded
-      if (node.expanded && (node.children ?? []).filter(c => !c.is_synthetic).length > 0) {
-        setViewTree(prev => prev ? collapseNode(prev, node.node_id) : null)
-        return
-      }
-      if (!node.has_more) return
-
-      setExpandingId(node.node_id)
-      try {
-        const res = await fetch(
-          `${API}/tree?root=${encodeURIComponent(node.node_id)}&max_depth=2`
-        )
-        if (!res.ok) throw new Error(await res.text())
-        const fetched: OrgNode = await res.json()
-        const children = (filterToDeptNodes(fetched).children ?? []).filter(c => c.node_id)
-        setViewTree(prev => prev ? mergeChildren(prev, node.node_id, children) : null)
-        setFocusNodeId(node.node_id)
-        // Clear focusNodeId after the pan animation completes
-        setTimeout(() => setFocusNodeId(null), 500)
-      } catch (e: any) {
-        setStatus('error'); setStatusMsg(e.message)
-      } finally {
-        setExpandingId(null)
-      }
-
-    } else if (isDept) {
+    if (isDept) {
       const realChildren = (node.children ?? []).filter(c => !c.is_synthetic)
 
       // ── Toggle sub-department expansion in tree ──────────────────────
@@ -298,22 +274,36 @@ export default function App() {
       is_ghost: false, expanded: false, metadata: {},
       children: [
         {
-          node_id: 'dept__executive_management', node_type: 'dept_primary',
-          label: 'Executive Management', layer: 1, sector: 'All', color: '#3491E8',
-          is_ghost: false, expanded: false, has_more: true, metadata: {},
-          children: [],
-        },
-        {
-          node_id: 'dept__finance', node_type: 'dept_primary',
-          label: 'Finance', layer: 1, sector: 'All', color: '#3491E8',
-          is_ghost: false, expanded: false, has_more: true, metadata: {},
-          children: [],
-        },
-        {
-          node_id: 'dept__technology', node_type: 'dept_primary',
-          label: 'Technology', layer: 1, sector: 'All', color: '#3491E8',
-          is_ghost: false, expanded: false, has_more: true, metadata: {},
-          children: [],
+          node_id: 'dept__board_of_management', node_type: 'dept_primary',
+          label: 'Board of Management', layer: 1, sector: 'All', color: '#3491E8',
+          is_ghost: false, expanded: true, has_more: false, metadata: {},
+          children: [
+            {
+              node_id: 'dept__executive_management', node_type: 'dept_primary',
+              label: 'Executive Management', layer: 1, sector: 'All', color: '#3491E8',
+              is_ghost: false, expanded: true, has_more: false, metadata: {},
+              children: [
+                {
+                  node_id: 'dept__finance', node_type: 'dept_primary',
+                  label: 'Finance', layer: 1, sector: 'All', color: '#3491E8',
+                  is_ghost: false, expanded: false, has_more: true, metadata: {},
+                  children: [],
+                },
+                {
+                  node_id: 'dept__technology', node_type: 'dept_primary',
+                  label: 'Technology', layer: 1, sector: 'All', color: '#3491E8',
+                  is_ghost: false, expanded: false, has_more: true, metadata: {},
+                  children: [],
+                },
+                {
+                  node_id: 'dept__human_resources', node_type: 'dept_primary',
+                  label: 'Human Resources', layer: 1, sector: 'All', color: '#3491E8',
+                  is_ghost: false, expanded: false, has_more: true, metadata: {},
+                  children: [],
+                },
+              ],
+            },
+          ],
         },
       ],
     }
