@@ -491,30 +491,51 @@ def _canonical_subdept(dept_secondary: str) -> str:
 
 # Department display order — lower number = shown first
 DEPT_PRIMARY_ORDER: dict[str, int] = {
+    # ── Leadership (always first) ────────────────────────────────────
+    "board of management":   0,   # canonical L0 label used by the engine
     "board of directors":    0,
     "board":                 0,
-    "executive management":  1,
+    "executive management":  1,   # canonical L1/L2 label
+    "c-suite":               1,
     "ceo office":            2,
-    "c-suite":               2,
     "corporate":             3,
+    # ── Support functions ────────────────────────────────────────────
     "finance":              10,
     "human resources":      11,
+    "people & culture":     11,
     "hr":                   11,
     "legal":                12,
+    "legal & compliance":   12,
     "risk & compliance":    13,
+    "risk management":      13,
     "risk":                 13,
+    "compliance":           13,
+    # ── Technology / Data ────────────────────────────────────────────
+    "technology":           14,
     "information technology": 14,
     "it":                   14,
     "data & analytics":     15,
     "data":                 15,
+    # ── Product / Engineering ────────────────────────────────────────
     "engineering":          16,
+    "research & development": 16,
     "engineering & r&d":    16,
-    "operations":           17,
-    "manufacturing":        18,
-    "supply chain":         19,
-    "sales":                20,
-    "marketing":            21,
-    "customer service":     22,
+    "product management":   17,
+    "strategy":             18,
+    # ── Operations ───────────────────────────────────────────────────
+    "operations":           19,
+    "manufacturing":        20,
+    "supply chain":         21,
+    "procurement":          22,
+    # ── Revenue / Customer ───────────────────────────────────────────
+    "sales":                23,
+    "marketing":            24,
+    "customer experience":  25,
+    "customer success":     25,
+    "customer service":     25,
+    # ── Others ───────────────────────────────────────────────────────
+    "communications":       28,
+    "corporate development": 29,
     "sustainability":       30,
 }
 
@@ -984,9 +1005,18 @@ def build_from_records(records: list[dict],
     for rec in classified:
         dag.insert_person(rec)
 
-    # Always enrich with LLM-sourced Board & Executive Management,
-    # regardless of what was in the uploaded file.
-    _enrich_with_llm_leadership(dag, classified, company_name)
+    # Extract primary email domain for website-based leadership research
+    from collections import Counter as _Counter
+    _domain_counts = _Counter(
+        str(r.get("email_domain", "") or "").strip().lower()
+        for r in records
+        if r.get("email_domain")
+        and str(r.get("email_domain", "")).strip().lower() not in ("nan", "none", "")
+    )
+    primary_domain = _domain_counts.most_common(1)[0][0] if _domain_counts else ""
+
+    # Always enrich with website-scraped + LLM-sourced BOD & Executive Management.
+    _enrich_with_llm_leadership(dag, classified, company_name, domain=primary_domain)
 
     db = OrganogramDB(db_path=db_path)
     db.upsert_dag(dag)
@@ -1008,6 +1038,7 @@ def _enrich_with_llm_leadership(
     dag: OrganogramDAG,
     classified: list,
     company_name: str,
+    domain: str = "",
 ) -> None:
     """
     For every distinct company in the dataset, fetch Board of Directors and
@@ -1061,7 +1092,8 @@ def _enrich_with_llm_leadership(
 
     # ── Fetch and inject per company ─────────────────────────────────
     for co, ctx in companies.items():
-        leadership = llm_fetch_leadership(co)
+        # Use the company's own website as primary source; LLM knowledge as fallback
+        leadership = llm_fetch_leadership(co, domain=domain if co == company_name else "")
         region = ctx["region"]
         sector = ctx["sector"]
 
