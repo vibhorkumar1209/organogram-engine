@@ -35,7 +35,6 @@ const SECTOR_COLORS: Record<string, string> = {
 
 const NODE_TYPE_ICON: Record<string, string> = {
   global:         '⬡',
-  region:         '◈',
   dept_primary:   '▣',
   dept_secondary: '▤',
   dept_tertiary:  '▥',
@@ -45,7 +44,6 @@ const NODE_TYPE_ICON: Record<string, string> = {
 
 const NODE_TYPE_LABEL: Record<string, string> = {
   global:         'Organisation',
-  region:         'Region',
   dept_primary:   'Department',
   dept_secondary: 'Sub-Department',
   dept_tertiary:  'Team',
@@ -287,7 +285,7 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .attr('fill', d => accentColor(d))
       .text(d => `L${d.data.layer}`)
 
-    // ── Seniority tier for person cards ───────────────────────────────
+    // ── Seniority tier for person cards (bottom-left) ─────────────────
     const SENIORITY_SHORT: Record<number, string> = {
       0: 'Board', 1: 'C-Suite', 2: 'EVP', 3: 'VP',
       4: 'Sr.Dir', 5: 'Dir', 6: 'Sr.Mgr', 7: 'Mgr',
@@ -301,6 +299,18 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .text(d => {
         const tier = SENIORITY_SHORT[d.data.layer]
         return tier ? `L${d.data.layer} · ${tier}` : `L${d.data.layer}`
+      })
+
+    // ── Region chip for person cards (bottom-right) ────────────────────
+    nodeGroups.filter(d => d.data.node_type === 'person' && !!(d.data.metadata?.region))
+      .append('text')
+      .attr('x', NODE_W / 2 - 8).attr('y', NODE_H / 2 - 6)
+      .attr('font-size', 8)
+      .attr('fill', d => accentColor(d) + '55')
+      .attr('text-anchor', 'end')
+      .text(d => {
+        const r = String(d.data.metadata?.region ?? '')
+        return r.length > 11 ? r.slice(0, 10) + '…' : r
       })
 
     // ── Expand/collapse chevron ────────────────────────────────────────

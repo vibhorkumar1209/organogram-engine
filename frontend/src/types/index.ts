@@ -1,6 +1,6 @@
 export interface OrgNode {
   node_id: string
-  node_type: 'global' | 'region' | 'dept_primary' | 'dept_secondary' | 'dept_tertiary' | 'person' | 'ghost'
+  node_type: 'global' | 'dept_primary' | 'dept_secondary' | 'dept_tertiary' | 'person' | 'ghost'
   label: string
   layer: number
   sector: string

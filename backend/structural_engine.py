@@ -588,23 +588,6 @@ class OrganogramDAG:
         if not self.G.has_edge(parent, child):
             self.G.add_edge(parent, child)
 
-    # ─── Build region layer ───────────────────
-    def ensure_region(self, region: str, sector: str) -> str:
-        rid = self._node_id("region", region)
-        self._ensure_node(rid, **{
-            "node_id":   rid,
-            "node_type": NODE_REGION,
-            "label":     region,
-            "layer":     0,
-            "sector":    sector,
-            "color":     SECTOR_COLORS.get(sector, "#64748B"),
-            "is_ghost":  False,
-            "expanded":  False,
-            "metadata":  {"region": region},
-        })
-        self._ensure_edge("root_global", rid)
-        return rid
-
     # ─── Build department layers ──────────────
     def ensure_department(self, region: str, sector: str,
                            dept_p: str, dept_s: str, dept_t: str
@@ -614,12 +597,17 @@ class OrganogramDAG:
         deepest created node ID (leaf). Redundant nodes are skipped:
         - Secondary is skipped when empty or identical to primary.
         - Tertiary is skipped when empty or identical to secondary/primary.
+
+        Region is NOT a structural node — it is stored as metadata on person
+        cards so it can be shown on the executive card without cluttering the
+        tree.  All departments connect directly to root_global.
         """
-        region_id = self.ensure_region(region, sector)
         color = SECTOR_COLORS.get(sector, "#64748B")
 
         # ── Primary dept (always created) ───────────────────────────────
-        dp_id = self._node_id("dept", region, dept_p)
+        # Node ID excludes region so the same dept (e.g. "Finance") in EMEA
+        # and North America maps to ONE node, not two parallel branches.
+        dp_id = self._node_id("dept", dept_p)
         self._ensure_node(dp_id, **{
             "node_id":   dp_id,
             "node_type": NODE_DEPT_P,
@@ -629,15 +617,15 @@ class OrganogramDAG:
             "color":     color,
             "is_ghost":  False,
             "expanded":  False,
-            "metadata":  {"dept_primary": dept_p, "region": region},
+            "metadata":  {"dept_primary": dept_p},
         })
-        self._ensure_edge(region_id, dp_id)
+        self._ensure_edge("root_global", dp_id)
         leaf = dp_id
 
         # ── Secondary dept (skip if empty or same as primary) ───────────
         effective_s = dept_s if (dept_s and dept_s.lower() != dept_p.lower()) else ""
         if effective_s:
-            ds_id = self._node_id("dept", region, dept_p, dept_s)
+            ds_id = self._node_id("dept", dept_p, dept_s)
             self._ensure_node(ds_id, **{
                 "node_id":   ds_id,
                 "node_type": NODE_DEPT_S,
@@ -661,7 +649,7 @@ class OrganogramDAG:
                 else ""
             )
             if effective_t:
-                dt_id = self._node_id("dept", region, dept_p, dept_s, dept_t)
+                dt_id = self._node_id("dept", dept_p, dept_s, dept_t)
                 self._ensure_node(dt_id, **{
                     "node_id":   dt_id,
                     "node_type": NODE_DEPT_T,
@@ -687,7 +675,7 @@ class OrganogramDAG:
         if attrs.get("is_ghost"):
             return (900, label)
 
-        if node_type in (NODE_DEPT_P, NODE_REGION):
+        if node_type == NODE_DEPT_P:
             return (DEPT_PRIMARY_ORDER.get(label, 50), label)
 
         if node_type in (NODE_DEPT_S, NODE_DEPT_T):
@@ -737,6 +725,7 @@ class OrganogramDAG:
                 "company":        rec.company,
                 "linkedin_url":   rec.linkedin_url,
                 "location":       rec.location,
+                "region":         getattr(rec, "region", "") or "",
                 "dept_primary":   dept_p,
                 "dept_secondary": dept_s,
                 "nlp_confidence": round(getattr(rec, "nlp_confidence", 0.0), 2),

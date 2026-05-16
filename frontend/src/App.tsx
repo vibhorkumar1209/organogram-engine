@@ -7,7 +7,7 @@ import { ExecPanel } from './components/ExecPanel'
 const API = import.meta.env.VITE_API_URL || '/api'
 
 const DEPT_TYPES = new Set<OrgNode['node_type']>([
-  'global', 'region', 'dept_primary', 'dept_secondary', 'dept_tertiary',
+  'global', 'dept_primary', 'dept_secondary', 'dept_tertiary',
 ])
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -159,12 +159,12 @@ export default function App() {
     // Person nodes: tooltip only
     if (node.node_type === 'person') return
 
-    const isGlobalOrRegion = node.node_type === 'global' || node.node_type === 'region'
+    const isGlobal = node.node_type === 'global'
     const isDept = node.node_type === 'dept_primary' ||
                    node.node_type === 'dept_secondary' ||
                    node.node_type === 'dept_tertiary'
 
-    if (isGlobalOrRegion) {
+    if (isGlobal) {
       // Collapse if already expanded
       if (node.expanded && (node.children ?? []).filter(c => !c.is_synthetic).length > 0) {
         setViewTree(prev => prev ? collapseNode(prev, node.node_id) : null)
@@ -298,20 +298,20 @@ export default function App() {
       is_ghost: false, expanded: false, metadata: {},
       children: [
         {
-          node_id: 'region__north_america', node_type: 'region',
-          label: 'North America', layer: 0, sector: 'Startup', color: '#8B5CF6',
+          node_id: 'dept__executive_management', node_type: 'dept_primary',
+          label: 'Executive Management', layer: 1, sector: 'All', color: '#3491E8',
           is_ghost: false, expanded: false, has_more: true, metadata: {},
           children: [],
         },
         {
-          node_id: 'region__europe', node_type: 'region',
-          label: 'Europe', layer: 0, sector: 'Automotive', color: '#F59E0B',
+          node_id: 'dept__finance', node_type: 'dept_primary',
+          label: 'Finance', layer: 1, sector: 'All', color: '#3491E8',
           is_ghost: false, expanded: false, has_more: true, metadata: {},
           children: [],
         },
         {
-          node_id: 'region__apac', node_type: 'region',
-          label: 'Asia Pacific', layer: 0, sector: 'Govt', color: '#3B82F6',
+          node_id: 'dept__technology', node_type: 'dept_primary',
+          label: 'Technology', layer: 1, sector: 'All', color: '#3491E8',
           is_ghost: false, expanded: false, has_more: true, metadata: {},
           children: [],
         },
@@ -434,9 +434,9 @@ export default function App() {
               How to use
             </div>
             {[
-              ['›', 'Click region to show departments'],
+              ['›', 'Click org to show departments'],
               ['›', 'Click department to view executives'],
-              ['‹', 'Click region again to collapse'],
+              ['‹', 'Click department again to collapse'],
               ['⊙', 'Fit chart to screen'],
             ].map(([icon, tip]) => (
               <div key={tip} style={{ display: 'flex', gap: 6, padding: '3px 0', fontSize: 10, color: '#374e65' }}>
@@ -552,7 +552,7 @@ export default function App() {
               position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
               fontSize: 11, color: '#1e3a52', whiteSpace: 'nowrap', pointerEvents: 'none',
             }}>
-              Click a region › to expand departments&nbsp;·&nbsp;
+              Click the org › to expand departments&nbsp;·&nbsp;
               Click a department › to view executives&nbsp;·&nbsp;
               Scroll / pinch to zoom
             </div>

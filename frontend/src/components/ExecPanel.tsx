@@ -210,8 +210,14 @@ const PersonRow: React.FC<{
               {String(p.metadata.designation).slice(0, 36)}
             </div>
           )}
-          {/* Footer: location + linkedin + pay + source */}
+          {/* Footer: region + location + linkedin + pay + source */}
           <div style={{ display: 'flex', gap: 7, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+            {p.metadata?.region && (
+              <span style={{ fontSize: 8.5, color: '#1e4d6b', background: '#0d2b3e',
+                borderRadius: 3, padding: '1px 5px', border: '1px solid #1a3a52' }}>
+                🌐 {String(p.metadata.region)}
+              </span>
+            )}
             {p.metadata?.location && (
               <span style={{ fontSize: 8.5, color: '#263d52' }}>
                 📍 {String(p.metadata.location).split(',')[0]}
