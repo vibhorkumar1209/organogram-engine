@@ -103,6 +103,7 @@ export default function App() {
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [companyWebsite, setCompanyWebsite] = useState('')
 
   // Ping backend on load so Render wakes before first upload
   useEffect(() => {
@@ -245,10 +246,10 @@ export default function App() {
     setStatusMsg(`Processing ${file.name}…`)
 
     try {
-      const res = await fetch(
-        `${API}/upload`,
-        { method: 'POST', body: form }
-      )
+      const uploadUrl = companyWebsite.trim()
+        ? `${API}/upload?company_website=${encodeURIComponent(companyWebsite.trim())}`
+        : `${API}/upload`
+      const res = await fetch(uploadUrl, { method: 'POST', body: form })
       clearInterval(tick)
       if (!res.ok) {
         const errText = await res.text()
@@ -513,6 +514,24 @@ export default function App() {
             }}>
               <div style={{ fontSize: 48, opacity: 0.1 }}>⬡</div>
               <div style={{ color: '#334155', fontSize: 14 }}>Drop a file or click "Demo"</div>
+              {/* Company website input for BOD/EM enrichment */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="text"
+                  placeholder="Company website (optional) — e.g. morganstanley.com"
+                  value={companyWebsite}
+                  onChange={e => setCompanyWebsite(e.target.value)}
+                  style={{
+                    width: 340, padding: '6px 12px',
+                    background: '#0c1929', border: '1px solid #1e3a52',
+                    borderRadius: 6, color: '#94a3b8', fontSize: 12,
+                    outline: 'none',
+                  }}
+                />
+                <div style={{ fontSize: 11, color: '#1e3a52' }}>
+                  Used to fetch Board of Directors &amp; Executive Management from the company website
+                </div>
+              </div>
             </div>
           )}
 

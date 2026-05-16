@@ -94,6 +94,58 @@ _SENIORITY_WORDS: frozenset[str] = frozenset({
 })
 
 
+# ── Board-member title patterns → force L0 ───────────────────────────────────
+# NLP sees "Director" and assigns L5 (senior middle-management). But "Independent
+# Director", "Non-Executive Director" etc. are board roles, not line roles.
+# These patterns override both layer and dept_primary.
+_BOARD_PATTERNS: tuple[str, ...] = (
+    "non-executive director",
+    "non executive director",
+    "independent non-executive",
+    "independent director",
+    "non-executive chair",
+    "non-executive chairman",
+    "non-executive vice chairman",
+    "senior independent director",
+    "supervisory board",
+    "board of trustees",
+    "board trustee",
+    "board of directors",
+    "lead independent",
+    "lead director",
+    "outside director",
+    "external director",
+    # Single-word board titles (checked separately with word-boundary logic)
+)
+_BOARD_EXACT: frozenset[str] = frozenset({
+    "chairman",
+    "chairwoman",
+    "chairperson",
+    "chair",
+    "board member",
+    "board director",
+    "director (non-executive)",
+    "ned",   # Non-Executive Director abbreviation
+})
+
+
+def _is_board_title(designation: str) -> bool:
+    """
+    Return True if the designation is a board-level role (L0).
+    Catches "Independent Director", "Non-Executive Chairman", etc. that the
+    NLP keyword engine misclassifies as L5 line-Director roles.
+    """
+    t = designation.strip().lower()
+    # Substring match for multi-word patterns
+    for pat in _BOARD_PATTERNS:
+        if pat in t:
+            return True
+    # Exact match for short/ambiguous titles
+    if t in _BOARD_EXACT:
+        return True
+    return False
+
+
 def _bare_dept_check(designation: str) -> tuple[Optional[str], bool]:
     """
     Returns (canonical_dept, is_bare) for a designation.
@@ -568,14 +620,25 @@ class InferenceEngine:
                 if refined[2] and not dept_tertiary:
                     dept_tertiary = refined[2]
 
-        # ── Fix 2: Bare dept name as designation → IC, not a leader ─────
-        bare_dept, is_bare = _bare_dept_check(designation)
-        if is_bare and bare_dept:
-            dept_primary = bare_dept
-            layer = max(layer, 8)   # floor at Staff/IC — never a head/manager
-            logger.debug(
-                f"Bare dept designation '{designation}' → {bare_dept} L{layer}"
-            )
+        # ── Board title override (highest priority after dept field) ─────────
+        # "Independent Director", "Non-Executive Chairman" etc. are Board roles.
+        # NLP keyword engine misreads "Director" as L5 line-management; override it.
+        if _is_board_title(designation):
+            layer        = 0
+            dept_primary = "Board of Management"
+            dept_secondary = ""
+            dept_tertiary  = ""
+            logger.debug(f"Board title override: '{designation}' → L0 Board of Management")
+
+        # ── Bare dept name as designation → IC, not a leader ─────────────
+        elif not _is_board_title(designation):
+            bare_dept, is_bare = _bare_dept_check(designation)
+            if is_bare and bare_dept:
+                dept_primary = bare_dept
+                layer = max(layer, 8)   # floor at Staff/IC — never a head/manager
+                logger.debug(
+                    f"Bare dept designation '{designation}' → {bare_dept} L{layer}"
+                )
 
         # ── Sector ────────────────────────────────────────────────────────
         sector = self.nlp.classify_sector(company, designation, industry_hint)

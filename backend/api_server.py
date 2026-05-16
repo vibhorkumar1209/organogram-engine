@@ -290,8 +290,13 @@ def _dag_loaded() -> bool:
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...),
-                      company_name: str = Query("Organization")):
-    """Accept CSV, JSON, or Excel. Build the DAG and return stats."""
+                      company_name: str = Query("Organization"),
+                      company_website: str = Query("")):
+    """Accept CSV, JSON, or Excel. Build the DAG and return stats.
+
+    Optional: company_website=https://morganstanley.com
+    When provided, the backend scrapes that domain for BOD/EM leadership data.
+    """
     global _dag, _db
 
     content = await file.read()
@@ -356,6 +361,12 @@ async def upload_file(file: UploadFile = File(...),
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning(f"Background enrichment failed: {exc}")
+
+    # Explicit company_website param overrides auto-detected domain
+    if company_website:
+        import re as _re
+        _m = _re.search(r"(?:https?://)?(?:www\.)?([^/]+)", company_website)
+        _domain = _m.group(1) if _m else _domain
 
     t = threading.Thread(
         target=_bg_enrich,

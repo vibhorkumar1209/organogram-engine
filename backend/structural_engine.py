@@ -1008,8 +1008,8 @@ def build_from_records(records: list[dict],
     db = OrganogramDB(db_path=db_path)
     db.upsert_dag(dag)
 
-    # Return classified records and primary domain so the caller can run
-    # leadership enrichment in a background thread without blocking the upload.
+    # Determine primary domain for website-based leadership research.
+    # Priority: email_domain column → guess from company_name slug
     from collections import Counter as _Counter
     _domain_counts = _Counter(
         str(r.get("email_domain", "") or "").strip().lower()
@@ -1019,7 +1019,31 @@ def build_from_records(records: list[dict],
     )
     primary_domain = _domain_counts.most_common(1)[0][0] if _domain_counts else ""
 
+    if not primary_domain and company_name:
+        primary_domain = _guess_domain(company_name)
+
     return dag, db, classified, primary_domain
+
+
+def _guess_domain(company_name: str) -> str:
+    """
+    Best-effort domain from a company name.
+    'Morgan Stanley' → 'morganstanley.com'
+    'JP Morgan'      → 'jpmorgan.com'
+    Returns '' when the result looks too short to be reliable.
+    """
+    suffixes = (
+        " & co", " and co", " inc", " ltd", " llc", " plc", " corp",
+        " corporation", " limited", " group", " holdings", " sa", " ag",
+        " gmbh", " bv", " nv", " se", " co",
+    )
+    name = company_name.lower().strip()
+    for sfx in suffixes:
+        if name.endswith(sfx):
+            name = name[: -len(sfx)].strip()
+            break
+    slug = re.sub(r"[^a-z0-9]", "", name)
+    return f"{slug}.com" if len(slug) >= 4 else ""
 
 
 # ─────────────────────────────────────────────
