@@ -158,36 +158,6 @@ Rules:
   {"board": [], "executives": []}.
 - Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
-_SYSTEM_FROM_KNOWLEDGE = """\
-You are a corporate intelligence assistant with knowledge of listed and \
-major private companies worldwide.
-
-Given a company name, return a JSON object with the current (or most recent \
-publicly known) Board of Directors and Executive Management team.
-
-Schema:
-{
-  "board": [
-    {"name": "Full Name", "title": "Exact board title (e.g. Non-Executive Director, Chairman)"}
-  ],
-  "executives": [
-    {"name": "Full Name", "title": "Exact C-Suite title (e.g. Chief Financial Officer)"}
-  ]
-}
-
-Rules:
-- board: include Chairman, Non-Executive Directors, Independent Directors, \
-  Supervisory Board members, Board of Trustees members. Do NOT include \
-  executive directors who also hold a C-Suite role (they go in executives).
-- executives: include ONLY C-Suite: CEO, President, COO, CFO, CTO, CIO, CISO, \
-  CMO, CHRO / Chief People Officer, CRO, CLO / General Counsel, Chief Strategy \
-  Officer, Chief Digital Officer, Chief Commercial Officer, and equivalent.
-  Do NOT include VPs, SVPs, MDs, or Directors.
-- Use full legal/formal titles exactly as the company uses them.
-- If the company is not publicly known or you have no reliable data, return \
-  {"board": [], "executives": []}.
-- Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CACHE
@@ -229,35 +199,33 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Priority 1: scrape the company's own website ─────────────────────────
-    web_text = _fetch_leadership_text(domain) if domain else ""
-    if web_text:
-        logger.info(
-            f"Using website content for '{company_name}' "
-            f"(domain={domain}, {len(web_text)} chars scraped)"
+    # ── Website scrape — only source; no LLM knowledge fallback ─────────────
+    if not domain:
+        logger.debug(
+            f"No domain for '{company_name}' — skipping leadership enrichment"
         )
-        result = _call_claude(
-            system=_SYSTEM_FROM_WEB,
-            user_msg=(
-                f"Company: {company_name}\n\n"
-                f"Website content:\n{web_text}"
-            ),
-            label=f"{company_name} [web]",
-        )
-        # If the website gave us real data, use it
-        if result["board"] or result["executives"]:
-            _LEADERSHIP_CACHE[cache_key] = result
-            return result
-        logger.info(
-            f"Website scrape returned no leaders for '{company_name}' "
-            f"— falling back to LLM knowledge"
-        )
+        return {"board": [], "executives": []}
 
-    # ── Priority 2: LLM training-data knowledge ──────────────────────────────
+    web_text = _fetch_leadership_text(domain)
+    if not web_text:
+        logger.info(
+            f"No leadership pages found on {domain} for '{company_name}'"
+        )
+        result = {"board": [], "executives": []}
+        _LEADERSHIP_CACHE[cache_key] = result
+        return result
+
+    logger.info(
+        f"Scraping leadership for '{company_name}' from {domain} "
+        f"({len(web_text)} chars)"
+    )
     result = _call_claude(
-        system=_SYSTEM_FROM_KNOWLEDGE,
-        user_msg=f"Company: {company_name}",
-        label=f"{company_name} [knowledge]",
+        system=_SYSTEM_FROM_WEB,
+        user_msg=(
+            f"Company: {company_name}\n\n"
+            f"Website content:\n{web_text}"
+        ),
+        label=f"{company_name} [web]",
     )
     _LEADERSHIP_CACHE[cache_key] = result
     return result
