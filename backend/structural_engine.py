@@ -163,43 +163,40 @@ _SUBDEPT_REMAP: dict[str, str] = {
 
 # or an industry-specific label and gets remapped via _DEPT_REMAP.
 _CANONICAL_PRIMARY: frozenset[str] = frozenset({
+    # ── Leadership ────────────────────────────────────────────────────
     "Board of Management",
     "Executive Management",
+    # ── Support functions ─────────────────────────────────────────────
     "Finance",
     "Human Resources",
     "People & Culture",
-    "Legal",
-    "Legal & Compliance",
-    "Risk & Compliance",
-    "Risk Management",
-    "Compliance",
+    "Legal",              # Compliance, Regulatory Affairs are SUB-depts of Legal
+    "Risk Management",    # Credit Risk, Market Risk, etc. are SUB-depts
+    # ── Technology ───────────────────────────────────────────────────
     "Technology",
-    "Information Technology",
     "Engineering",
     "Data & Analytics",
     "Product Management",
+    # ── Operations ───────────────────────────────────────────────────
     "Operations",
     "Supply Chain",
     "Manufacturing",
+    "Procurement",
+    # ── Revenue ──────────────────────────────────────────────────────
     "Sales",
-    "Commercial",
-    "Sales & Commercial",
     "Marketing",
-    "Customer Experience",
-    "Customer Success",
+    # ── Strategy / Comms ─────────────────────────────────────────────
     "Strategy",
     "Corporate Development",
     "Communications",
     "Sustainability",
+    # ── R&D ──────────────────────────────────────────────────────────
     "Research & Development",
-    "Procurement",
+    # ── Financial-services industry-specific ─────────────────────────
     "Actuarial",
     "Underwriting",
     "Claims",
     "Investment Management",
-    "Treasury",
-    "Audit",
-    "Internal Audit",
 })
 
 # Map non-canonical / industry-specific / generic dept names → canonical.
@@ -318,21 +315,40 @@ _DEPT_REMAP: dict[str, str] = {
     "sourcing":                         "Procurement",
     "indirect procurement":             "Procurement",
     "direct procurement":               "Procurement",
-    # Legal
-    "legal & regulatory":               "Legal & Compliance",
-    "regulatory":                       "Legal & Compliance",
-    "regulatory affairs":               "Legal & Compliance",
-    "compliance & legal":               "Legal & Compliance",
-    "governance":                       "Legal & Compliance",
-    "governance risk & compliance":     "Risk & Compliance",
-    "grc":                              "Risk & Compliance",
-    # Risk
+    # Legal — all compliance/regulatory variants collapse to "Legal" primary
+    # so that _DEPT_ELEVATE can then set the correct sub-dept
+    "legal & compliance":               "Legal",
+    "compliance & legal":               "Legal",
+    "legal & regulatory":               "Legal",
+    "legal, compliance & regulatory":   "Legal",
+    "legal and compliance":             "Legal",
+    "regulatory":                       "Legal",
+    "regulatory affairs":               "Legal",
+    "compliance":                       "Legal",
+    "governance":                       "Legal",
+    "secretariat":                      "Legal",
+    "company secretary":                "Legal",
+    # Risk — all risk variants collapse to "Risk Management" primary
+    "risk & compliance":                "Risk Management",
+    "risk and compliance":              "Risk Management",
+    "governance risk & compliance":     "Risk Management",
+    "governance, risk & compliance":    "Risk Management",
+    "grc":                              "Risk Management",
     "risk":                             "Risk Management",
     "credit risk":                      "Risk Management",
     "market risk":                      "Risk Management",
     "operational risk":                 "Risk Management",
     "enterprise risk":                  "Risk Management",
     "risk advisory":                    "Risk Management",
+    # Public Sector / Government — client-segment, not a functional dept
+    "public sector":                    "Sales",
+    "government":                       "Sales",
+    "government & public sector":       "Sales",
+    "public sector & government":       "Sales",
+    "defence":                          "Sales",
+    "defence & public sector":          "Sales",
+    "healthcare sector":                "Sales",
+    "financial services sector":        "Sales",
     # R&D
     "r&d":                              "Research & Development",
     "innovation":                       "Research & Development",
@@ -347,15 +363,25 @@ _DEPT_REMAP: dict[str, str] = {
     "after-sales":                      "Customer Experience",
     "post sales":                       "Customer Experience",
     "service":                          "Customer Experience",
-    # Strategy / Corporate
+    # Strategy / Corporate — all policy/strategy variants collapse to "Strategy"
     "corporate strategy":               "Strategy",
     "group strategy":                   "Strategy",
     "strategy & corporate development": "Strategy",
     "business strategy":                "Strategy",
+    "policy & strategy":                "Strategy",
+    "strategy & policy":                "Strategy",
+    "policy":                           "Strategy",
+    "public policy":                    "Strategy",
+    "strategy & planning":              "Strategy",
+    "planning & strategy":              "Strategy",
     "transformation":                   "Strategy",
     "business transformation":          "Strategy",
     "digital transformation":           "Strategy",
     "change management":                "Strategy",
+    # Commercial / Sales & Commercial → Sales
+    "commercial":                       "Sales",
+    "sales & commercial":               "Sales",
+    "commercial & sales":               "Sales",
     # Communications / PR
     "public relations":                 "Communications",
     "pr":                               "Communications",
@@ -375,55 +401,153 @@ _DEPT_REMAP: dict[str, str] = {
 # correct (parent_primary, sub_dept_label) pair.  Applied in insert_person()
 # only when dept_secondary is otherwise empty, and only for L3+ people.
 _DEPT_ELEVATE: dict[str, tuple[str, str]] = {
-    # ── Sales children ──────────────────────────────────────────────────
+    # ── Legal sub-depts ─────────────────────────────────────────────────
+    # Primary dept = "Legal".  Everything that was previously a sibling
+    # of "Legal" becomes a sub-dept of it.
+    "legal & compliance":               ("Legal", "Compliance"),
+    "compliance & legal":               ("Legal", "Compliance"),
+    "legal and compliance":             ("Legal", "Compliance"),
+    "compliance":                       ("Legal", "Compliance"),
+    "legal & regulatory":               ("Legal", "Regulatory Affairs"),
+    "legal, compliance & regulatory":   ("Legal", "Regulatory Affairs"),
+    "regulatory affairs":               ("Legal", "Regulatory Affairs"),
+    "regulatory":                       ("Legal", "Regulatory Affairs"),
+    "governance":                       ("Legal", "Governance"),
+    "secretariat":                      ("Legal", "Company Secretariat"),
+    "company secretary":                ("Legal", "Company Secretariat"),
+    # ── Risk Management sub-depts ───────────────────────────────────────
+    "risk & compliance":                ("Risk Management", "Compliance"),
+    "risk and compliance":              ("Risk Management", "Compliance"),
+    "governance risk & compliance":     ("Risk Management", "Governance & Compliance"),
+    "governance, risk & compliance":    ("Risk Management", "Governance & Compliance"),
+    "grc":                              ("Risk Management", "Governance & Compliance"),
+    "credit risk":                      ("Risk Management", "Credit Risk"),
+    "market risk":                      ("Risk Management", "Market Risk"),
+    "operational risk":                 ("Risk Management", "Operational Risk"),
+    "enterprise risk":                  ("Risk Management", "Enterprise Risk"),
+    "risk advisory":                    ("Risk Management", "Risk Advisory"),
+    # ── Strategy sub-depts ──────────────────────────────────────────────
+    "policy & strategy":                ("Strategy", "Policy & Strategy"),
+    "strategy & policy":                ("Strategy", "Policy & Strategy"),
+    "public policy":                    ("Strategy", "Public Policy"),
+    "policy":                           ("Strategy", "Policy"),
+    "corporate strategy":               ("Strategy", "Corporate Strategy"),
+    "group strategy":                   ("Strategy", "Corporate Strategy"),
+    "business strategy":                ("Strategy", "Corporate Strategy"),
+    "strategy & planning":              ("Strategy", "Strategic Planning"),
+    "planning & strategy":              ("Strategy", "Strategic Planning"),
+    "transformation":                   ("Strategy", "Business Transformation"),
+    "business transformation":          ("Strategy", "Business Transformation"),
+    "digital transformation":           ("Strategy", "Business Transformation"),
+    "change management":                ("Strategy", "Change Management"),
+    "programme management":             ("Strategy", "Programme Management"),
+    "pmo":                              ("Strategy", "Programme Management"),
+    "epmo":                             ("Strategy", "Programme Management"),
+    "project management":               ("Strategy", "Programme Management"),
+    # ── Sales sub-depts ─────────────────────────────────────────────────
     "sales & account management":       ("Sales", "Account Management"),
-    "sales & commercial":               ("Sales", "Sales & Commercial"),
+    "sales & commercial":               ("Sales", "Commercial"),
     "account management":               ("Sales", "Account Management"),
     "key account management":           ("Sales", "Account Management"),
     "inside sales":                     ("Sales", "Inside Sales"),
-    "new business development":         ("Sales", "New Business Development"),
-    "new business":                     ("Sales", "New Business Development"),
+    "new business development":         ("Sales", "Business Development"),
+    "new business":                     ("Sales", "Business Development"),
+    "business development":             ("Sales", "Business Development"),
     "pre-sales":                        ("Sales", "Pre-Sales & Solutioning"),
     "channel & partners":               ("Sales", "Channel & Partners"),
     "sales operations":                 ("Sales", "Sales Operations"),
-    "commercial":                       ("Sales", "Sales & Commercial"),
-    # ── Marketing children ──────────────────────────────────────────────
+    "commercial":                       ("Sales", "Commercial"),
+    # Client-segment verticals → Sales sub-depts (not standalone depts)
+    "public sector":                    ("Sales", "Public Sector"),
+    "government":                       ("Sales", "Government & Public Sector"),
+    "government & public sector":       ("Sales", "Government & Public Sector"),
+    "public sector & government":       ("Sales", "Government & Public Sector"),
+    "defence":                          ("Sales", "Defence & Government"),
+    "defence & public sector":          ("Sales", "Defence & Government"),
+    "healthcare sector":                ("Sales", "Healthcare"),
+    "financial services sector":        ("Sales", "Financial Services"),
+    "enterprise accounts":              ("Sales", "Enterprise"),
+    "mid-market":                       ("Sales", "Mid-Market"),
+    # ── Marketing sub-depts ─────────────────────────────────────────────
     "customer experience":              ("Marketing", "Customer Experience"),
     "customer success":                 ("Marketing", "Customer Success"),
-    "brand":                            ("Marketing", "Brand & Communications"),
-    "brand & communications":           ("Marketing", "Brand & Communications"),
+    "brand":                            ("Marketing", "Brand"),
+    "brand & communications":           ("Marketing", "Brand"),
+    "brand management":                 ("Marketing", "Brand"),
     "digital marketing":                ("Marketing", "Digital Marketing"),
     "digital & performance marketing":  ("Marketing", "Digital Marketing"),
     "performance marketing":            ("Marketing", "Digital Marketing"),
+    "social media":                     ("Marketing", "Digital Marketing"),
     "market research":                  ("Marketing", "Market Research & Insights"),
     "consumer insights":                ("Marketing", "Market Research & Insights"),
     "product marketing":                ("Marketing", "Product Marketing"),
-    "social media":                     ("Marketing", "Digital Marketing"),
-    # ── R&D children ────────────────────────────────────────────────────
+    "content":                          ("Marketing", "Content & Creative"),
+    "creative":                         ("Marketing", "Content & Creative"),
+    "events":                           ("Marketing", "Events & Sponsorship"),
+    # ── Finance sub-depts ───────────────────────────────────────────────
+    "treasury":                         ("Finance", "Treasury"),
+    "internal audit":                   ("Finance", "Internal Audit"),
+    "audit & assurance":                ("Finance", "Internal Audit"),
+    "audit":                            ("Finance", "Internal Audit"),
+    "fp&a":                             ("Finance", "FP&A"),
+    "financial planning & analysis":    ("Finance", "FP&A"),
+    "tax":                              ("Finance", "Tax"),
+    "accounting":                       ("Finance", "Accounting & Reporting"),
+    "investor relations":               ("Finance", "Investor Relations"),
+    "corporate finance":                ("Finance", "Corporate Finance"),
+    # ── Human Resources sub-depts ───────────────────────────────────────
+    "talent acquisition":               ("Human Resources", "Talent Acquisition"),
+    "recruitment":                      ("Human Resources", "Talent Acquisition"),
+    "talent management":                ("Human Resources", "Talent Management"),
+    "learning & development":           ("Human Resources", "Learning & Development"),
+    "l&d":                              ("Human Resources", "Learning & Development"),
+    "training":                         ("Human Resources", "Learning & Development"),
+    "compensation & benefits":          ("Human Resources", "Compensation & Benefits"),
+    "total rewards":                    ("Human Resources", "Compensation & Benefits"),
+    "hr business partnering":           ("Human Resources", "HR Business Partnering"),
+    "people analytics":                 ("Human Resources", "People Analytics"),
+    "diversity & inclusion":            ("Human Resources", "Diversity & Inclusion"),
+    "dei":                              ("Human Resources", "Diversity & Inclusion"),
+    # ── Technology sub-depts ────────────────────────────────────────────
+    "data & analytics":                 ("Technology", "Data & Analytics"),
+    "data engineering":                 ("Technology", "Data & Analytics"),
+    "data science":                     ("Technology", "Data & Analytics"),
+    "analytics":                        ("Technology", "Data & Analytics"),
+    "cybersecurity":                    ("Technology", "Information Security"),
+    "information security":             ("Technology", "Information Security"),
+    "cyber security":                   ("Technology", "Information Security"),
+    "it infrastructure":                ("Technology", "IT Infrastructure"),
+    "infrastructure":                   ("Technology", "IT Infrastructure"),
+    "application development":          ("Technology", "Application Development"),
+    "software development":             ("Technology", "Application Development"),
+    "enterprise architecture":          ("Technology", "Enterprise Architecture"),
+    "digital":                          ("Technology", "Digital"),
+    # ── R&D sub-depts ───────────────────────────────────────────────────
     "research":                         ("Research & Development", "Research"),
     "innovation":                       ("Research & Development", "Innovation"),
     "r&d":                              ("Research & Development", "Research"),
-    # ── Technology children ─────────────────────────────────────────────
-    "data & analytics":                 ("Technology", "Data & Analytics"),
-    "cybersecurity":                    ("Technology", "Cybersecurity"),
-    "information security":             ("Technology", "Information Security"),
-    "it infrastructure":                ("Technology", "IT Infrastructure"),
-    "application development":          ("Technology", "Application Development"),
-    # ── Finance children ────────────────────────────────────────────────
-    "treasury":                         ("Finance", "Treasury"),
-    "internal audit":                   ("Finance", "Internal Audit"),
-    "fp&a":                             ("Finance", "FP&A"),
-    # ── HR children ─────────────────────────────────────────────────────
-    "talent acquisition":               ("Human Resources", "Talent Acquisition"),
-    "learning & development":           ("Human Resources", "Learning & Development"),
-    "compensation & benefits":          ("Human Resources", "Compensation & Benefits"),
-    # ── Operations children ─────────────────────────────────────────────
+    # ── Operations sub-depts ────────────────────────────────────────────
     "health, safety & environment":     ("Operations", "HSE"),
-    "quality & compliance":             ("Operations", "Quality & Compliance"),
+    "hse":                              ("Operations", "HSE"),
+    "ehs":                              ("Operations", "HSE"),
+    "health & safety":                  ("Operations", "HSE"),
+    "quality & compliance":             ("Operations", "Quality"),
+    "quality assurance":                ("Operations", "Quality"),
+    "quality":                          ("Operations", "Quality"),
     "facilities management":            ("Operations", "Facilities"),
-    # ── Legal / Compliance children ─────────────────────────────────────
-    "legal & compliance":               ("Legal", "Compliance"),
-    "risk management":                  ("Legal", "Risk Management"),
+    "facilities":                       ("Operations", "Facilities"),
+    "real estate":                      ("Operations", "Real Estate & Facilities"),
+    "shared services":                  ("Operations", "Shared Services"),
+    "service delivery":                 ("Operations", "Service Delivery"),
+    # ── Communications sub-depts ────────────────────────────────────────
+    "corporate communications":         ("Communications", "Corporate Communications"),
+    "internal communications":          ("Communications", "Internal Communications"),
+    "external communications":          ("Communications", "External Communications"),
+    "public relations":                 ("Communications", "Public Relations"),
+    "pr":                               ("Communications", "Public Relations"),
+    "external affairs":                 ("Communications", "External Affairs"),
+    "public affairs":                   ("Communications", "Public Affairs"),
+    "media relations":                  ("Communications", "Media Relations"),
 }
 
 
@@ -442,8 +566,12 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
     # Layer-based hard overrides (most important — independent of NLP dept)
     if layer == 0:
         return "Board of Management"
-    if layer in (1, 2):
+    if layer == 1:
+        # True C-Suite (CEO, CFO, COO, CTO, CMO …) → always Executive Management
         return "Executive Management"
+    # L2 (EVP / MD / Senior VP) and below: use actual functional department.
+    # An "EVP of Finance" belongs in Finance, not Executive Management.
+    # Only the true C-Suite chiefs (L1) should be grouped under EM.
 
     # Attempt remap via exact lookup (case-insensitive)
     key = dept_primary.strip().lower()
@@ -491,52 +619,43 @@ def _canonical_subdept(dept_secondary: str) -> str:
 
 # Department display order — lower number = shown first
 DEPT_PRIMARY_ORDER: dict[str, int] = {
-    # ── Leadership (always first) ────────────────────────────────────
-    "board of management":   0,   # canonical L0 label used by the engine
-    "board of directors":    0,
-    "board":                 0,
-    "executive management":  1,   # canonical L1/L2 label
-    "c-suite":               1,
-    "ceo office":            2,
-    "corporate":             3,
-    # ── Support functions ────────────────────────────────────────────
-    "finance":              10,
-    "human resources":      11,
-    "people & culture":     11,
-    "hr":                   11,
-    "legal":                12,
-    "legal & compliance":   12,
-    "risk & compliance":    13,
-    "risk management":      13,
-    "risk":                 13,
-    "compliance":           13,
+    # ── Leadership (always first two levels) ─────────────────────────
+    "board of management":      0,
+    "board of directors":       0,
+    "board":                    0,
+    "executive management":     1,
+    "c-suite":                  1,
+    # ── Governance / Support functions ───────────────────────────────
+    "finance":                 10,
+    "human resources":         11,
+    "people & culture":        11,
+    "legal":                   12,   # Compliance & Regulatory are sub-depts
+    "risk management":         13,   # Credit/Market/Operational Risk are sub-depts
     # ── Technology / Data ────────────────────────────────────────────
-    "technology":           14,
-    "information technology": 14,
-    "it":                   14,
-    "data & analytics":     15,
-    "data":                 15,
-    # ── Product / Engineering ────────────────────────────────────────
-    "engineering":          16,
-    "research & development": 16,
-    "engineering & r&d":    16,
-    "product management":   17,
-    "strategy":             18,
+    "technology":              14,
+    "engineering":             15,
+    "data & analytics":        16,
+    "product management":      17,
+    # ── Strategy / Transformation ────────────────────────────────────
+    "strategy":                18,
+    "corporate development":   19,
     # ── Operations ───────────────────────────────────────────────────
-    "operations":           19,
-    "manufacturing":        20,
-    "supply chain":         21,
-    "procurement":          22,
-    # ── Revenue / Customer ───────────────────────────────────────────
-    "sales":                23,
-    "marketing":            24,
-    "customer experience":  25,
-    "customer success":     25,
-    "customer service":     25,
-    # ── Others ───────────────────────────────────────────────────────
-    "communications":       28,
-    "corporate development": 29,
-    "sustainability":       30,
+    "operations":              20,
+    "manufacturing":           21,
+    "supply chain":            22,
+    "procurement":             23,
+    # ── Revenue / Customer-facing ────────────────────────────────────
+    "sales":                   24,
+    "marketing":               25,
+    # ── Communications / ESG ─────────────────────────────────────────
+    "communications":          28,
+    "sustainability":          30,
+    # ── R&D / Specialist ─────────────────────────────────────────────
+    "research & development":  32,
+    "actuarial":               35,
+    "underwriting":            36,
+    "claims":                  37,
+    "investment management":   38,
 }
 
 
