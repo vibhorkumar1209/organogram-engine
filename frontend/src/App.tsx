@@ -237,9 +237,9 @@ export default function App() {
       setStats(data.stats)
       if (data.canonical_missing?.length > 0) {
         setColWarning(
-          `Auto-mapped columns. Missing: ${data.canonical_missing.join(', ')}. ` +
-          `Detected: ${data.detected_columns?.join(', ') ?? '(unknown)'}. ` +
-          `Use headers: FirstName, LastName, Designation, Company, Location, LinkedInURL, Industry_Hint`
+          `Could not detect: ${data.canonical_missing.join(' · ')}. ` +
+          `Check that your file has columns for name, job title, and company. ` +
+          `Detected columns: ${data.detected_columns?.join(', ') ?? '(unknown)'}.`
         )
       }
       await loadDeptStructure()
@@ -270,7 +270,7 @@ export default function App() {
   const loadEmbeddedDemo = () => {
     const raw: OrgNode = {
       node_id: 'root_global', node_type: 'global',
-      label: 'Global Conglomerate Inc.', layer: -1, sector: 'All', color: '#3491E8',
+      label: 'AutoPrime Motors', layer: -1, sector: 'All', color: '#3491E8',
       is_ghost: false, expanded: false, metadata: {},
       children: [
         {

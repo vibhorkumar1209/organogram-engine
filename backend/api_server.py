@@ -216,6 +216,9 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+import os
+from fastapi.staticfiles import StaticFiles
+
 app = FastAPI(title="Organogram Engine API", version="1.0.0")
 
 app.add_middleware(
@@ -387,19 +390,38 @@ async def upload_file(file: UploadFile = File(...),
     )
     t.start()
 
-    # Report which canonical fields were found
-    canonical = {"FirstName", "LastName", "Designation", "Company",
-                 "LinkedInURL", "Location", "Industry_Hint"}
-    found   = canonical & set(mapped_cols)
-    missing = canonical - set(mapped_cols)
+    # ── Field coverage check (group-aware) ──────────────────────────────────
+    # Vendors use many equivalent column names.  We check coverage by semantic
+    # group, not by exact canonical name, so "full_name" satisfies "Name" even
+    # though neither "FirstName" nor "LastName" is present.
+    mapped_set = set(mapped_cols)
+
+    has_name = (
+        "FullName"    in mapped_set              # full_name / name / etc.
+        or ("FirstName" in mapped_set and "LastName" in mapped_set)
+    )
+    has_title    = "Designation"  in mapped_set  # job_title / title / designation
+    has_company  = "Company"      in mapped_set  # company_name / company / employer
+    has_linkedin = "LinkedInURL"  in mapped_set  # linkedin_url / linkedinurl
+    has_location = bool(mapped_set & {           # any of these satisfies "location"
+        "Location", "city", "country_name", "country_code",
+        "job_city", "job_country", "job_country_code",
+    })
+
+    missing: list[str] = []
+    if not has_name:    missing.append("Name (FirstName+LastName or FullName)")
+    if not has_title:   missing.append("Designation / JobTitle")
+    if not has_company: missing.append("Company")
+    # Location and LinkedInURL are strongly recommended but not blocking
+    if not has_location:  missing.append("Location / city / country")
+    if not has_linkedin:  missing.append("LinkedInURL")
 
     return {
         "status": "ok",
-        "records_ingested": len(records),
-        "detected_columns": detected_cols,
-        "mapped_columns":   mapped_cols,
-        "canonical_found":  sorted(found),
-        "canonical_missing": sorted(missing),
+        "records_ingested":  len(records),
+        "detected_columns":  detected_cols,
+        "mapped_columns":    mapped_cols,
+        "canonical_missing": missing,   # empty list = all key fields detected
         "stats": _dag.stats(),
     }
 
@@ -416,7 +438,7 @@ async def load_demo():
         records = json.load(f)
 
     _dag, _db, _classified, _domain = build_from_records(
-        records, company_name="Global Conglomerate Inc."
+        records, company_name="AutoPrime Motors"
     )
     return {
         "status": "ok",
@@ -498,8 +520,15 @@ def get_industries():
 @app.get("/executives")
 def get_executives(dept_id: str = Query(...)):
     """
-    Walk the DAG from dept_id and return all person nodes (sorted by layer),
-    skipping ghost/placeholder nodes entirely.
+    Return person nodes under dept_id with source-aware filtering:
+
+    • BOD / EM nodes  → only DIRECT person children whose nlp_method is
+      "llm_leadership" (web-scraped from company website).  No DFS into
+      functional sub-departments.
+
+    • Functional dept nodes → DFS across all sub-depts / teams, but
+      EXCLUDE web-scraped governance people (nlp_method == "llm_leadership")
+      so board members / executives don't bleed into dept cards.
     """
     if not _dag_loaded():
         return {"loaded": False, "executives": [], "count": 0}
@@ -507,19 +536,38 @@ def get_executives(dept_id: str = Query(...)):
     if dept_id not in dag.G:
         raise HTTPException(status_code=404, detail=f"Node '{dept_id}' not found.")
 
+    # Identify BOD / EM governance nodes by their canonical label
+    _GOVERNANCE_LABELS: frozenset = frozenset({
+        "board of management", "board of directors", "board",
+        "executive management", "c-suite", "ceo office",
+    })
+    node_label = str(dag.G.nodes[dept_id].get("label", "")).lower()
+    is_governance = node_label in _GOVERNANCE_LABELS
+
     people: list[dict] = []
 
-    def collect(nid: str, visited: set):
-        if nid in visited:
-            return
-        visited.add(nid)
-        attrs = dict(dag.G.nodes.get(nid, {}))
-        if attrs.get("node_type") == "person":
-            people.append(attrs)
-        for child in dag.G.successors(nid):
-            collect(child, visited)
+    if is_governance:
+        # Only direct person children that were sourced from the company website
+        for child_id in dag.G.successors(dept_id):
+            attrs = dict(dag.G.nodes.get(child_id, {}))
+            if (attrs.get("node_type") == "person"
+                    and attrs.get("metadata", {}).get("nlp_method") == "llm_leadership"):
+                people.append(attrs)
+    else:
+        # Full DFS but exclude web-scraped governance people
+        def collect(nid: str, visited: set):
+            if nid in visited:
+                return
+            visited.add(nid)
+            attrs = dict(dag.G.nodes.get(nid, {}))
+            if attrs.get("node_type") == "person":
+                if attrs.get("metadata", {}).get("nlp_method") != "llm_leadership":
+                    people.append(attrs)
+            for child in dag.G.successors(nid):
+                collect(child, visited)
 
-    collect(dept_id, set())
+        collect(dept_id, set())
+
     people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
     return {"executives": people, "count": len(people)}
 
@@ -1416,8 +1464,18 @@ async def v2_corrections_summary():
 
 
 # ─────────────────────────────────────────────
+# FRONTEND STATIC FILES
+# Mount the built React app so the backend serves everything from one port.
+# API routes defined above take priority; this catches everything else.
+# ─────────────────────────────────────────────
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if _DIST.exists():
+    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
+
+
+# ─────────────────────────────────────────────
 # ENTRY
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8769, reload=True)

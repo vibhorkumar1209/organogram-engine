@@ -76,7 +76,9 @@ export const NodeTooltip: React.FC<Props> = ({ node, x, y }) => {
           </>
         )}
 
-        {node.metadata?.company && (
+        {/* Only show company for web-scraped leadership (llm_leadership);
+            uploaded data often carries the org name as company, which is redundant */}
+        {node.metadata?.company && node.metadata?.nlp_method === 'llm_leadership' && (
           <>
             <span style={{ color: '#475569' }}>Company</span>
             <span>{node.metadata.company}</span>

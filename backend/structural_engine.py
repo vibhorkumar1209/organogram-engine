@@ -558,10 +558,17 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
     Layer overrides take priority:
       L0  → Board of Management (always)
       L1  → Executive Management (C-Suite)
-      L2  → Executive Management (MD / EVP level)
 
-    For L3+, remaps non-canonical / industry-specific / generic names to the
-    closest canonical function. Falls back to "Operations" when nothing matches.
+    For L2+, only applies EXACT-match lookups (case-insensitive):
+      1. Explicit remap in _DEPT_REMAP  (e.g. "it" → "Technology")
+      2. Already a canonical primary name → return as-is
+      3. Non-empty unknown name → pass through unchanged
+      4. Empty → "Operations"
+
+    ⚠  No partial/substring matching — that caused "Professional Services"
+    to wrongly match "service" → "Customer Experience", and many similar
+    false positives.  The NLP engine (classify_dept_from_text) handles
+    compound or unfamiliar names before this function is called.
     """
     # Layer-based hard overrides (most important — independent of NLP dept)
     if layer == 0:
@@ -569,30 +576,25 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
     if layer == 1:
         # True C-Suite (CEO, CFO, COO, CTO, CMO …) → always Executive Management
         return "Executive Management"
-    # L2 (EVP / MD / Senior VP) and below: use actual functional department.
+    # L2 (EVP / MD) and below: use actual functional department.
     # An "EVP of Finance" belongs in Finance, not Executive Management.
-    # Only the true C-Suite chiefs (L1) should be grouped under EM.
 
-    # Attempt remap via exact lookup (case-insensitive)
+    # ── Exact lookup in the remap table (case-insensitive) ───────────────
     key = dept_primary.strip().lower()
     if key in _DEPT_REMAP:
         return _DEPT_REMAP[key]
 
-    # Accept if it's already canonical
+    # ── Already a recognised canonical primary name ───────────────────────
+    key_lower = key
     for canon in _CANONICAL_PRIMARY:
-        if dept_primary.strip().lower() == canon.lower():
+        if key_lower == canon.lower():
             return canon
 
-    # Partial-word remap for compound names not in the explicit map
-    for banned_key, replacement in _DEPT_REMAP.items():
-        if banned_key in key:
-            return replacement
-
-    # Unknown but non-empty name — accept as-is (analyst wrote something real)
+    # ── Unknown but non-empty — preserve it (the analyst wrote something real)
     if dept_primary.strip():
         return dept_primary.strip()
 
-    # Ultimate fallback
+    # ── Truly empty dept → last resort
     return "Operations"
 
 
@@ -610,10 +612,8 @@ def _canonical_subdept(dept_secondary: str) -> str:
     key = dept_secondary.strip().lower()
     if key in _SUBDEPT_REMAP:
         return _SUBDEPT_REMAP[key]   # "" means merge into parent
-    # Partial match for compound names not explicitly listed
-    for remap_key, remap_val in _SUBDEPT_REMAP.items():
-        if remap_key and remap_key in key:
-            return remap_val
+    # No partial/substring matching — pass unknown sub-dept names through unchanged.
+    # Partial matching caused "Professional Services" → "" (merge), etc.
     return dept_secondary.strip()
 
 
@@ -972,6 +972,73 @@ class OrganogramDAG:
 
         self._ensure_edge(prev, person_node)
 
+    # ─── Governance edge repair ───────────────────────────────────────
+    def repair_governance_edges(self) -> None:
+        """
+        Re-enforce the canonical governance hierarchy:
+            root_global → BOD → EM → functional depts
+
+        This is needed because the LLM enrichment thread creates BOD/EM
+        AFTER the uploaded records were already inserted.  At upload time,
+        EM and functional depts fall back to root_global as their parent
+        (since BOD/EM don't exist yet).  Once enrichment finishes, stale
+        root_global edges must be removed and correct parent edges added.
+
+        Safe to call multiple times — every operation is idempotent.
+        """
+        G   = self.G
+        bod_id = self._node_id("dept", "Board of Management")
+        em_id  = self._node_id("dept", "Executive Management")
+        bod_exists = bod_id in G
+        em_exists  = em_id  in G
+
+        _BOD_LABELS = frozenset({
+            "board of management", "board of directors", "board",
+        })
+        _EM_LABELS = frozenset({
+            "executive management", "c-suite", "ceo office",
+        })
+
+        # ── Step 1: EM should sit under BOD when both exist ──────────────
+        if bod_exists and em_exists:
+            if G.has_edge("root_global", em_id):
+                G.remove_edge("root_global", em_id)
+            if not G.has_edge(bod_id, em_id):
+                G.add_edge(bod_id, em_id)
+
+        # ── Step 2: Functional depts should sit under EM (or BOD) ────────
+        # Re-parent any dept_primary that is wrongly a direct child of
+        # root_global or BOD when a better parent (EM or BOD) now exists.
+        if em_exists or bod_exists:
+            correct_parent = em_id if em_exists else bod_id
+            _reserved = _BOD_LABELS | _EM_LABELS
+
+            # Walk root_global children
+            for child_id in list(G.successors("root_global")):
+                if child_id == bod_id:
+                    continue   # BOD stays directly under root_global
+                attrs = G.nodes.get(child_id, {})
+                label = str(attrs.get("label", "")).lower()
+                if (attrs.get("node_type") == NODE_DEPT_P
+                        and label not in _reserved):
+                    G.remove_edge("root_global", child_id)
+                    if not G.has_edge(correct_parent, child_id):
+                        G.add_edge(correct_parent, child_id)
+
+            # Walk BOD children — functional depts that landed under BOD
+            # (happens when BOD existed but EM didn't yet) must move to EM
+            if bod_exists and em_exists:
+                for child_id in list(G.successors(bod_id)):
+                    if child_id == em_id:
+                        continue   # EM stays under BOD
+                    attrs = G.nodes.get(child_id, {})
+                    label = str(attrs.get("label", "")).lower()
+                    if (attrs.get("node_type") == NODE_DEPT_P
+                            and label not in _reserved):
+                        G.remove_edge(bod_id, child_id)
+                        if not G.has_edge(em_id, child_id):
+                            G.add_edge(em_id, child_id)
+
     # ─── Recursive CTE-style drill-down ──────
     def get_subtree(self, node_id: str, max_depth: int = 20) -> dict:
         """
@@ -1144,6 +1211,11 @@ def build_from_records(records: list[dict],
     for rec in classified:
         dag.insert_person(rec)
 
+    # Repair any stale parent edges from the initial insertion pass
+    # (happens when L0/L1 records appear after some L2+ records due to
+    # edge cases in sort stability or data ordering)
+    dag.repair_governance_edges()
+
     db = OrganogramDB(db_path=db_path)
     db.upsert_dag(dag)
 
@@ -1291,6 +1363,12 @@ def _enrich_with_llm_leadership(
             )
             dag.insert_person(rec)
 
+    # ── Repair governance edges ───────────────────────────────────────────
+    # Uploaded records often lack L0/L1 people, so EM and functional depts
+    # fall back to root_global as their parent.  After injecting BOD/EM here,
+    # fix those stale edges so the hierarchy is correct.
+    dag.repair_governance_edges()
+
 
 # ─────────────────────────────────────────────
 # CLI TEST
@@ -1300,7 +1378,7 @@ if __name__ == "__main__":
     with open(data_path) as f:
         records = json.load(f)
 
-    dag, db = build_from_records(records, company_name="Global Conglomerate Inc.")
+    dag, db = build_from_records(records, company_name="AutoPrime Motors")
     stats = dag.stats()
     print(f"\n{'='*60}")
     print("DAG Statistics")
