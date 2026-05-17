@@ -122,14 +122,26 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     Priority for company: Company > job_org_linkedin_url > email_domain.
     Priority for location/region: job_country_code > job_country > Location.
     """
-    rename_map = {}
+    # Build rename map ensuring each canonical name is claimed by at most ONE
+    # source column.  Without this guard, two source columns that both alias
+    # to e.g. "Department" would both be renamed, creating duplicate columns —
+    # and any subsequent df["Department"].str.strip() receives a DataFrame
+    # instead of a Series, raising "'DataFrame' object has no attribute 'str'".
+    rename_map: dict = {}
+    already_claimed: set = set(df.columns)   # canonicals already present win
     for col in df.columns:
         key = re.sub(r"[^a-z0-9 _]", "", str(col).lower().strip())
         canonical = COLUMN_ALIASES.get(key)
-        if canonical and canonical not in df.columns:
+        if canonical and canonical not in already_claimed:
             rename_map[col] = canonical
+            already_claimed.add(canonical)   # block any second column claiming it
     if rename_map:
         df = df.rename(columns=rename_map)
+
+    # Safety net: drop any duplicate columns that may have survived
+    # (can happen when the Excel itself has repeated headers).
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
     # ── Name synthesis ────────────────────────────────────────────────
     # 1. FullName present → split into First + Last
