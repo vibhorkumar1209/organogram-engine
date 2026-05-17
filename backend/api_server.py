@@ -520,15 +520,9 @@ def get_industries():
 @app.get("/executives")
 def get_executives(dept_id: str = Query(...)):
     """
-    Return person nodes under dept_id with source-aware filtering:
-
-    • BOD / EM nodes  → only DIRECT person children whose nlp_method is
-      "llm_leadership" (web-scraped from company website).  No DFS into
-      functional sub-departments.
-
-    • Functional dept nodes → DFS across all sub-depts / teams, but
-      EXCLUDE web-scraped governance people (nlp_method == "llm_leadership")
-      so board members / executives don't bleed into dept cards.
+    Return all person nodes in the subtree rooted at dept_id via DFS.
+    No source filtering — every person node in the subtree is included
+    regardless of whether they came from the upload or web scraping.
     """
     if not _dag_loaded():
         return {"loaded": False, "executives": [], "count": 0}
@@ -536,37 +530,19 @@ def get_executives(dept_id: str = Query(...)):
     if dept_id not in dag.G:
         raise HTTPException(status_code=404, detail=f"Node '{dept_id}' not found.")
 
-    # Identify BOD / EM governance nodes by their canonical label
-    _GOVERNANCE_LABELS: frozenset = frozenset({
-        "board of management", "board of directors", "board",
-        "executive management", "c-suite", "ceo office",
-    })
-    node_label = str(dag.G.nodes[dept_id].get("label", "")).lower()
-    is_governance = node_label in _GOVERNANCE_LABELS
-
     people: list[dict] = []
 
-    if is_governance:
-        # Only direct person children that were sourced from the company website
-        for child_id in dag.G.successors(dept_id):
-            attrs = dict(dag.G.nodes.get(child_id, {}))
-            if (attrs.get("node_type") == "person"
-                    and attrs.get("metadata", {}).get("nlp_method") == "llm_leadership"):
-                people.append(attrs)
-    else:
-        # Full DFS but exclude web-scraped governance people
-        def collect(nid: str, visited: set):
-            if nid in visited:
-                return
-            visited.add(nid)
-            attrs = dict(dag.G.nodes.get(nid, {}))
-            if attrs.get("node_type") == "person":
-                if attrs.get("metadata", {}).get("nlp_method") != "llm_leadership":
-                    people.append(attrs)
-            for child in dag.G.successors(nid):
-                collect(child, visited)
+    def collect(nid: str, visited: set):
+        if nid in visited:
+            return
+        visited.add(nid)
+        attrs = dict(dag.G.nodes.get(nid, {}))
+        if attrs.get("node_type") == "person":
+            people.append(attrs)
+        for child in dag.G.successors(nid):
+            collect(child, visited)
 
-        collect(dept_id, set())
+    collect(dept_id, set())
 
     people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
     return {"executives": people, "count": len(people)}

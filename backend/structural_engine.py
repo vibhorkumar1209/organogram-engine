@@ -1006,14 +1006,14 @@ class OrganogramDAG:
             if not G.has_edge(bod_id, em_id):
                 G.add_edge(bod_id, em_id)
 
-        # ── Step 2: Functional depts should sit under EM (or BOD) ────────
-        # Re-parent any dept_primary that is wrongly a direct child of
-        # root_global or BOD when a better parent (EM or BOD) now exists.
-        if em_exists or bod_exists:
-            correct_parent = em_id if em_exists else bod_id
+        # ── Step 2: Functional depts should sit under EM ─────────────────
+        # Only re-parent when EM actually exists.  If only BOD is present
+        # (no EM scraped yet), leave functional depts under root_global —
+        # pulling them under BOD would mix board members with dept cards.
+        if em_exists:
             _reserved = _BOD_LABELS | _EM_LABELS
 
-            # Walk root_global children
+            # Walk root_global children → move functional depts to EM
             for child_id in list(G.successors("root_global")):
                 if child_id == bod_id:
                     continue   # BOD stays directly under root_global
@@ -1022,12 +1022,12 @@ class OrganogramDAG:
                 if (attrs.get("node_type") == NODE_DEPT_P
                         and label not in _reserved):
                     G.remove_edge("root_global", child_id)
-                    if not G.has_edge(correct_parent, child_id):
-                        G.add_edge(correct_parent, child_id)
+                    if not G.has_edge(em_id, child_id):
+                        G.add_edge(em_id, child_id)
 
             # Walk BOD children — functional depts that landed under BOD
             # (happens when BOD existed but EM didn't yet) must move to EM
-            if bod_exists and em_exists:
+            if bod_exists:
                 for child_id in list(G.successors(bod_id)):
                     if child_id == em_id:
                         continue   # EM stays under BOD
