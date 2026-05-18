@@ -110,10 +110,22 @@ _LEADERSHIP_PATHS = [
     "/en/about-us/leadership",
 ]
 
-_WEB_TIMEOUT = 6          # seconds per HTTP request
-_MAX_PAGE_CHARS = 8_000   # chars to pass to Claude per page
-_MAX_PAGES = 2            # allow up to 2 pages (board + executive may be separate)
-_TOTAL_BUDGET = 25        # hard cap on total scraping time (seconds)
+_WEB_TIMEOUT = 8          # seconds per HTTP request
+_MAX_PAGE_CHARS = 20_000  # chars to pass to Claude per page
+_MAX_PAGES = 4            # allow up to 4 pages (BOD + exec committee may be separate)
+_TOTAL_BUDGET = 40        # hard cap on total scraping time (seconds)
+
+# Link patterns that indicate a sub-page with leadership content
+_LEADERSHIP_LINK_RE = re.compile(
+    r'href=["\']([^"\']*(?:'
+    r'board[-_]of[-_]directors|board-of-directors'
+    r'|operating[-_]committee|leadership[-_]team'
+    r'|executive[-_]committee|management[-_]committee'
+    r'|senior[-_]leadership|our[-_]leaders'
+    r'|supervisory[-_]board|advisory[-_]board'
+    r')[^"\']*)["\']',
+    re.IGNORECASE,
+)
 
 
 def _fetch_leadership_text(domain: str) -> str:
@@ -196,6 +208,43 @@ def _fetch_leadership_text(domain: str) -> str:
                     f"Scraped leadership page: {url} "
                     f"({len(text)} chars text, {len(ld_text)} chars JSON-LD)"
                 )
+
+                # Discover sub-pages linked from this leadership page
+                # (e.g. /board-of-directors, /operating-committee on same domain)
+                if len(collected) < _MAX_PAGES:
+                    for m in _LEADERSHIP_LINK_RE.finditer(raw_html):
+                        href = m.group(1)
+                        # Resolve relative links against the base
+                        if href.startswith("http"):
+                            linked_url = href
+                        elif href.startswith("/"):
+                            linked_url = f"{base}{href}"
+                        else:
+                            continue
+                        if linked_url not in tried:
+                            if time.monotonic() < deadline and len(collected) < _MAX_PAGES:
+                                tried.add(linked_url)
+                                remaining2 = max(1, deadline - time.monotonic())
+                                try:
+                                    r2 = httpx.get(
+                                        linked_url, headers=headers,
+                                        timeout=min(_WEB_TIMEOUT, remaining2),
+                                        follow_redirects=True,
+                                    )
+                                    ct2 = r2.headers.get("content-type", "")
+                                    if r2.status_code == 200 and "text/html" in ct2:
+                                        ld2 = _extract_json_ld(r2.text)
+                                        t2  = _strip_html(r2.text)
+                                        if len(t2) >= 200 or ld2:
+                                            c2 = f"{ld2}\n\n{t2[:_MAX_PAGE_CHARS]}" if ld2 else t2[:_MAX_PAGE_CHARS]
+                                            collected.append(f"[Page: {linked_url}]\n{c2}")
+                                            logger.debug(
+                                                f"Scraped linked leadership page: {linked_url} "
+                                                f"({len(t2)} chars text)"
+                                            )
+                                except Exception as exc2:
+                                    logger.debug(f"Linked page scrape failed {linked_url}: {exc2}")
+
                 if len(collected) >= _MAX_PAGES:
                     break
             except Exception as exc:
@@ -214,8 +263,13 @@ def _fetch_leadership_text(domain: str) -> str:
 _SYSTEM_FROM_WEB = """\
 You are a corporate intelligence assistant.
 
-You are given text scraped from a company's own website. Extract the current \
-Board of Directors and Executive Management / C-Suite team from it.
+You are given text scraped from one or more pages of a company's own website. \
+Extract the current Board of Directors and Executive Management / C-Suite team.
+
+The website may present these under different headings such as:
+- Board of Directors, Board of Trustees, Supervisory Board, Advisory Board
+- Executive Committee, Operating Committee, Leadership Team, Management Committee,
+  Senior Leadership Team, Group Management Board
 
 Schema:
 {
@@ -229,12 +283,15 @@ Schema:
 
 Rules:
 - board: Chairman, Non-Executive Directors, Independent Directors, \
-  Supervisory Board members, Board of Trustees members.
+  Supervisory Board members, Board of Trustees members. \
   Do NOT include executive directors who also hold a C-Suite role.
-- executives: ONLY C-Suite — CEO, President, COO, CFO, CTO, CIO, CISO, CMO, \
-  CHRO / Chief People Officer, CRO, CLO / General Counsel, Chief Strategy \
-  Officer, Chief Digital Officer, Chief Commercial Officer, and equivalent.
-  Do NOT include VPs, SVPs, MDs, or Directors.
+- executives: Members of the Operating Committee, Executive Committee, \
+  Leadership Team, or Management Committee AND classic C-Suite — CEO, President, \
+  COO, CFO, CTO, CIO, CISO, CMO, CHRO / Chief People Officer, CRO, \
+  CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, \
+  Chief Commercial Officer, and equivalent. \
+  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on \
+  the Operating/Executive Committee explicitly listed on the website.
 - Use the exact names and titles as they appear on the website.
 - If the scraped text does not contain leadership information, return \
   {"board": [], "executives": []}.
@@ -259,9 +316,11 @@ Schema:
 Rules:
 - board: Non-executive directors, independent directors, chairman only.
   Do NOT include C-Suite executives in the board list.
-- executives: ONLY C-Suite — CEO, President, COO, CFO, CTO, CIO, CISO, CMO, \
-  CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, and equivalent.
-  Do NOT include VPs, SVPs, MDs, or Directors.
+- executives: Members of the company's Operating Committee, Executive Committee, \
+  Leadership Team, or Management Committee, plus classic C-Suite — CEO, President, \
+  COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, \
+  Chief Strategy Officer, Chief Digital Officer, Chief Commercial Officer, and equivalent. \
+  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on the Operating/Executive Committee.
 - Only include people you are highly confident are currently in role.
 - If you have no reliable knowledge of this company's leadership, return \
   {"board": [], "executives": []}.
