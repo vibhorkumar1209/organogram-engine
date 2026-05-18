@@ -193,6 +193,40 @@ _RAW_DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "operational risk":                 ("Risk Management", "Operational Risk"),
     "enterprise risk":                  ("Risk Management", "Enterprise Risk"),
     "risk advisory":                    ("Risk Management", "Risk Advisory"),
+    # ── Financial-services business divisions ────────────────────────
+    # These are ALWAYS authoritative — override vendor_function (job_function)
+    # because a person's business division is more specific than their LinkedIn
+    # job_function tag (which can be "Information Technology" for a trader).
+    "investment banking":               ("Investment Banking", "Capital Markets"),
+    "investment banking division":      ("Investment Banking", "Capital Markets"),
+    "m&a advisory":                     ("Investment Banking", "M&A Advisory"),
+    "mergers & acquisitions":           ("Investment Banking", "M&A Advisory"),
+    "capital markets":                  ("Investment Banking", "Capital Markets"),
+    "debt capital markets":             ("Investment Banking", "Capital Markets"),
+    "equity capital markets":           ("Investment Banking", "Capital Markets"),
+    "leveraged finance":                ("Investment Banking", "Capital Markets"),
+    "fixed income":                     ("Sales & Trading", "Fixed Income"),
+    "fixed income, currencies & commodities": ("Sales & Trading", "Fixed Income"),
+    "sales & trading":                  ("Sales & Trading", "Fixed Income"),
+    "equities":                         ("Sales & Trading", "Equities"),
+    "equity sales":                     ("Sales & Trading", "Equities"),
+    "equity trading":                   ("Sales & Trading", "Equities"),
+    "prime brokerage":                  ("Sales & Trading", "Prime Brokerage"),
+    "institutional securities":         ("Sales & Trading", "Institutional Securities"),
+    "wealth management":                ("Wealth Management", "Client Advisory"),
+    "global wealth management":         ("Wealth Management", "Client Advisory"),
+    "private banking":                  ("Wealth Management", "Private Banking"),
+    "private banking & wealth management": ("Wealth Management", "Private Banking"),
+    "private wealth management":        ("Wealth Management", "Private Wealth"),
+    "asset management":                 ("Investment Management", "Asset Management"),
+    "investment management":            ("Investment Management", "Asset Management"),
+    "global investment management":     ("Investment Management", "Asset Management"),
+    "research":                         ("Research & Development", "Research"),
+    "global research":                  ("Research & Development", "Research"),
+    "equity research":                  ("Research & Development", "Research"),
+    "fixed income research":            ("Research & Development", "Research"),
+    "facilities & real estate":         ("Operations", "Facilities & Real Estate"),
+    "real estate & facilities":         ("Operations", "Facilities & Real Estate"),
     # ── Strategy sub-depts ──────────────────────────────────────────────
     "policy & strategy":                ("Strategy", "Policy & Strategy"),
     "strategy & policy":                ("Strategy", "Policy & Strategy"),
@@ -705,15 +739,21 @@ class InferenceEngine:
             rd_key = raw_dept.strip().lower()
             if rd_key in _RAW_DEPT_ELEVATE:
                 rd_primary, rd_secondary = _RAW_DEPT_ELEVATE[rd_key]
-                if not vendor_function_dept:
-                    dept_primary = rd_primary
-                dept_secondary = rd_secondary
+                # _RAW_DEPT_ELEVATE is always authoritative — explicit dept data
+                # beats vendor_function (which can be a generic LinkedIn tag like
+                # "Information Technology" even for traders / bankers).
+                dept_primary   = rd_primary
+                if rd_secondary:
+                    dept_secondary = rd_secondary
             else:
                 refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
                 if refined[0] and refined[0] not in ("General", "Unclassified", ""):
                     if not vendor_function_dept:
                         dept_primary = refined[0]
-                if refined[1] and not dept_secondary:
+                # Only set secondary from NLP when vendor_function isn't controlling
+                # primary — mixing vendor_function primary with raw_dept secondary
+                # creates nonsense pairings (e.g. Engineering / IT + Fixed Income).
+                if refined[1] and not dept_secondary and not vendor_function_dept:
                     dept_secondary = refined[1]
                 if refined[2] and not dept_tertiary:
                     dept_tertiary = refined[2]

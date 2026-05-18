@@ -195,6 +195,10 @@ _CANONICAL_PRIMARY: frozenset[str] = frozenset({
     "Underwriting",
     "Claims",
     "Investment Management",
+    # ── Investment bank / markets business divisions ─────────────────────
+    "Investment Banking",
+    "Sales & Trading",
+    "Wealth Management",
 })
 
 # Map non-canonical / industry-specific / generic dept names → canonical.
@@ -372,6 +376,25 @@ _DEPT_REMAP: dict[str, str] = {
     "r&d":                              "Research & Development",
     "innovation":                       "Research & Development",
     "research & development":           "Research & Development",
+    # ── Financial-services business divisions ────────────────────────────
+    "investment banking":               "Investment Banking",
+    "investment banking division":      "Investment Banking",
+    "m&a advisory":                     "Investment Banking",
+    "mergers & acquisitions":           "Investment Banking",
+    "capital markets":                  "Investment Banking",
+    "sales & trading":                  "Sales & Trading",
+    "fixed income":                     "Sales & Trading",
+    "fixed income, currencies & commodities": "Sales & Trading",
+    "equities":                         "Sales & Trading",
+    "equity sales":                     "Sales & Trading",
+    "institutional securities":         "Sales & Trading",
+    "wealth management":                "Wealth Management",
+    "global wealth management":         "Wealth Management",
+    "private banking":                  "Wealth Management",
+    "private banking & wealth management": "Wealth Management",
+    "private wealth management":        "Wealth Management",
+    "facilities & real estate":         "Operations",
+    "real estate & facilities":         "Operations",
     # ── Strategy / Corporate ─────────────────────────────────────────────
     "corporate strategy":               "Strategy",
     "group strategy":                   "Strategy",
@@ -545,6 +568,8 @@ _DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "facilities management":            ("Operations", "Facilities"),
     "facilities":                       ("Operations", "Facilities"),
     "real estate":                      ("Operations", "Facilities"),
+    "facilities & real estate":         ("Operations", "Facilities & Real Estate"),
+    "real estate & facilities":         ("Operations", "Facilities & Real Estate"),
     "shared services":                  ("Operations", "Facilities"),
     "service delivery":                 ("Operations", "Facilities"),
     "production":                       ("Operations", "Production"),
@@ -558,6 +583,29 @@ _DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "onboarding":                       ("Customer Success", "Client Relations"),
     "renewals":                         ("Customer Success", "Client Relations"),
     "technical support":                ("Customer Success", "Customer Support"),
+    # ── Investment Banking sub-depts ────────────────────────────────────
+    "m&a advisory":                     ("Investment Banking", "M&A Advisory"),
+    "mergers & acquisitions":           ("Investment Banking", "M&A Advisory"),
+    "capital markets":                  ("Investment Banking", "Capital Markets"),
+    "debt capital markets":             ("Investment Banking", "Capital Markets"),
+    "equity capital markets":           ("Investment Banking", "Capital Markets"),
+    "leveraged finance":                ("Investment Banking", "Capital Markets"),
+    # ── Sales & Trading sub-depts ───────────────────────────────────────
+    "fixed income":                     ("Sales & Trading", "Fixed Income"),
+    "fixed income, currencies & commodities": ("Sales & Trading", "Fixed Income"),
+    "equities":                         ("Sales & Trading", "Equities"),
+    "equity sales":                     ("Sales & Trading", "Equities"),
+    "equity trading":                   ("Sales & Trading", "Equities"),
+    "prime brokerage":                  ("Sales & Trading", "Prime Brokerage"),
+    "institutional securities":         ("Sales & Trading", "Institutional Securities"),
+    # ── Wealth Management sub-depts ─────────────────────────────────────
+    "private banking":                  ("Wealth Management", "Private Banking"),
+    "private banking & wealth management": ("Wealth Management", "Private Banking"),
+    "private wealth management":        ("Wealth Management", "Private Wealth"),
+    "global wealth management":         ("Wealth Management", "Client Advisory"),
+    # ── Investment Management sub-depts ─────────────────────────────────
+    "asset management":                 ("Investment Management", "Asset Management"),
+    "global investment management":     ("Investment Management", "Asset Management"),
 }
 
 
