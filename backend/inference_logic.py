@@ -726,7 +726,14 @@ class InferenceEngine:
                 or result.match_method == "fallback"
                 or result.confidence < 0.5
             ):
-                dept_primary = vendor_function_dept
+                dept_primary   = vendor_function_dept
+                # The NLP secondary/tertiary were derived from the now-discarded
+                # NLP primary — keep them only when vendor_function agrees with
+                # the NLP primary (same dept).  Otherwise they create nonsense
+                # pairings like "Engineering / IT > M&A Advisory".
+                if vendor_function_dept != result.dept_primary:
+                    dept_secondary = ""
+                    dept_tertiary  = ""
                 logger.debug(f"vendor_function: '{vendor_function}' → {vendor_function_dept}")
 
         # ── Override 3: vendor_level (JOB_LEVEL) ─────────────────────────
