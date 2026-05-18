@@ -232,6 +232,11 @@ def map_vendor_function(
             if any(k in title_l for k in keywords):
                 return target
 
+    # Disambiguate "Engineering / IT" — facilities engineers → Operations
+    if engine_function == "Engineering / IT":
+        if any(k in title_l for k in ("facilit", "real estate", "workplace", "property")):
+            return "Operations"
+
     # Disambiguate "Engineering / IT" — process industries treat as R&D
     if engine_function == "Engineering / IT" and archetype_id == "process_industries":
         return "Research & Development"

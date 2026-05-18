@@ -227,6 +227,12 @@ _RAW_DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "fixed income research":            ("Research & Development", "Research"),
     "facilities & real estate":         ("Operations", "Facilities & Real Estate"),
     "real estate & facilities":         ("Operations", "Facilities & Real Estate"),
+    "facilities":                       ("Operations", "Facilities"),
+    "facilities management":            ("Operations", "Facilities"),
+    "real estate":                      ("Operations", "Facilities"),
+    "corporate real estate":            ("Operations", "Facilities"),
+    "workplace":                        ("Operations", "Facilities"),
+    "workplace & facilities":           ("Operations", "Facilities"),
     # ── Strategy sub-depts ──────────────────────────────────────────────
     "policy & strategy":                ("Strategy", "Policy & Strategy"),
     "strategy & policy":                ("Strategy", "Policy & Strategy"),
