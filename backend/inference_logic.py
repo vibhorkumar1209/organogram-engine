@@ -606,12 +606,15 @@ class InferenceEngine:
           Title      : Designation / JOB_TITLE  >  linkedin_headline
           Company    : Company  >  job_org_linkedin_url slug  >  email_domain
           Region     : job_country_code  >  country_code  >  Location text
-          Function   : ProfileLevel  >  vendor_function (JOB_FUNCTION)  >  NLP
-          Layer      : ProfileLevel  >  vendor_level (JOB_LEVEL)  >  NLP
+          Function   : ProfileLevel  >  vendor_function (JOB_FUNCTION)  >  NLP  >  linkedin_headline
+          Layer      : ProfileLevel  >  vendor_level (JOB_LEVEL)  >  NLP  >  linkedin_headline
           Industry   : Industry_Hint  >  linkedin_industry
         """
         # ── Title ─────────────────────────────────────────────────────────
-        designation = _get(record, "Designation") or _get(record, "linkedin_headline") or ""
+        designation = _get(record, "Designation") or ""
+        headline    = _get(record, "linkedin_headline") or ""
+        if not designation:
+            designation = headline
 
         # ── Company ───────────────────────────────────────────────────────
         company = _get(record, "Company") or ""
@@ -666,19 +669,27 @@ class InferenceEngine:
                 layer = pl_layer
 
         # ── Override 2: vendor_function (JOB_FUNCTION) ───────────────────
-        # Applied when NLP had no rule match (fallback) OR dept is unresolved.
+        # job_function is a structured LinkedIn taxonomy field — more reliable
+        # than free-text NLP when NLP is uncertain.  Also handles unmapped
+        # values by running classify_dept_from_text on the raw string.
         vendor_function = _get(record, "vendor_function") or ""
-        if vendor_function and (
-            dept_primary in ("General", "Unclassified", "")
-            or result.match_method == "fallback"
-        ):
-            mapped_fn = _dept_from_vendor_function(vendor_function)
-            if mapped_fn:
-                dept_primary = mapped_fn
-                logger.debug(f"vendor_function override: '{vendor_function}' → {mapped_fn}")
+        vendor_function_dept: Optional[str] = None
+        if vendor_function:
+            vendor_function_dept = _dept_from_vendor_function(vendor_function)
+            if not vendor_function_dept:
+                # Not in static map — try NLP on the function string itself
+                fn_refined = self.nlp.classify_dept_from_text(vendor_function, "")
+                if fn_refined[0] and fn_refined[0] not in ("General", "Unclassified", ""):
+                    vendor_function_dept = fn_refined[0]
+            if vendor_function_dept and (
+                dept_primary in ("General", "Unclassified", "")
+                or result.match_method == "fallback"
+                or result.confidence < 0.5
+            ):
+                dept_primary = vendor_function_dept
+                logger.debug(f"vendor_function: '{vendor_function}' → {vendor_function_dept}")
 
         # ── Override 3: vendor_level (JOB_LEVEL) ─────────────────────────
-        # Applied when NLP fell back to a low-confidence guess.
         vendor_level = _get(record, "vendor_level") or ""
         if vendor_level and result.match_method in ("fallback",):
             mapped_layer = _layer_from_vendor_level(vendor_level)
@@ -687,22 +698,46 @@ class InferenceEngine:
                 logger.debug(f"vendor_level override: '{vendor_level}' → L{mapped_layer}")
 
         # ── Department refinement from free-text Department field ──────────
-        # The Department column is explicit structured data — trust it over
-        # title-derived NLP classification.
-        # Priority 1: exact match in _RAW_DEPT_ELEVATE → sets (primary, secondary)
-        # Priority 2: NLP classify_dept_from_text on the raw dept string
+        # Refines primary dept and sets secondary/tertiary.  When vendor_function
+        # already gave a confident primary dept, raw_dept only updates secondary
+        # and tertiary — it does not override the primary.
         if raw_dept and raw_dept.lower() not in ("nan", "none", ""):
             rd_key = raw_dept.strip().lower()
             if rd_key in _RAW_DEPT_ELEVATE:
-                dept_primary, dept_secondary = _RAW_DEPT_ELEVATE[rd_key]
+                rd_primary, rd_secondary = _RAW_DEPT_ELEVATE[rd_key]
+                if not vendor_function_dept:
+                    dept_primary = rd_primary
+                dept_secondary = rd_secondary
             else:
                 refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
                 if refined[0] and refined[0] not in ("General", "Unclassified", ""):
-                    dept_primary = refined[0]
+                    if not vendor_function_dept:
+                        dept_primary = refined[0]
                 if refined[1] and not dept_secondary:
                     dept_secondary = refined[1]
                 if refined[2] and not dept_tertiary:
                     dept_tertiary = refined[2]
+
+        # ── linkedin_headline as additional dept / layer signal ────────────
+        # When designation alone left the dept uncertain, try the headline.
+        # Headline often contains richer role info: "VP of Finance at Morgan Stanley".
+        if (headline
+                and headline.strip().lower() != designation.strip().lower()
+                and (dept_primary in ("General", "Unclassified", "")
+                     or result.match_method == "fallback"
+                     or not vendor_function_dept)):
+            hl = self.nlp.classify(
+                designation=headline,
+                company=company,
+                industry_hint=industry_hint,
+                location=location,
+            )
+            if hl.dept_primary not in ("General", "Unclassified", "") and hl.match_method != "fallback":
+                if dept_primary in ("General", "Unclassified", "") or result.match_method == "fallback":
+                    dept_primary = hl.dept_primary
+                    logger.debug(f"linkedin_headline dept: '{headline}' → {hl.dept_primary}")
+            if hl.layer > 0 and hl.layer < layer and result.match_method == "fallback":
+                layer = hl.layer
 
         # ── Board title override (highest priority after dept field) ─────────
         # "Independent Director", "Non-Executive Chairman" etc. are Board roles.
