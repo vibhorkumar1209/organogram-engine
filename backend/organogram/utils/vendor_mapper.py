@@ -90,88 +90,102 @@ VENDOR_LEVEL_MAP: dict[str, int] = {
 #   - "Engineering" defaults to "Engineering" except in the
 #     process_industries archetype where it defaults to "R&D".
 VENDOR_FUNCTION_MAP: dict[str, str] = {
-    # Direct mappings
-    "finance":             "Finance",
-    "accounting":          "Finance",
-    "treasury":            "Finance",
-    "tax":                 "Finance",
-    "human resources":     "Human Resources",
-    "hr":                  "Human Resources",
-    "people":              "Human Resources",
-    "people & culture":    "Human Resources",
-    "talent":              "Human Resources",
-    "legal":               "Legal",
-    "compliance":          "Legal",           # sub-dept of Legal
-    "regulatory":          "Legal",           # sub-dept of Legal
-    "regulatory affairs":  "Legal",           # sub-dept of Legal
-    "risk":                "Risk Management",
-    "audit":               "Risk Management", # Internal Audit sub-dept
-    "credit":              "Risk Management",
-    "it":                  "Technology",
-    "information technology": "Technology",
-    "technology":          "Technology",
-    "sales":               "Sales",
-    "business development": "Sales",
-    "marketing":           "Marketing",
-    "communications":      "Marketing",
-    "brand":               "Marketing",
-    "operations":          "Operations",   # ambiguous — title disambiguates
-    "engineering":         "Engineering",  # ambiguous — see _resolve_engineering
-    "r&d":                 "Research & Development",
-    "research":            "Research & Development",
-    "research & development": "Research & Development",
+    # Finance & Accounting
+    "finance":                  "Finance & Accounting",
+    "accounting":               "Finance & Accounting",
+    "treasury":                 "Finance & Accounting",
+    "tax":                      "Finance & Accounting",
+    "audit":                    "Finance & Accounting",
+    "actuarial":                "Finance & Accounting",
+    "investor relations":       "Finance & Accounting",
+    # Human Resources
+    "human resources":          "Human Resources",
+    "hr":                       "Human Resources",
+    "people":                   "Human Resources",
+    "people & culture":         "Human Resources",
+    "talent":                   "Human Resources",
+    # Legal & Compliance
+    "legal":                    "Legal & Compliance",
+    "compliance":               "Legal & Compliance",
+    "regulatory":               "Legal & Compliance",
+    "regulatory affairs":       "Legal & Compliance",
+    # Risk Management
+    "risk":                     "Risk Management",
+    "credit":                   "Risk Management",
+    # Engineering / IT
+    "it":                       "Engineering / IT",
+    "information technology":   "Engineering / IT",
+    "technology":               "Engineering / IT",
+    "engineering":              "Engineering / IT",
+    "software":                 "Engineering / IT",
+    "data":                     "Engineering / IT",
+    "data science":             "Engineering / IT",
+    "analytics":                "Engineering / IT",
+    # Sales
+    "sales":                    "Sales",
+    "business development":     "Sales",
+    # Marketing
+    "marketing":                "Marketing",
+    "communications":           "Marketing",
+    "brand":                    "Marketing",
+    "public relations":         "Marketing",
+    # Customer Success
+    "customer service":         "Customer Success",
+    "customer success":         "Customer Success",
+    "customer experience":      "Customer Success",
+    "customer support":         "Customer Success",
+    "support":                  "Customer Success",
+    # Operations
+    "operations":               "Operations",
+    "general management":       "Operations",
+    "quality":                  "Operations",
+    "quality assurance":        "Operations",
+    "qa":                       "Operations",
+    "facilities":               "Operations",
+    "education":                "Operations",
+    "academic":                 "Operations",
+    "underwriting":             "Operations",
+    "claims":                   "Operations",
+    # Supply Chain
+    "supply chain":             "Supply Chain",
+    "logistics":                "Supply Chain",
+    # Procurement
+    "procurement":              "Procurement",
+    "purchasing":               "Procurement",
+    "sourcing":                 "Procurement",
+    # Manufacturing
+    "manufacturing":            "Manufacturing",
+    "production":               "Manufacturing",
+    # Product Management
+    "product":                  "Product Management",
+    "product management":       "Product Management",
+    "design":                   "Product Management",
+    "ux":                       "Product Management",
+    # Strategy
+    "strategy":                 "Strategy",
+    "consulting":               "Strategy",
+    "programme":                "Strategy",
+    "program":                  "Strategy",
+    "programme management":     "Strategy",
+    "program management":       "Strategy",
+    "pmo":                      "Strategy",
+    "project management":       "Strategy",
+    "transformation":           "Strategy",
+    "executive":                "Strategy",
+    "corporate development":    "Corporate Development",
+    "advisory":                 "Corporate Development",
+    "trading":                  "Corporate Development",
+    "investment":               "Corporate Development",
+    "research analyst":         "Corporate Development",
+    # R&D
+    "r&d":                      "Research & Development",
+    "research":                 "Research & Development",
+    "research & development":   "Research & Development",
     "research and development": "Research & Development",
-    "product":             "Strategy",
-    "product management":  "Strategy",
-    "strategy":            "Strategy",
-    "consulting":          "Strategy",
-    "executive":           "Strategy",
-    "general management":  "Operations",
-    "corporate development": "Strategy",
-    "programme":           "Strategy",
-    "program":             "Strategy",
-    "programme management": "Strategy",
-    "program management":  "Strategy",
-    "pmo":                 "Strategy",
-    "project management":  "Strategy",
-    "transformation":      "Strategy",
-    "supply chain":        "Supply Chain",
-    "logistics":            "Supply Chain",
-    "procurement":         "Procurement",
-    "purchasing":          "Procurement",
-    "sourcing":            "Procurement",
-    "manufacturing":       "Manufacturing",
-    "production":          "Manufacturing",
-    "quality":             "Quality",
-    "qa":                  "Quality",
-    "quality assurance":   "Quality",
-    "customer service":    "Customer Service",
-    "customer success":    "Customer Service",
-    "customer experience": "Customer Service",
-    "customer support":    "Customer Service",
-    "support":             "Customer Service",
-    "corporate affairs":   "Corporate Affairs",
-    "public relations":    "Corporate Affairs",
-    "investor relations":  "Corporate Affairs",
-    "government affairs":  "Corporate Affairs",
-
-    # Industry-specific (fall through to engine taxonomy via archetype)
-    "medical":             "Medical Affairs",
-    "medical affairs":     "Medical Affairs",
-    "underwriting":        "Operations",
-    "claims":              "Operations",
-    "actuarial":           "Finance",
-    "trading":             "Strategy",
-    "investment":          "Strategy",
-    "advisory":            "Strategy",
-    "research analyst":    "Strategy",
-    "data":                "Technology",
-    "data science":        "Technology",
-    "analytics":           "Technology",
-    "design":              "R&D",
-    "ux":                  "R&D",
-    "education":           "Operations",
-    "academic":            "Operations",
+    "innovation":               "Research & Development",
+    # Industry-specific
+    "medical":                  "Medical Affairs",
+    "medical affairs":          "Medical Affairs",
 }
 
 
@@ -218,9 +232,9 @@ def map_vendor_function(
             if any(k in title_l for k in keywords):
                 return target
 
-    # Disambiguate "Engineering" — process industries treat as R&D
-    if engine_function == "Engineering" and archetype_id == "process_industries":
-        return "R&D"
+    # Disambiguate "Engineering / IT" — process industries treat as R&D
+    if engine_function == "Engineering / IT" and archetype_id == "process_industries":
+        return "Research & Development"
 
     return engine_function
 

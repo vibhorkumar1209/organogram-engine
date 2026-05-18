@@ -281,6 +281,7 @@ def ping():
 # ─── In-memory state (single session) ────────
 _dag: OrganogramDAG | None = None
 _db:  OrganogramDB  | None = None
+_classified_records: list = []
 
 
 _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
@@ -312,7 +313,7 @@ async def upload_file(file: UploadFile = File(...),
     Optional: company_website=https://morganstanley.com
     When provided, the backend scrapes that domain for BOD/EM leadership data.
     """
-    global _dag, _db
+    global _dag, _db, _classified_records
 
     content = await file.read()
     fname   = file.filename or ""
@@ -361,6 +362,7 @@ async def upload_file(file: UploadFile = File(...),
         _dag, _db, _classified, _domain = build_from_records(
             records, company_name=company_name
         )
+        _classified_records = _classified
     except Exception as e:
         import traceback
         raise HTTPException(status_code=500,
@@ -429,7 +431,7 @@ async def upload_file(file: UploadFile = File(...),
 @app.post("/load-demo")
 async def load_demo():
     """Load the bundled test_data.json."""
-    global _dag, _db
+    global _dag, _db, _classified_records
     data_path = Path(__file__).parent / "test_data.json"
     if not data_path.exists():
         raise HTTPException(status_code=404, detail="test_data.json not found")
@@ -440,11 +442,31 @@ async def load_demo():
     _dag, _db, _classified, _domain = build_from_records(
         records, company_name="AutoPrime Motors"
     )
+    _classified_records = _classified
     return {
         "status": "ok",
         "records_ingested": len(records),
         "stats": _dag.stats(),
     }
+
+
+@app.get("/debug/classified")
+def debug_classified():
+    """Return NLP classification results per person — useful for diagnosing wrong dept mappings."""
+    if not _classified_records:
+        return {"error": "No data loaded. POST /upload first."}
+    rows = []
+    for r in _classified_records:
+        rows.append({
+            "name":          getattr(r, "full_name", ""),
+            "title":         getattr(r, "designation", ""),
+            "layer":         getattr(r, "layer", "?"),
+            "dept_primary":  getattr(r, "dept_primary", ""),
+            "dept_secondary": getattr(r, "dept_secondary", ""),
+            "nlp_method":    getattr(r, "nlp_method", ""),
+        })
+    rows.sort(key=lambda x: (x["dept_primary"], x["layer"], x["name"]))
+    return {"count": len(rows), "records": rows}
 
 
 # ─────────────────────────────────────────────
