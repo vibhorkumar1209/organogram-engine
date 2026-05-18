@@ -1323,6 +1323,72 @@ def _name_key(name: str) -> str:
     return " ".join(words[:2])
 
 
+def _inject_knowledge_leadership(
+    dag: OrganogramDAG,
+    company_name: str,
+    region: str = "Global HQ",
+    sector: str = "Private",
+) -> None:
+    """
+    Fast synchronous BOD/EM injection using LLM training knowledge only
+    (no web scraping).  Called inline during upload so board members appear
+    in the initial response without waiting for the background thread.
+
+    The background thread may later overwrite/refine these entries with
+    web-scraped data; deduplication by name prevents duplicates.
+    """
+    try:
+        from llm_fallback import llm_fetch_leadership
+    except ImportError:
+        return
+
+    try:
+        leadership = llm_fetch_leadership(company_name, domain="")
+    except Exception:
+        return
+
+    if not leadership.get("board") and not leadership.get("executives"):
+        return
+
+    existing_keys: set[str] = {
+        _name_key(dag.G.nodes[n].get("label", ""))
+        for n in dag.G.nodes
+        if dag.G.nodes[n].get("node_type") == "person"
+    }
+
+    from inference_logic import ClassifiedRecord
+    injections: list[tuple[int, str, str, str]] = []
+    for p in leadership.get("board", []):
+        injections.append((0, p["name"], p["title"], "Board of Management"))
+    for p in leadership.get("executives", []):
+        injections.append((1, p["name"], p["title"], "Executive Management"))
+
+    for layer, name, title, dept_primary in injections:
+        key = _name_key(name)
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        dag.insert_person(ClassifiedRecord(
+            id=f"llm_{uuid.uuid4().hex[:12]}",
+            full_name=name,
+            designation=title,
+            company=company_name,
+            linkedin_url="",
+            location="",
+            sector=sector,
+            region=region,
+            layer=layer,
+            dept_primary=dept_primary,
+            dept_secondary="",
+            dept_tertiary="",
+            nlp_confidence=0.9,
+            nlp_industry="llm",
+            nlp_method="llm_leadership",
+        ))
+
+    dag.repair_governance_edges()
+
+
 def _enrich_with_llm_leadership(
     dag: OrganogramDAG,
     classified: list,

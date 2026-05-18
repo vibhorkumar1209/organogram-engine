@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from structural_engine import (
     build_from_records, OrganogramDAG, OrganogramDB,
     _enrich_with_llm_leadership,
+    _inject_knowledge_leadership,
 )
 
 # ─── Flexible column name mapping ────────────
@@ -368,8 +369,19 @@ async def upload_file(file: UploadFile = File(...),
         raise HTTPException(status_code=500,
                             detail=f"Pipeline failed: {e}\n{traceback.format_exc()}")
 
-    # ── Leadership enrichment in background — keeps upload fast ──────────────
-    # Scrapes the company website and injects BOD/EM without blocking the response.
+    # ── Sync knowledge BOD injection — runs before response returns (~3s) ───────
+    # Calls LLM with training-data knowledge only (no web scraping) so board
+    # members appear immediately in the upload response.  The background thread
+    # below then optionally refines with live website data.
+    _inject_knowledge_leadership(
+        _dag, company_name,
+        region=_dag.G.nodes.get("root_global", {}).get("label", "Global HQ"),
+        sector="Private",
+    )
+
+    # ── Web-scrape enrichment in background — keeps upload fast ──────────────
+    # Scrapes the company website and refines BOD/EM (overrides knowledge data
+    # when the website has more current information).
     def _bg_enrich(dag: OrganogramDAG, db: OrganogramDB,
                    classified: list, co: str, domain: str) -> None:
         try:
