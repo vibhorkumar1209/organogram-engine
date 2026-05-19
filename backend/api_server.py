@@ -365,7 +365,7 @@ async def upload_file(file: UploadFile = File(...),
     company_name = inferred or company_name or "Organization"
 
     try:
-        _dag, _db, _classified, _domain = build_from_records(
+        _dag, _db, _classified, _domain, _industry = build_from_records(
             records, company_name=company_name
         )
         _classified_records = _classified
@@ -445,6 +445,7 @@ async def upload_file(file: UploadFile = File(...),
         "detected_columns":  detected_cols,
         "mapped_columns":    mapped_cols,
         "canonical_missing": missing,   # empty list = all key fields detected
+        "industry":          _industry or "",
         "stats": _dag.stats(),
     }
 
@@ -460,7 +461,7 @@ async def load_demo():
     with open(data_path) as f:
         records = json.load(f)
 
-    _dag, _db, _classified, _domain = build_from_records(
+    _dag, _db, _classified, _domain, _industry = build_from_records(
         records, company_name="AutoPrime Motors"
     )
     _classified_records = _classified

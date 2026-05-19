@@ -1331,7 +1331,24 @@ def build_from_records(records: list[dict],
                        company_name: str = "Organization",
                        db_path: str = ":memory:"
                        ) -> tuple[OrganogramDAG, OrganogramDB]:
-    engine = InferenceEngine()
+    # Determine primary domain early (needed for industry classification)
+    from collections import Counter as _Counter
+    _domain_counts_pre = _Counter(
+        str(r.get("email_domain", "") or "").strip().lower()
+        for r in records
+        if r.get("email_domain")
+        and str(r.get("email_domain", "")).strip().lower() not in ("nan", "none", "")
+    )
+    primary_domain_pre = _domain_counts_pre.most_common(1)[0][0] if _domain_counts_pre else ""
+    if not primary_domain_pre and company_name:
+        primary_domain_pre = _guess_domain(company_name)
+
+    # Classify company industry before running inference engine
+    from industry_classifier import classify_industry as _classify_industry
+    detected_industry = _classify_industry(company_name, primary_domain_pre)
+    logger.info("Detected industry for '%s': %s", company_name, detected_industry or "unknown")
+
+    engine = InferenceEngine(industry=detected_industry)
     classified = engine.classify_all(records)
 
     # Insert senior people first so ghost chains can route through them.
@@ -1349,24 +1366,16 @@ def build_from_records(records: list[dict],
     # edge cases in sort stability or data ordering)
     dag.repair_governance_edges()
 
+    # Store industry on the root global node metadata
+    if detected_industry and "root_global" in dag.G.nodes:
+        meta = dict(dag.G.nodes["root_global"].get("metadata", {}))
+        meta["industry"] = detected_industry
+        dag.G.nodes["root_global"]["metadata"] = meta
+
     db = OrganogramDB(db_path=db_path)
     db.upsert_dag(dag)
 
-    # Determine primary domain for website-based leadership research.
-    # Priority: email_domain column → guess from company_name slug
-    from collections import Counter as _Counter
-    _domain_counts = _Counter(
-        str(r.get("email_domain", "") or "").strip().lower()
-        for r in records
-        if r.get("email_domain")
-        and str(r.get("email_domain", "")).strip().lower() not in ("nan", "none", "")
-    )
-    primary_domain = _domain_counts.most_common(1)[0][0] if _domain_counts else ""
-
-    if not primary_domain and company_name:
-        primary_domain = _guess_domain(company_name)
-
-    return dag, db, classified, primary_domain
+    return dag, db, classified, primary_domain_pre, detected_industry
 
 
 def _guess_domain(company_name: str) -> str:

@@ -196,11 +196,228 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
 ]
 
 
-def _classify_layer(title: str, job_level: str = "") -> int:
-    """Return layer 0–10 for a job title (G0–G10 per reference)."""
+# ─────────────────────────────────────────────────────────────────────────────
+# INDUSTRY-SPECIFIC LAYER RULES
+# ─────────────────────────────────────────────────────────────────────────────
+# In Financial Markets / Banking the seniority ladder is inverted relative to
+# most corporate functions: VP is mid-level, MD is a senior leader.
+# These rules REPLACE the default _LAYER_RULES when the relevant industry
+# is detected.
+#
+# Standard banking hierarchy (bottom → top):
+#   Analyst → Associate → Vice President → Executive Director →
+#   Director → Managing Director → Senior MD / Partner → C-Suite / CEO
+
+_FINANCIAL_LAYER_RULES: list[tuple[int, list[str]]] = [
+    # G0 — Board
+    (0, [
+        r"non[- ]?executive\s+director", r"independent\s+director",
+        r"supervisory\s+board", r"board\s+(?:member|director|trustee)",
+        r"\bned\b", r"^chair(?:man|woman|person)?$",
+    ]),
+    # G1 — CEO / President / Group Head
+    (1, [
+        r"\bchief\s+executive\b", r"\bceo\b", r"^(?:group\s+)?president$",
+        r"\bchief\s+financial\b", r"\bcfo\b",
+        r"\bchief\s+(?:operating|technology|risk|legal|compliance|commercial)\b",
+        r"\bcoo\b", r"\bcto\b", r"\bcro\b",
+        r"^(?:co-?)?founder$",
+    ]),
+    # G2 — Global Head / Senior Managing Director / Senior Partner
+    (2, [
+        r"global\s+head\s+of",
+        r"senior\s+managing\s+director",
+        r"\bgroup\s+managing\s+director\b",
+        r"\bsenior\s+partner\b",
+    ]),
+    # G3 — Managing Director (MD) — most senior operating title in IB
+    (3, [
+        r"managing\s+director",
+        r"^md$",
+        r"\bhead\s+of\b",
+        r"^head,?\s",
+    ]),
+    # G4 — Executive Director (ED) / Principal
+    (4, [
+        r"executive\s+director",
+        r"\bed\b",
+        r"\bprincipal\b",
+    ]),
+    # G5 — Director (Dir) — below ED in banking
+    (5, [
+        r"\bdirector\b",
+        r"senior\s+vice\s+president",
+        r"\bsvp\b",
+    ]),
+    # G6 — Vice President (VP) — mid-level in banking, NOT equivalent to corporate VP
+    (6, [
+        r"\bvice\s+president\b",
+        r"\bvp\b",
+    ]),
+    # G7 — Senior Associate
+    (7, [
+        r"senior\s+associate",
+        r"\bsenior\b",
+        r"\bsr\.?\b",
+    ]),
+    # G8 — Associate (post-MBA entry in IB)
+    (8, [
+        r"\bassociate\b",
+    ]),
+    # G9 — Senior Analyst / Lead
+    (9, [
+        r"senior\s+analyst",
+        r"\blead\b",
+        r"\bstaff\b",
+    ]),
+    # G10 — Analyst (default)
+]
+
+# Industries where the financial-markets layer rules apply
+_FINANCIAL_INDUSTRIES: frozenset[str] = frozenset({
+    "Financial Markets / Capital Markets / Investments",
+    "Retail Banking / Commercial Banking",
+    "Life Insurance",
+    "P&C Insurance",
+    "Reinsurance",
+    "Healthcare Insurance (Payers)",
+})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INDUSTRY → DEPARTMENT SCORING BOOSTS
+# ─────────────────────────────────────────────────────────────────────────────
+# When the company's industry is known, add these extra points to specific
+# departments. Used to resolve ties and push industry-primary depts to the top.
+
+_INDUSTRY_DEPT_BOOSTS: dict[str, list[tuple[int, str]]] = {
+    # Insurance industries → boost Underwriting, Claims, Actuarial
+    "P&C Insurance": [
+        (60, DEPT_UW), (60, DEPT_CLM), (50, DEPT_ACT), (40, DEPT_LRC),
+    ],
+    "Life Insurance": [
+        (60, DEPT_UW), (60, DEPT_CLM), (50, DEPT_ACT),
+    ],
+    "Reinsurance": [
+        (60, DEPT_UW), (60, DEPT_CLM), (50, DEPT_ACT),
+    ],
+    "Healthcare Insurance (Payers)": [
+        (50, DEPT_UW), (50, DEPT_CLM), (40, DEPT_ACT), (30, DEPT_OPS),
+    ],
+    # Financial markets → boost IB, S&T, WM, IM
+    "Financial Markets / Capital Markets / Investments": [
+        (60, DEPT_IB), (60, DEPT_ST), (50, DEPT_WM), (50, DEPT_IM),
+        (40, DEPT_LRC),
+    ],
+    "Retail Banking / Commercial Banking": [
+        (50, DEPT_FIN), (40, DEPT_LRC), (30, DEPT_CS),
+    ],
+    # Technology industries → boost Engineering, IT, Product
+    "Software": [
+        (50, DEPT_ENG), (40, DEPT_PM), (30, DEPT_IT),
+    ],
+    "High Tech / Technology": [
+        (40, DEPT_ENG), (40, DEPT_IT), (30, DEPT_PM),
+    ],
+    "IT Services": [
+        (50, DEPT_IT), (30, DEPT_ENG), (20, DEPT_OPS),
+    ],
+    "IT Hardware": [
+        (40, DEPT_ENG), (30, DEPT_IT), (20, DEPT_MFG),
+    ],
+    # Pharma / Life Sciences → boost R&D, Medical Affairs
+    "Pharmaceuticals / Life Sciences": [
+        (60, DEPT_RD), (30, DEPT_MFG), (20, DEPT_LRC),
+    ],
+    "Medical Devices": [
+        (50, DEPT_RD), (40, DEPT_MFG), (30, DEPT_SALES),
+    ],
+    # Manufacturing → boost Manufacturing, Operations, Supply Chain
+    "Automotive": [
+        (50, DEPT_MFG), (40, DEPT_SC), (30, DEPT_ENG),
+    ],
+    "Industrial Manufacturing – Discrete": [
+        (60, DEPT_MFG), (40, DEPT_ENG), (30, DEPT_SC),
+    ],
+    "Industrial Manufacturing – Process": [
+        (60, DEPT_MFG), (50, DEPT_RD), (30, DEPT_SC),
+    ],
+    "Aerospace & Defence": [
+        (50, DEPT_ENG), (40, DEPT_MFG), (30, DEPT_RD),
+    ],
+    # Logistics → boost Supply Chain
+    "Supply Chain / Logistics": [
+        (70, DEPT_SC), (30, DEPT_OPS),
+    ],
+    "Transportation": [
+        (50, DEPT_OPS), (40, DEPT_SC),
+    ],
+    # Retail / Ecommerce → boost Sales, Marketing, Ops
+    "Retail": [
+        (40, DEPT_SALES), (40, DEPT_OPS), (30, DEPT_MKT),
+    ],
+    "Ecommerce": [
+        (50, DEPT_SALES), (40, DEPT_MKT), (30, DEPT_IT),
+    ],
+    "Wholesale / Distribution": [
+        (50, DEPT_SC), (40, DEPT_SALES), (30, DEPT_OPS),
+    ],
+    # Energy / Mining
+    "Energy (Oil & Gas)": [
+        (40, DEPT_ENG), (40, DEPT_OPS), (30, DEPT_RD),
+    ],
+    "Utilities": [
+        (40, DEPT_OPS), (30, DEPT_ENG),
+    ],
+    "Mineral / Mining / Natural Resources": [
+        (50, DEPT_OPS), (30, DEPT_ENG),
+    ],
+    # Healthcare providers → boost Operations, HR
+    "Healthcare Providers": [
+        (50, DEPT_OPS), (30, DEPT_HR),
+    ],
+    # Public sector
+    "Public Sector & Government": [
+        (40, DEPT_OPS), (30, DEPT_COMM),
+    ],
+    # Real estate
+    "Real Estate": [
+        (70, DEPT_FAC), (30, DEPT_FIN),
+    ],
+    # Media
+    "Media & Entertainment": [
+        (60, DEPT_MKT), (40, DEPT_COMM), (30, DEPT_ENG),
+    ],
+    # Telecom
+    "Telecommunications": [
+        (50, DEPT_ENG), (40, DEPT_IT), (30, DEPT_SALES),
+    ],
+    # Professional services
+    "Business Services / Professional Services": [
+        (40, DEPT_OPS), (30, DEPT_STR),
+    ],
+    # Construction
+    "Construction": [
+        (50, DEPT_OPS), (30, DEPT_ENG),
+    ],
+}
+
+
+def _classify_layer(title: str, job_level: str = "", industry: str = "") -> int:
+    """Return layer 0–10 for a job title (G0–G10 per reference).
+
+    When *industry* is a financial-markets type, uses the banking-specific
+    layer rules where VP = G6 (mid-level), MD = G3 (senior).
+    """
     t = title.strip().lower()
 
-    for layer, patterns in _LAYER_RULES:
+    rules = (
+        _FINANCIAL_LAYER_RULES
+        if industry in _FINANCIAL_INDUSTRIES
+        else _LAYER_RULES
+    )
+
+    for layer, patterns in rules:
         for pat in patterns:
             if re.search(pat, t):
                 return layer
@@ -837,13 +1054,15 @@ def _classify_dept(
     title: str,
     headline: str,
     job_function: str,
+    industry: str = "",
 ) -> tuple[str, float, str]:
     """
     Score every department against the combined text of title + headline.
     Returns (dept_primary, confidence, method).
 
-    job_function is used as a tiebreaker when the gap between first and
-    second place is < 30 points.
+    When *industry* is known, industry-specific boosts are added to the
+    department scores before ranking.  job_function is used as a tiebreaker
+    when the gap between first and second place is < 30 points.
     """
     combined = (title + " " + headline).lower()
 
@@ -851,6 +1070,15 @@ def _classify_dept(
         dept: _score(combined, rules)
         for dept, rules in _DEPT_SCORE_RULES
     }
+
+    # Apply industry-specific boosts (only when title scores are ambiguous
+    # or the boosted dept is already competitive — prevents overriding
+    # clear title signals)
+    if industry:
+        for boost, dept in _INDUSTRY_DEPT_BOOSTS.get(industry, []):
+            if dept in scores:
+                scores[dept] = scores[dept] + boost
+
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     top_dept,  top_score   = ranked[0]
     sec_dept,  sec_score   = ranked[1] if len(ranked) > 1 else ("", 0)
@@ -867,7 +1095,6 @@ def _classify_dept(
     elif gap >= 10:
         conf, method = 0.65, "title_keyword_moderate"
     else:
-        # Close race — consult job_function as tiebreaker
         hint = _FUNCTION_HINT_MAP.get((job_function or "").strip().lower())
         if hint == top_dept:
             conf, method = 0.72, "title_keyword+job_function"
@@ -898,6 +1125,7 @@ def classify(
     linkedin_headline: str = "",
     job_function:      str = "",
     job_level:         str = "",
+    industry:          str = "",
 ) -> TitleClassification:
     """
     Classify a person record into a canonical department + layer.
@@ -906,11 +1134,14 @@ def classify(
     ----------
     job_title         Primary NLP signal — the person's current role title.
     linkedin_headline Secondary NLP signal — LinkedIn profile headline.
-                      Often contains richer context: "VP Engineering at Stripe".
-    job_function      LinkedIn job_function field — used as a soft tiebreaker
-                      when title-based scoring is ambiguous.  Never authoritative.
-    job_level         LinkedIn job_level string — used as layer fallback when
-                      the title matches no layer pattern.
+    job_function      LinkedIn job_function field — soft tiebreaker only.
+    job_level         LinkedIn job_level string — layer fallback.
+    industry          One of the 37 canonical industries from
+                      Global_Org_Hierarchy.xlsx.  When provided:
+                        - Selects industry-specific layer rules (e.g. banking:
+                          VP = G6 not G4, MD = G3)
+                        - Applies industry department-scoring boosts so that
+                          industry-primary depts rank higher on ambiguous titles
 
     Returns
     -------
@@ -920,6 +1151,7 @@ def classify(
     headline = (linkedin_headline or "").strip()
     jf       = (job_function     or "").strip()
     jl       = (job_level        or "").strip()
+    ind      = (industry         or "").strip()
 
     # Strip "at [Company]" from headline to avoid company name polluting scoring
     headline = re.sub(r"\s+at\s+.+$", "", headline, flags=re.IGNORECASE).strip()
@@ -930,21 +1162,20 @@ def classify(
             layer=10, confidence=0.1, method="no_input",
         )
 
-    # Use headline as title fallback when title is absent
     effective_title = title or headline
 
-    # ── Layer classification ──────────────────────────────────────────────
-    layer = _classify_layer(effective_title, jl)
+    # ── Layer classification (industry-aware) ────────────────────────────
+    layer = _classify_layer(effective_title, jl, ind)
 
-    # Board members → always DEPT_BOARD
+    # Board members → always DEPT_BOARD regardless of industry
     if layer == 0:
         return TitleClassification(
             dept_primary=DEPT_BOARD, dept_secondary="",
             layer=0, confidence=1.0, method="board_pattern",
         )
 
-    # ── Department classification ─────────────────────────────────────────
-    dept, conf, method = _classify_dept(effective_title, headline, jf)
+    # ── Department classification (industry-aware) ───────────────────────
+    dept, conf, method = _classify_dept(effective_title, headline, jf, ind)
     sub  = _classify_sub_dept(dept, effective_title, headline)
 
     return TitleClassification(

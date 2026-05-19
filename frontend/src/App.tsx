@@ -89,6 +89,7 @@ export default function App() {
   const [deptTree, setDeptTree]     = useState<OrgNode | null>(null)
   const [viewTree, setViewTree]     = useState<OrgNode | null>(null)
   const [stats, setStats]           = useState<Stats | null>(null)
+  const [industry, setIndustry]     = useState<string>('')
   const [allNodes, setAllNodes]     = useState<OrgNode[]>([])
   const [highlight, setHighlight]   = useState<string | null>(null)
   const [dragging, setDragging]     = useState(false)
@@ -235,6 +236,7 @@ export default function App() {
       }
       const data = await res.json()
       setStats(data.stats)
+      if (data.industry) setIndustry(data.industry)
       if (data.canonical_missing?.length > 0) {
         setColWarning(
           `Could not detect: ${data.canonical_missing.join(' · ')}. ` +
@@ -415,6 +417,16 @@ export default function App() {
                   <span style={{ color: '#3491E8', fontWeight: 700 }}>{val}</span>
                 </div>
               ))}
+              {industry && (
+                <div style={{
+                  marginTop: 8, padding: '4px 6px',
+                  background: '#0c1e2e', borderRadius: 4,
+                  fontSize: 10, color: '#94a3b8', lineHeight: 1.4,
+                }}>
+                  <span style={{ color: '#475569', display: 'block', marginBottom: 2 }}>INDUSTRY</span>
+                  <span style={{ color: '#3491E8', fontWeight: 600 }}>{industry}</span>
+                </div>
+              )}
             </div>
           )}
 

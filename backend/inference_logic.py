@@ -381,6 +381,12 @@ class InferenceEngine:
       - department field is completely ignored
     """
 
+    def __init__(self, industry: str = "") -> None:
+        # One of the 37 canonical industries from Global_Org_Hierarchy.xlsx.
+        # When set, passed to classifier.classify() for industry-aware layer
+        # rules and department-scoring boosts.
+        self.industry = industry
+
     def classify_record(self, record: dict) -> ClassifiedRecord:
         # ── Extract primary NLP signals ───────────────────────────────────
         job_title  = _get(record, "Designation") or ""
@@ -424,6 +430,7 @@ class InferenceEngine:
             linkedin_headline=headline,
             job_function=job_function,
             job_level=job_level,
+            industry=self.industry,
         )
 
         dept_primary   = result.dept_primary
@@ -467,15 +474,23 @@ class InferenceEngine:
             dept_secondary=dept_secondary,
             dept_tertiary=dept_tertiary,
             nlp_confidence=result.confidence,
-            nlp_industry="generic",
+            nlp_industry=self.industry or "generic",
             nlp_method=result.method,
         )
 
-    def classify_all(self, records: list[dict]) -> list[ClassifiedRecord]:
+    def classify_all(
+        self,
+        records: list[dict],
+        industry: str = "",
+    ) -> list[ClassifiedRecord]:
         """
         Classify all records. Skips empty records.
         Compound designations like "CEO and CHRO" produce two entries.
+
+        *industry* overrides the instance's industry when provided.
         """
+        if industry:
+            self.industry = industry
         classified: list[ClassifiedRecord] = []
         skipped = 0
 
