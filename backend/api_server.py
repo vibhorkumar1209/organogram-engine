@@ -7,7 +7,6 @@ import io
 import json
 import re
 import tempfile
-import threading
 from pathlib import Path
 
 import pandas as pd
@@ -381,41 +380,22 @@ async def upload_file(file: UploadFile = File(...),
     # knowledge tagged "llm_leadership_ai".
     # The background thread below then runs the full scrape and can upgrade
     # "llm_leadership_ai" entries to "llm_leadership_web" when web data lands.
-    # Sync injection uses LLM knowledge only (domain="") — no web scraping.
-    # Web scraping happens in the background thread below and can take 40 s+;
-    # running it synchronously here blocks the upload response and starves the
-    # Haiku knowledge call that actually injects BOD/EM.
-    _inject_knowledge_leadership(
-        _dag, company_name,
-        region=_dag.G.nodes.get("root_global", {}).get("label", "Global HQ"),
-        sector="Private",
-        domain="",
-    )
-
-    # ── Web-scrape enrichment in background — keeps upload fast ──────────────
-    # Scrapes the company website and refines BOD/EM (overrides knowledge data
-    # when the website has more current information).
-    def _bg_enrich(dag: OrganogramDAG, db: OrganogramDB,
-                   classified: list, co: str, domain: str) -> None:
-        try:
-            _enrich_with_llm_leadership(dag, classified, co, domain=domain)
-            db.upsert_dag(dag)        # refresh SQLite with enriched nodes
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(f"Background enrichment failed: {exc}")
-
     # Explicit company_website param overrides auto-detected domain
     if company_website:
         import re as _re
         _m = _re.search(r"(?:https?://)?(?:www\.)?([^/]+)", company_website)
         _domain = _m.group(1) if _m else _domain
 
-    t = threading.Thread(
-        target=_bg_enrich,
-        args=(_dag, _db, _classified, company_name, _domain),
-        daemon=True,
-    )
-    t.start()
+    # ── Full BOD/EM enrichment — runs synchronously so response contains
+    # complete leadership data (web-sourced where available).
+    # This takes up to ~60 s (web scrape budget + LLM calls) but the frontend
+    # waits and receives everything at once — no partial / two-phase display.
+    try:
+        _enrich_with_llm_leadership(_dag, _classified, company_name, domain=_domain)
+        _db.upsert_dag(_dag)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(f"Leadership enrichment failed: {exc}")
 
     # ── Field coverage check (group-aware) ──────────────────────────────────
     # Vendors use many equivalent column names.  We check coverage by semantic

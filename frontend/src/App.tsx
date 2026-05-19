@@ -230,11 +230,15 @@ export default function App() {
     const form = new FormData()
     form.append('file', file)
 
-    // Tick elapsed seconds so user knows it's working (NLP can take 20-40s)
+    // Tick elapsed seconds — full pipeline (NLP + web BOD/EM enrichment) takes ~60s
     let elapsed = 0
     const tick = setInterval(() => {
       elapsed += 1
-      setStatusMsg(`Processing ${file.name}… ${elapsed}s (NLP classifying rows)`)
+      const phase =
+        elapsed < 12 ? 'Classifying roles & departments…' :
+        elapsed < 20 ? 'Identifying company industry…' :
+        'Fetching Board & Executive leadership from web…'
+      setStatusMsg(`${phase}  (${elapsed}s)`)
     }, 1000)
     setStatusMsg(`Processing ${file.name}…`)
 
