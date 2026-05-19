@@ -6,6 +6,7 @@ Supports recursive CTE-style drill-down queries.
 """
 
 import json
+import logging
 import re
 import sqlite3
 import uuid
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 import networkx as nx
+
+logger = logging.getLogger(__name__)
 
 from inference_logic import ClassifiedRecord, InferenceEngine
 
