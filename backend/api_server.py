@@ -97,20 +97,25 @@ COLUMN_ALIASES: dict[str, str] = {
     "state_name":     "state_name",
     "city":           "city",
 
-    # ── Vendor pre-classification ────────────────────────────────────────
-    "job_function": "vendor_function",
-    "job_level":    "vendor_level",
-    "persona":      "vendor_persona",
+    # ── Job classification signals ───────────────────────────────────────
+    # job_function → soft tiebreaker only (never authoritative for dept)
+    # job_level    → layer fallback when title matches no pattern
+    "job_function": "job_function",
+    "job_level":    "job_level",
 
     # ── LinkedIn enrichment fields ───────────────────────────────────────
-    # LINKEDIN_HEADLINE is used as a title fallback when JOB_TITLE is empty.
     "linkedin_headline": "linkedin_headline",
-    "linkedin_industry": "linkedin_industry",
+    "linkedin_industry": "Industry_Hint",
 
     # ── Org-level fallback identifiers ───────────────────────────────────
-    # JOB_ORG_LINKEDIN_URL is used to infer company name when no Company column.
     "job_org_linkedin_url": "job_org_linkedin_url",
     "email_domain":         "email_domain",
+
+    # ── New schema pass-through fields ───────────────────────────────────
+    "id":                          "id",
+    "job_count":                   "job_count",
+    "job_is_current":              "job_is_current",
+    "linkedin_connections_count":  "linkedin_connections_count",
 }
 
 
@@ -540,14 +545,30 @@ def get_stats():
 
 @app.get("/industries")
 def get_industries():
-    """Return loaded industry directories (names + sectors)."""
-    from inference_logic import get_nlp
-    nlp = get_nlp()
+    """Return the canonical department taxonomy used by the classifier."""
+    from classifier import (
+        DEPT_BOARD, DEPT_EXEC, DEPT_FIN, DEPT_HR, DEPT_LRC, DEPT_IT,
+        DEPT_ENG, DEPT_RD, DEPT_PM, DEPT_MKT, DEPT_SALES, DEPT_CS,
+        DEPT_OPS, DEPT_STR, DEPT_FAC, DEPT_COMM, DEPT_SUS,
+        DEPT_IB, DEPT_ST, DEPT_WM, DEPT_IM, DEPT_ACT, DEPT_UW, DEPT_CLM,
+        DEPT_SC, DEPT_MFG, DEPT_PRC,
+    )
+    core = [
+        DEPT_BOARD, DEPT_EXEC, DEPT_FIN, DEPT_HR, DEPT_LRC,
+        DEPT_IT, DEPT_ENG, DEPT_RD, DEPT_PM, DEPT_MKT,
+        DEPT_SALES, DEPT_CS, DEPT_OPS, DEPT_STR, DEPT_FAC,
+        DEPT_COMM, DEPT_SUS,
+    ]
+    industry_specific = [
+        DEPT_IB, DEPT_ST, DEPT_WM, DEPT_IM,
+        DEPT_ACT, DEPT_UW, DEPT_CLM,
+        DEPT_SC, DEPT_MFG, DEPT_PRC,
+    ]
     return {
-        "industries": [
-            {"id": d.id, "name": d.name, "sector": d.sector}
-            for d in nlp._dirs
-        ]
+        "departments": {
+            "core": core,
+            "industry_specific": industry_specific,
+        }
     }
 
 

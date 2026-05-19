@@ -1,49 +1,51 @@
 """
-Universal Organogram Engine - Inference Engine (NLP-powered)
-Classifies raw person records using per-industry YAML directories
-and NLP-enhanced designation parsing (abbreviation expansion,
-fuzzy matching, regex patterns).
+Universal Organogram Engine - Inference Engine
+Classifies raw person records using the keyword-scoring classifier.
 
-Hierarchy:
-  Global HQ (root)
-    └── Region (layer 0)
-          └── Dept Primary (layer 1)
-                └── Dept Secondary (layer 2)
-                      └── Dept Tertiary (layer 3)
-                            └── Person (layer 4–10 per seniority)
+Primary signals  : job_title, linkedin_headline
+Guidance signal  : job_function (soft tiebreaker, never authoritative)
+Ignored          : department input field (per design decision)
+Reference        : Global_Org_Hierarchy.xlsx   (16 canonical L0 departments)
+                   Global_Designation_Hierarchy.xlsx (G0–G11 grade scale)
+
+Input schema (new):
+  id, full_name, job_title, job_function, city, department (ignored),
+  title, email_domain, company_name, country_name, job_count,
+  job_is_current, job_level, linkedin_connections_count, linkedin_url,
+  linkedin_headline, job_org_linkedin_url
 
 Layer scale (people nodes):
-  0  Board of Directors / Non-Executive
-  1  C-Suite / CEO / Founder / Managing Partner
-  2  Executive Director / MD / EVP
-  3  SVP / VP / General Manager
-  4  Senior Director / Head of Business
-  5  Director / Head
-  6  Senior Manager / Associate Director
-  7  Manager / Team Lead
-  8  Senior Analyst / Specialist / Senior IC
-  9  Analyst / Associate / IC
-  10 Graduate / Intern / Entry Level
+  0  Board / Non-Executive
+  1  C-Suite / CEO / Founder
+  2  EVP / Executive Director / MD
+  3  SVP / Senior VP
+  4  VP / Head of Function
+  5  Senior Director / AVP
+  6  Director
+  7  Senior Manager / Associate Director
+  8  Manager / Supervisor
+  9  Senior IC / Lead / Staff
+  10 IC / Analyst / Specialist / Graduate
 """
-
 from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
-from nlp_engine import NLPEngine, ClassificationResult
+from classifier import classify as _classify_title, TitleClassification
 
 logger = logging.getLogger(__name__)
 
-# ── Fix 2: Bare department names as designations ─────────────────────────────
-# A title that is ONLY a department/function keyword (e.g. "Sales", "Marketing",
-# "Engineering", "Programme") contains no seniority signal and cannot indicate a
-# department head or team lead. Such records are capped at IC level (L8+).
-# We also remap the dept to the correct canonical name.
+
+# ─────────────────────────────────────────────────────────────────
+# BARE DEPARTMENT NAMES
+# ─────────────────────────────────────────────────────────────────
+# A title that is ONLY a department keyword (e.g. "Sales", "Engineering")
+# has no seniority signal. Such records are capped at L8+ (IC/staff level).
+
 _BARE_DEPT_NAMES: dict[str, str] = {
-    # key (lowercase) → canonical dept name (aligned with Global_Org_Hierarchy.xlsx)
     "sales":                    "Sales & Business Development",
     "marketing":                "Marketing",
     "engineering":              "Engineering",
@@ -86,7 +88,6 @@ _BARE_DEPT_NAMES: dict[str, str] = {
     "workplace":                "Facilities, Real Estate & Workplace",
 }
 
-# Seniority words — if ANY of these appear in the designation the title is NOT bare
 _SENIORITY_WORDS: frozenset[str] = frozenset({
     "chief", "head", "director", "vp", "vice president", "svp", "evp",
     "president", "manager", "lead", "senior", "principal", "associate",
@@ -97,351 +98,25 @@ _SENIORITY_WORDS: frozenset[str] = frozenset({
 })
 
 
-# ── Board-member title patterns → force L0 ───────────────────────────────────
-# NLP sees "Director" and assigns L5 (senior middle-management). But "Independent
-# Director", "Non-Executive Director" etc. are board roles, not line roles.
-# These patterns override both layer and dept_primary.
-_BOARD_PATTERNS: tuple[str, ...] = (
-    "non-executive director",
-    "non executive director",
-    "independent non-executive",
-    "independent director",
-    "non-executive chair",
-    "non-executive chairman",
-    "non-executive vice chairman",
-    "senior independent director",
-    "supervisory board",
-    "board of trustees",
-    "board trustee",
-    "board of directors",
-    "lead independent",
-    "lead director",
-    "outside director",
-    "external director",
-    # Single-word board titles (checked separately with word-boundary logic)
-)
-_BOARD_EXACT: frozenset[str] = frozenset({
-    "chairman",
-    "chairwoman",
-    "chairperson",
-    "chair",
-    "board member",
-    "board director",
-    "director (non-executive)",
-    "ned",   # Non-Executive Director abbreviation
-})
-
-
-def _is_board_title(designation: str) -> bool:
-    """
-    Return True if the designation is a board-level role (L0).
-    Catches "Independent Director", "Non-Executive Chairman", etc. that the
-    NLP keyword engine misclassifies as L5 line-Director roles.
-    """
-    t = designation.strip().lower()
-    # Substring match for multi-word patterns
-    for pat in _BOARD_PATTERNS:
-        if pat in t:
-            return True
-    # Exact match for short/ambiguous titles
-    if t in _BOARD_EXACT:
-        return True
-    return False
-
-
 def _bare_dept_check(designation: str) -> tuple[Optional[str], bool]:
-    """
-    Returns (canonical_dept, is_bare) for a designation.
-
-    is_bare=True means the title is ONLY a department keyword — no seniority
-    indicator present. The engine will cap such records at L8 (Staff IC).
-    """
+    """Return (canonical_dept, is_bare). is_bare=True → cap layer at 8+."""
     title_l = designation.strip().lower()
     if not title_l:
         return None, False
-    # Is any seniority word present?
     for sw in _SENIORITY_WORDS:
         if sw in title_l:
             return None, False
-    # Does the whole title match a bare dept keyword?
     if title_l in _BARE_DEPT_NAMES:
         return _BARE_DEPT_NAMES[title_l], True
     return None, False
 
-# ── Raw Department field → (primary, secondary) elevation ────────────────────
-# Applied BEFORE NLP classification when the Department column is present.
-# These are compound or sub-dept names that would confuse the NLP keyword
-# matcher, so we short-circuit and set primary+secondary directly.
-_RAW_DEPT_ELEVATE: dict[str, tuple[str, str]] = {
-    # ── Legal, Risk & Compliance sub-depts (merged per reference) ────────
-    "legal & compliance":               ("Legal, Risk & Compliance", "Legal Counsel"),
-    "compliance & legal":               ("Legal, Risk & Compliance", "Legal Counsel"),
-    "legal and compliance":             ("Legal, Risk & Compliance", "Legal Counsel"),
-    "compliance":                       ("Legal, Risk & Compliance", "Regulatory & Compliance"),
-    "legal & regulatory":               ("Legal, Risk & Compliance", "Regulatory & Compliance"),
-    "legal, compliance & regulatory":   ("Legal, Risk & Compliance", "Regulatory & Compliance"),
-    "regulatory affairs":               ("Legal, Risk & Compliance", "Regulatory & Compliance"),
-    "regulatory":                       ("Legal, Risk & Compliance", "Regulatory & Compliance"),
-    "governance":                       ("Legal, Risk & Compliance", "Ethics & Governance"),
-    "secretariat":                      ("Legal, Risk & Compliance", "Corporate Secretary"),
-    "company secretary":                ("Legal, Risk & Compliance", "Corporate Secretary"),
-    "risk & compliance":                ("Legal, Risk & Compliance", "Risk Management"),
-    "risk and compliance":              ("Legal, Risk & Compliance", "Risk Management"),
-    "governance risk & compliance":     ("Legal, Risk & Compliance", "Ethics & Governance"),
-    "governance, risk & compliance":    ("Legal, Risk & Compliance", "Ethics & Governance"),
-    "grc":                              ("Legal, Risk & Compliance", "Ethics & Governance"),
-    "credit risk":                      ("Legal, Risk & Compliance", "Risk Management"),
-    "market risk":                      ("Legal, Risk & Compliance", "Risk Management"),
-    "operational risk":                 ("Legal, Risk & Compliance", "Risk Management"),
-    "enterprise risk":                  ("Legal, Risk & Compliance", "Risk Management"),
-    "risk advisory":                    ("Legal, Risk & Compliance", "Risk Management"),
-    # ── Financial-services business divisions ────────────────────────────
-    # ALWAYS authoritative — override vendor_function (job_function)
-    "investment banking":               ("Investment Banking", "Capital Markets"),
-    "investment banking division":      ("Investment Banking", "Capital Markets"),
-    "m&a advisory":                     ("Investment Banking", "M&A Advisory"),
-    "mergers & acquisitions":           ("Investment Banking", "M&A Advisory"),
-    "capital markets":                  ("Investment Banking", "Capital Markets"),
-    "debt capital markets":             ("Investment Banking", "Capital Markets"),
-    "equity capital markets":           ("Investment Banking", "Capital Markets"),
-    "leveraged finance":                ("Investment Banking", "Capital Markets"),
-    "fixed income":                     ("Sales & Trading", "Fixed Income"),
-    "fixed income, currencies & commodities": ("Sales & Trading", "Fixed Income"),
-    "sales & trading":                  ("Sales & Trading", "Fixed Income"),
-    "equities":                         ("Sales & Trading", "Equities"),
-    "equity sales":                     ("Sales & Trading", "Equities"),
-    "equity trading":                   ("Sales & Trading", "Equities"),
-    "prime brokerage":                  ("Sales & Trading", "Prime Brokerage"),
-    "institutional securities":         ("Sales & Trading", "Institutional Securities"),
-    "wealth management":                ("Wealth Management", "Client Advisory"),
-    "global wealth management":         ("Wealth Management", "Client Advisory"),
-    "private banking":                  ("Wealth Management", "Private Banking"),
-    "private banking & wealth management": ("Wealth Management", "Private Banking"),
-    "private wealth management":        ("Wealth Management", "Private Wealth"),
-    "asset management":                 ("Investment Management", "Asset Management"),
-    "investment management":            ("Investment Management", "Asset Management"),
-    "global investment management":     ("Investment Management", "Asset Management"),
-    "equity research":                  ("Research & Development", "Research"),
-    "fixed income research":            ("Research & Development", "Research"),
-    "global research":                  ("Research & Development", "Research"),
-    # ── Facilities, Real Estate & Workplace (standalone per reference) ────
-    "facilities & real estate":         ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    "real estate & facilities":         ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    "facilities":                       ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    "facilities management":            ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    "real estate":                      ("Facilities, Real Estate & Workplace", "Real Estate & Workplace Strategy"),
-    "corporate real estate":            ("Facilities, Real Estate & Workplace", "Real Estate & Workplace Strategy"),
-    "workplace":                        ("Facilities, Real Estate & Workplace", "Real Estate & Workplace Strategy"),
-    "workplace & facilities":           ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    "workplace services":               ("Facilities, Real Estate & Workplace", "Facilities Management"),
-    # ── Strategy & Corporate Development sub-depts ───────────────────────
-    "policy & strategy":                ("Strategy & Corporate Development", "Corporate Strategy"),
-    "strategy & policy":                ("Strategy & Corporate Development", "Corporate Strategy"),
-    "public policy":                    ("Strategy & Corporate Development", "Corporate Strategy"),
-    "policy":                           ("Strategy & Corporate Development", "Corporate Strategy"),
-    "corporate strategy":               ("Strategy & Corporate Development", "Corporate Strategy"),
-    "group strategy":                   ("Strategy & Corporate Development", "Corporate Strategy"),
-    "business strategy":                ("Strategy & Corporate Development", "Corporate Strategy"),
-    "strategy & planning":              ("Strategy & Corporate Development", "Corporate Strategy"),
-    "planning & strategy":              ("Strategy & Corporate Development", "Corporate Strategy"),
-    "transformation":                   ("Strategy & Corporate Development", "Digital Transformation & Innovation"),
-    "business transformation":          ("Strategy & Corporate Development", "Digital Transformation & Innovation"),
-    "digital transformation":           ("Strategy & Corporate Development", "Digital Transformation & Innovation"),
-    "change management":                ("Strategy & Corporate Development", "Digital Transformation & Innovation"),
-    "programme management":             ("Strategy & Corporate Development", "Corporate Strategy"),
-    "programme management office":      ("Strategy & Corporate Development", "Corporate Strategy"),
-    "pmo":                              ("Strategy & Corporate Development", "Corporate Strategy"),
-    "epmo":                             ("Strategy & Corporate Development", "Corporate Strategy"),
-    "project management":               ("Strategy & Corporate Development", "Corporate Strategy"),
-    "project management office":        ("Strategy & Corporate Development", "Corporate Strategy"),
-    "deal advisory":                    ("Strategy & Corporate Development", "M&A & Corporate Development"),
-    "m&a":                              ("Strategy & Corporate Development", "M&A & Corporate Development"),
-    "corporate development":            ("Strategy & Corporate Development", "M&A & Corporate Development"),
-    # ── Sales & Business Development sub-depts ──────────────────────────
-    "sales & account management":       ("Sales & Business Development", "Direct Sales"),
-    "sales & commercial":               ("Sales & Business Development", "Sales Operations"),
-    "account management":               ("Sales & Business Development", "Direct Sales"),
-    "key account management":           ("Sales & Business Development", "Direct Sales"),
-    "inside sales":                     ("Sales & Business Development", "Direct Sales"),
-    "new business development":         ("Sales & Business Development", "Partnerships & Alliances"),
-    "new business":                     ("Sales & Business Development", "Partnerships & Alliances"),
-    "business development":             ("Sales & Business Development", "Partnerships & Alliances"),
-    "pre-sales":                        ("Sales & Business Development", "Sales Operations"),
-    "channel & partners":               ("Sales & Business Development", "Partnerships & Alliances"),
-    "sales operations":                 ("Sales & Business Development", "Sales Operations"),
-    "commercial":                       ("Sales & Business Development", "Sales Operations"),
-    "public sector":                    ("Sales & Business Development", "Direct Sales"),
-    "government":                       ("Sales & Business Development", "Direct Sales"),
-    "government & public sector":       ("Sales & Business Development", "Direct Sales"),
-    "public sector & government":       ("Sales & Business Development", "Direct Sales"),
-    "defence":                          ("Sales & Business Development", "Direct Sales"),
-    "defence & public sector":          ("Sales & Business Development", "Direct Sales"),
-    "healthcare sector":                ("Sales & Business Development", "Direct Sales"),
-    "financial services sector":        ("Sales & Business Development", "Direct Sales"),
-    "enterprise accounts":              ("Sales & Business Development", "Direct Sales"),
-    "alliances":                        ("Sales & Business Development", "Partnerships & Alliances"),
-    # ── Marketing sub-depts ─────────────────────────────────────────────
-    "brand":                            ("Marketing", "Brand & Creative"),
-    "brand & communications":           ("Marketing", "Brand & Creative"),
-    "brand management":                 ("Marketing", "Brand & Creative"),
-    "digital marketing":                ("Marketing", "Performance & Digital Marketing"),
-    "performance marketing":            ("Marketing", "Performance & Digital Marketing"),
-    "digital & performance marketing":  ("Marketing", "Performance & Digital Marketing"),
-    "social media":                     ("Marketing", "Performance & Digital Marketing"),
-    "product marketing":                ("Marketing", "Product Marketing"),
-    "market research":                  ("Marketing", "Market Research & Insights"),
-    "consumer insights":                ("Marketing", "Market Research & Insights"),
-    "content":                          ("Marketing", "Brand & Creative"),
-    "creative":                         ("Marketing", "Brand & Creative"),
-    "events":                           ("Marketing", "Field & Event Marketing"),
-    "trade marketing":                  ("Marketing", "Field & Event Marketing"),
-    # ── Corporate Communications & Public Affairs sub-depts ──────────────
-    "corporate communications":         ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "public relations":                 ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "pr":                               ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "external affairs":                 ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
-    "public affairs":                   ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
-    "government relations":             ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
-    "communications":                   ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "internal communications":          ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "media relations":                  ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    # ── Customer Success & Service sub-depts ─────────────────────────────
-    "customer experience":              ("Customer Success & Service", "Customer Experience"),
-    "customer success":                 ("Customer Success & Service", "Customer Success Management"),
-    "customer support":                 ("Customer Success & Service", "Customer Support"),
-    "client relations":                 ("Customer Success & Service", "Customer Success Management"),
-    "client success":                   ("Customer Success & Service", "Customer Success Management"),
-    "onboarding":                       ("Customer Success & Service", "Customer Success Management"),
-    "renewals":                         ("Customer Success & Service", "Customer Success Management"),
-    "technical support":                ("Customer Success & Service", "Customer Support"),
-    # ── R&D sub-depts ───────────────────────────────────────────────────
-    "research":                         ("Research & Development", "Research"),
-    "innovation":                       ("Research & Development", "Innovation & IP Management"),
-    "product development":              ("Research & Development", "Product Development"),
-    # ── Human Resources sub-depts ───────────────────────────────────────
-    "talent acquisition":               ("Human Resources", "Talent Acquisition"),
-    "talent management":                ("Human Resources", "Talent Acquisition"),
-    "learning & development":           ("Human Resources", "Learning & Development"),
-    "l&d":                              ("Human Resources", "Learning & Development"),
-    "training":                         ("Human Resources", "Learning & Development"),
-    "compensation & benefits":          ("Human Resources", "Total Rewards"),
-    "total rewards":                    ("Human Resources", "Total Rewards"),
-    "hr business partnering":           ("Human Resources", "HR Business Partners"),
-    "people analytics":                 ("Human Resources", "People Operations & HR Systems"),
-    "diversity & inclusion":            ("Human Resources", "Employee Relations & DE&I"),
-    "dei":                              ("Human Resources", "Employee Relations & DE&I"),
-    "people operations":                ("Human Resources", "People Operations & HR Systems"),
-    # ── Finance & Accounting sub-depts ──────────────────────────────────
-    "treasury":                         ("Finance & Accounting", "Treasury"),
-    "internal audit":                   ("Finance & Accounting", "Internal Audit"),
-    "audit":                            ("Finance & Accounting", "Internal Audit"),
-    "fp&a":                             ("Finance & Accounting", "FP&A"),
-    "financial planning & analysis":    ("Finance & Accounting", "FP&A"),
-    "payroll":                          ("Finance & Accounting", "Financial Operations"),
-    "financial operations":             ("Finance & Accounting", "Financial Operations"),
-    "control & reporting":              ("Finance & Accounting", "Control & Financial Reporting"),
-    "financial reporting":              ("Finance & Accounting", "Control & Financial Reporting"),
-    # ── Information Technology sub-depts (per reference L1) ─────────────
-    "data & analytics":                 ("Information Technology", "Data & Enterprise Analytics"),
-    "data engineering":                 ("Information Technology", "Data & Enterprise Analytics"),
-    "data science":                     ("Information Technology", "Data & Enterprise Analytics"),
-    "analytics":                        ("Information Technology", "Data & Enterprise Analytics"),
-    "cybersecurity":                    ("Information Technology", "Cybersecurity"),
-    "information security":             ("Information Technology", "Cybersecurity"),
-    "cyber security":                   ("Information Technology", "Cybersecurity"),
-    "it infrastructure":                ("Information Technology", "Infrastructure & Cloud"),
-    "infrastructure":                   ("Information Technology", "Infrastructure & Cloud"),
-    "cloud":                            ("Information Technology", "Infrastructure & Cloud"),
-    "enterprise architecture":          ("Information Technology", "Infrastructure & Cloud"),
-    "enterprise applications":          ("Information Technology", "Enterprise Applications"),
-    "it support":                       ("Information Technology", "IT Support & Service Delivery"),
-    "it service delivery":              ("Information Technology", "IT Support & Service Delivery"),
-    # ── Engineering sub-depts (per reference L1) ────────────────────────
-    "software engineering":             ("Engineering", "Software Engineering"),
-    "software development":             ("Engineering", "Software Engineering"),
-    "application development":          ("Engineering", "Software Engineering"),
-    "devops":                           ("Engineering", "Platform & Infrastructure Engineering"),
-    "platform engineering":             ("Engineering", "Platform & Infrastructure Engineering"),
-    "site reliability":                 ("Engineering", "Platform & Infrastructure Engineering"),
-    "hardware engineering":             ("Engineering", "Hardware & Systems Engineering"),
-    "systems engineering":              ("Engineering", "Hardware & Systems Engineering"),
-    "quality engineering":              ("Engineering", "Quality Engineering"),
-    # ── Operations sub-depts ────────────────────────────────────────────
-    "health, safety & environment":     ("Operations", "Quality Assurance & EHS"),
-    "hse":                              ("Operations", "Quality Assurance & EHS"),
-    "ehs":                              ("Operations", "Quality Assurance & EHS"),
-    "health & safety":                  ("Operations", "Quality Assurance & EHS"),
-    "quality & compliance":             ("Operations", "Quality Assurance & EHS"),
-    "quality assurance":                ("Operations", "Quality Assurance & EHS"),
-    "quality":                          ("Operations", "Quality Assurance & EHS"),
-    "shared services":                  ("Operations", "Supply Chain Management"),
-    "service delivery":                 ("Operations", "Supply Chain Management"),
-    "production":                       ("Operations", "Manufacturing & Production"),
-    "maintenance":                      ("Operations", "Manufacturing & Production"),
-}
-
-# ── Country-code → region mapping (shared with organogram v2 NLP agent) ──────
-# Imported lazily so the module loads even if organogram package is absent.
-def _get_country_code_to_region() -> dict[str, str]:
-    try:
-        from organogram.agents.nlp_agent import COUNTRY_CODE_TO_REGION
-        return COUNTRY_CODE_TO_REGION
-    except ImportError:
-        return {}
-
-_COUNTRY_CODE_TO_REGION: dict[str, str] = {}   # populated on first use
-
-
-def _region_from_country_code(code: str) -> Optional[str]:
-    """Return engine region string for an ISO-2 country code, or None."""
-    global _COUNTRY_CODE_TO_REGION
-    if not _COUNTRY_CODE_TO_REGION:
-        _COUNTRY_CODE_TO_REGION = _get_country_code_to_region()
-    return _COUNTRY_CODE_TO_REGION.get((code or "").strip().upper())
-
-
-# ── Vendor level → engine layer mapping ─────────────────────────────────────
-def _get_vendor_level_map() -> dict[str, int]:
-    try:
-        from organogram.utils.vendor_mapper import VENDOR_LEVEL_MAP
-        return VENDOR_LEVEL_MAP
-    except ImportError:
-        return {}
-
-_VENDOR_LEVEL_MAP: dict[str, int] = {}   # populated on first use
-
-
-def _layer_from_vendor_level(vendor_level: str) -> Optional[int]:
-    """Map a vendor JOB_LEVEL string to an engine layer int, or None."""
-    global _VENDOR_LEVEL_MAP
-    if not _VENDOR_LEVEL_MAP:
-        _VENDOR_LEVEL_MAP = _get_vendor_level_map()
-    return _VENDOR_LEVEL_MAP.get((vendor_level or "").strip().lower())
-
-
-# ── Vendor function → engine function mapping ────────────────────────────────
-def _get_vendor_function_map() -> dict[str, str]:
-    try:
-        from organogram.utils.vendor_mapper import VENDOR_FUNCTION_MAP
-        return VENDOR_FUNCTION_MAP
-    except ImportError:
-        return {}
-
-_VENDOR_FUNCTION_MAP: dict[str, str] = {}   # populated on first use
-
-
-def _dept_from_vendor_function(vendor_function: str) -> Optional[str]:
-    """Map a vendor JOB_FUNCTION string to an engine department string, or None."""
-    global _VENDOR_FUNCTION_MAP
-    if not _VENDOR_FUNCTION_MAP:
-        _VENDOR_FUNCTION_MAP = _get_vendor_function_map()
-    return _VENDOR_FUNCTION_MAP.get((vendor_function or "").strip().lower())
 
 # ─────────────────────────────────────────────────────────────────
 # COMPOUND TITLE SPLITTING
 # ─────────────────────────────────────────────────────────────────
+# "CEO and CHRO" → ["CEO", "CHRO"]  (only when both sides are seniority tokens)
+# "Head of Sales and Marketing" → stays as-is
 
-# Tokens that indicate a string is a standalone seniority title (not a dept word)
 _TITLE_TOKENS: frozenset[str] = frozenset({
     "ceo", "cfo", "coo", "cto", "cmo", "cso", "chro", "cpo", "cio",
     "cdo", "cro", "ccio", "caio", "cxo",
@@ -456,12 +131,6 @@ _COMPOUND_SEPS = (" and ", " & ", " / ")
 
 
 def _split_compound_title(designation: str) -> list[str]:
-    """
-    Split compound executive titles like "CEO and CHRO" → ["CEO", "CHRO"].
-    Does NOT split functional phrases like "Head of Sales and Marketing".
-
-    Rule: split only when BOTH sides contain at least one seniority token.
-    """
     des = designation.strip()
     for sep in _COMPOUND_SEPS:
         if sep.lower() in des.lower():
@@ -470,26 +139,213 @@ def _split_compound_title(designation: str) -> list[str]:
             right = des[idx + len(sep):].strip()
             if not left or not right:
                 continue
-            left_words  = set(left.lower().split())
-            right_words = set(right.lower().split())
-            if left_words & _TITLE_TOKENS and right_words & _TITLE_TOKENS:
+            if set(left.lower().split()) & _TITLE_TOKENS and set(right.lower().split()) & _TITLE_TOKENS:
                 return [left, right]
     return [des]
 
-# Singleton NLP engine — initialised once, reused across all records
-_NLP: Optional[NLPEngine] = None
+
+# ─────────────────────────────────────────────────────────────────
+# SECTOR CLASSIFICATION
+# ─────────────────────────────────────────────────────────────────
+
+_SECTOR_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("Banking & Financial Services", [
+        "bank", "financial", "finance", "investment", "capital", "asset management",
+        "insurance", "wealth", "securities", "brokerage", "trading", "fund",
+    ]),
+    ("Technology", [
+        "tech", "software", "saas", "cloud", "digital", "ai", "data",
+        "analytics", "platform", "cyber", "semiconductor", "internet",
+    ]),
+    ("Healthcare & Life Sciences", [
+        "health", "pharma", "biotech", "hospital", "medical", "clinical",
+        "life science", "diagnostic", "therapeutics", "dental",
+    ]),
+    ("Professional Services", [
+        "consulting", "advisory", "audit", "accounting", "legal", "law firm",
+        "recruitment", "staffing",
+    ]),
+    ("Energy & Utilities", [
+        "oil", "gas", "energy", "utility", "utilities", "power", "renewable",
+        "mining", "petroleum",
+    ]),
+    ("Manufacturing & Industrials", [
+        "manufacturing", "industrial", "automotive", "aerospace", "engineering",
+        "chemical", "construction", "materials",
+    ]),
+    ("Retail & Consumer", [
+        "retail", "consumer", "ecommerce", "e-commerce", "fmcg", "food",
+        "beverage", "fashion", "luxury",
+    ]),
+    ("Telecommunications", [
+        "telecom", "telecommunications", "mobile", "wireless", "broadband",
+        "network provider",
+    ]),
+    ("Media & Entertainment", [
+        "media", "entertainment", "publishing", "broadcasting", "streaming",
+        "gaming", "sports",
+    ]),
+    ("Real Estate", [
+        "real estate", "property", "reit", "realty", "facilities management",
+    ]),
+]
 
 
-def get_nlp() -> NLPEngine:
-    global _NLP
-    if _NLP is None:
-        _NLP = NLPEngine()
-        logger.info(f"NLP engine initialised with industries: {_NLP.loaded_industries}")
-    return _NLP
+def _classify_sector(company: str, designation: str, industry_hint: str) -> str:
+    combined = (company + " " + designation + " " + industry_hint).lower()
+    for sector, keywords in _SECTOR_KEYWORDS:
+        if any(k in combined for k in keywords):
+            return sector
+    return "General"
 
 
 # ─────────────────────────────────────────────────────────────────
-# OUTPUT RECORD
+# REGION CLASSIFICATION
+# ─────────────────────────────────────────────────────────────────
+
+_COUNTRY_TO_REGION: dict[str, str] = {
+    # North America
+    "united states": "North America", "usa": "North America", "us": "North America",
+    "canada": "North America", "mexico": "North America",
+    # Europe
+    "united kingdom": "Europe", "uk": "Europe", "gb": "Europe",
+    "germany": "Europe", "france": "Europe", "netherlands": "Europe",
+    "switzerland": "Europe", "sweden": "Europe", "norway": "Europe",
+    "denmark": "Europe", "finland": "Europe", "belgium": "Europe",
+    "austria": "Europe", "italy": "Europe", "spain": "Europe",
+    "portugal": "Europe", "ireland": "Europe", "poland": "Europe",
+    "czech republic": "Europe", "hungary": "Europe", "romania": "Europe",
+    "greece": "Europe", "luxembourg": "Europe", "turkey": "Europe",
+    # Middle East & Africa
+    "united arab emirates": "Middle East & Africa", "uae": "Middle East & Africa",
+    "saudi arabia": "Middle East & Africa", "qatar": "Middle East & Africa",
+    "kuwait": "Middle East & Africa", "bahrain": "Middle East & Africa",
+    "oman": "Middle East & Africa", "israel": "Middle East & Africa",
+    "south africa": "Middle East & Africa", "nigeria": "Middle East & Africa",
+    "kenya": "Middle East & Africa", "egypt": "Middle East & Africa",
+    "ghana": "Middle East & Africa", "ethiopia": "Middle East & Africa",
+    # Asia Pacific
+    "india": "Asia Pacific", "in": "Asia Pacific",
+    "china": "Asia Pacific", "cn": "Asia Pacific",
+    "japan": "Asia Pacific", "jp": "Asia Pacific",
+    "australia": "Asia Pacific", "au": "Asia Pacific",
+    "singapore": "Asia Pacific", "sg": "Asia Pacific",
+    "hong kong": "Asia Pacific", "hk": "Asia Pacific",
+    "south korea": "Asia Pacific", "kr": "Asia Pacific",
+    "indonesia": "Asia Pacific", "malaysia": "Asia Pacific",
+    "thailand": "Asia Pacific", "vietnam": "Asia Pacific",
+    "philippines": "Asia Pacific", "new zealand": "Asia Pacific",
+    "taiwan": "Asia Pacific", "bangladesh": "Asia Pacific",
+    "pakistan": "Asia Pacific",
+    # Latin America
+    "brazil": "Latin America", "br": "Latin America",
+    "argentina": "Latin America", "colombia": "Latin America",
+    "chile": "Latin America", "peru": "Latin America",
+    "venezuela": "Latin America", "ecuador": "Latin America",
+}
+
+
+def _classify_region(country_name: str, city: str) -> str:
+    combined = (country_name + " " + city).strip().lower()
+    if not combined:
+        return "Global"
+    for key, region in _COUNTRY_TO_REGION.items():
+        if key in combined:
+            return region
+    return "Global"
+
+
+# ─────────────────────────────────────────────────────────────────
+# FIELD EXTRACTION
+# ─────────────────────────────────────────────────────────────────
+
+# Maps any known column variant → canonical field name used in _get()
+_FIELD_ALIASES: dict[str, str] = {
+    # id
+    "id": "id",
+    # full_name (vendor new-schema field)
+    "full_name": "FullName", "full name": "FullName", "fullname": "FullName",
+    "name": "FullName", "contact name": "FullName", "person name": "FullName",
+    "employee name": "FullName",
+    # First / Last (legacy split)
+    "firstname": "FirstName", "first_name": "FirstName", "first name": "FirstName",
+    "given name": "FirstName", "givenname": "FirstName", "fname": "FirstName",
+    "lastname": "LastName", "last_name": "LastName", "last name": "LastName",
+    "surname": "LastName", "family name": "LastName", "lname": "LastName",
+    # job_title (new primary signal)
+    "job_title": "Designation", "job title": "Designation", "jobtitle": "Designation",
+    "designation": "Designation", "title": "Designation",
+    "position": "Designation", "role": "Designation",
+    "current title": "Designation", "currenttitle": "Designation",
+    "current position": "Designation",
+    # linkedin_headline (secondary NLP signal)
+    "linkedin_headline": "linkedin_headline", "headline": "linkedin_headline",
+    "linkedin headline": "linkedin_headline",
+    # job_function (soft tiebreaker — guidance only, never authoritative)
+    "job_function": "job_function", "job function": "job_function",
+    "function": "job_function",
+    # job_level (LinkedIn level string — layer fallback)
+    "job_level": "job_level", "job level": "job_level",
+    "seniority": "job_level", "vendor_level": "job_level",
+    # company_name (new field name)
+    "company_name": "Company", "company": "Company", "companyname": "Company",
+    "organization": "Company", "organisation": "Company",
+    "employer": "Company", "firm": "Company",
+    # email_domain (used for leadership injection and company fallback)
+    "email_domain": "email_domain",
+    # linkedin_url
+    "linkedin_url": "LinkedInURL", "linkedin": "LinkedInURL",
+    "linkedinurl": "LinkedInURL", "linkedin url": "LinkedInURL",
+    "linkedin profile": "LinkedInURL", "profile url": "LinkedInURL",
+    # job_org_linkedin_url (company fallback)
+    "job_org_linkedin_url": "job_org_linkedin_url",
+    # location fields
+    "city": "city", "country_name": "country_name", "country": "country_name",
+    "location": "Location", "country_code": "country_code",
+    "job_country": "country_name", "job_city": "city",
+    "job_location_country": "country_name",
+    "job_location_country_code": "country_code",
+    "job_location_city": "city",
+    # misc new fields (passed through, not used in classification)
+    "job_count": "job_count", "job_is_current": "job_is_current",
+    "linkedin_connections_count": "linkedin_connections_count",
+    # industry hint
+    "industry_hint": "Industry_Hint", "industry": "Industry_Hint",
+    "sector": "Industry_Hint", "linkedin_industry": "Industry_Hint",
+    # department — accepted in alias table so the field appears in records,
+    # but _classify_record() NEVER reads it for classification.
+    "department": "department", "dept": "department",
+}
+
+
+def _get(record: dict, *canonical_names: str) -> str:
+    """Return first non-empty value matching any canonical field name."""
+    for name in canonical_names:
+        val = record.get(name, "")
+        if val and str(val).strip() and str(val).strip().lower() not in ("nan", "none", "null"):
+            return str(val).strip()
+    for raw_key, raw_val in record.items():
+        normalised_key = str(raw_key).lower().strip()
+        canonical = _FIELD_ALIASES.get(normalised_key)
+        if canonical in canonical_names:
+            if raw_val and str(raw_val).strip().lower() not in ("nan", "none", "null"):
+                return str(raw_val).strip()
+    return ""
+
+
+def _extract_name(record: dict) -> str:
+    first = _get(record, "FirstName")
+    last  = _get(record, "LastName")
+    if first or last:
+        return f"{first} {last}".strip()
+    full = _get(record, "FullName")
+    if full:
+        return full
+    return "Unknown"
+
+
+# ─────────────────────────────────────────────────────────────────
+# OUTPUT RECORD (ClassifiedRecord — unchanged interface for structural_engine)
 # ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -506,153 +362,9 @@ class ClassifiedRecord:
     dept_primary: str
     dept_secondary: str
     dept_tertiary: str
-    # NLP provenance
     nlp_confidence: float = 0.0
     nlp_industry: str = "generic"
     nlp_method: str = "fallback"
-
-
-# ─────────────────────────────────────────────────────────────────
-# FIELD EXTRACTOR
-# ─────────────────────────────────────────────────────────────────
-
-# All known column aliases → canonical name
-_FIELD_ALIASES: dict[str, str] = {
-    # FirstName
-    "firstname": "FirstName", "first_name": "FirstName", "first name": "FirstName",
-    "given name": "FirstName", "givenname": "FirstName", "fname": "FirstName",
-    # LastName
-    "lastname": "LastName", "last_name": "LastName", "last name": "LastName",
-    "surname": "LastName", "family name": "LastName", "lname": "LastName",
-    # Full name
-    "fullname": "FullName", "full name": "FullName", "name": "FullName",
-    "full_name": "FullName", "contact name": "FullName", "person name": "FullName",
-    "employee name": "FullName",
-    # Designation
-    "designation": "Designation", "title": "Designation", "job title": "Designation",
-    "jobtitle": "Designation", "position": "Designation", "role": "Designation",
-    "job role": "Designation", "current title": "Designation",
-    "currenttitle": "Designation", "headline": "Designation",
-    "current position": "Designation",
-    # Company
-    "company": "Company", "company name": "Company", "companyname": "Company",
-    "organization": "Company", "organisation": "Company", "employer": "Company",
-    "current company": "Company", "currentcompany": "Company",
-    "account": "Company", "firm": "Company",
-    # LinkedInURL
-    "linkedinurl": "LinkedInURL", "linkedin url": "LinkedInURL",
-    "linkedin": "LinkedInURL", "linkedin profile": "LinkedInURL",
-    "profile url": "LinkedInURL", "profileurl": "LinkedInURL", "url": "LinkedInURL",
-    # Location
-    "location": "Location", "city": "Location", "country": "Location",
-    "region": "Location", "office location": "Location",
-    "officelocation": "Location", "geography": "Location", "geo": "Location",
-    "based in": "Location", "basedin": "Location",
-    # Industry hint
-    "industry_hint": "Industry_Hint", "industry": "Industry_Hint",
-    "sector": "Industry_Hint", "domain": "Industry_Hint",
-    "vertical": "Industry_Hint", "industry hint": "Industry_Hint",
-    "industryhint": "Industry_Hint",
-    # ProTrail / structured ProfileLevel → treated as a strong industry/dept hint
-    "profilelevel": "ProfileLevel", "profile level": "ProfileLevel",
-    "profile_level": "ProfileLevel", "org": "ProfileLevel",
-    # ProTrail raw Department field
-    "department": "Department", "dept": "Department",
-}
-
-
-# ─────────────────────────────────────────────────────────────────
-# PROTRAIL ProfileLevel → (dept_primary, industry_hint) mapping
-# Derived from 354k-row ProTrail-OrgData analysis
-# ─────────────────────────────────────────────────────────────────
-_PROFILE_LEVEL_MAP: dict[str, tuple[str, str, int | None]] = {
-    # ProfileLevel value → (dept_primary, industry_hint, forced_layer or None)
-    "it org":                                               ("Information Technology", "technology", None),
-    "information technology":                               ("Information Technology", "technology", None),
-    "operations org":                                       ("Operations",             "generic",    None),
-    "executive management":                                 ("Executive Management",   "generic",    1),
-    "sales org":                                            ("Sales",                  "generic",    None),
-    "finance org":                                          ("Finance",                "banking_finance", None),
-    "marketing org":                                        ("Marketing",              "generic",    None),
-    "hr org":                                               ("Human Resources",        "generic",    None),
-    "human resources":                                      ("Human Resources",        "generic",    None),
-    "board of directors":                                   ("Board of Directors",     "generic",    0),
-    "board of director":                                    ("Board of Directors",     "generic",    0),
-    "supervisory board":                                    ("Board of Directors",     "generic",    0),
-    "board of trustees":                                    ("Board of Directors",     "generic",    0),
-    "artificial intelligence and machine learning":         ("Data & AI",              "technology", None),
-    "engineering, r&d":                                     ("Engineering & R&D",      "manufacturing", None),
-    "design and engineering":                               ("Engineering & R&D",      "manufacturing", None),
-    "engineering & construction, design, plant & manufacturing": ("Engineering & R&D", "manufacturing", None),
-    "design and construction":                              ("Engineering & R&D",      "manufacturing", None),
-    "procurement services":                                 ("Procurement & Supply Chain", "generic", None),
-    "logistics and transportation":                         ("Logistics & Supply Chain", "generic",  None),
-    "healthcare org":                                       ("Healthcare",             "healthcare", None),
-    "manufacturing":                                        ("Manufacturing",          "manufacturing", None),
-    "it services and consulting":                           ("IT Consulting",          "technology", None),
-    "advanced driver assistance systems (adas)":            ("Engineering & R&D",      "automotive", None),
-    "corporate operations group":                           ("Corporate Operations",   "generic",    None),
-    "corporate development division":                       ("Corporate Development",  "generic",    2),
-    "risk management & compliance":                         ("Risk & Compliance",      "banking_finance", None),
-    "asset management":                                     ("Asset Management",       "banking_finance", None),
-    "data analytics":                                       ("Data & Analytics",       "technology", None),
-    "sustainability":                                       ("Sustainability",          "generic",    None),
-    "legal & governance group":                             ("Legal",                  "generic",    None),
-    "infrastructure & construction":                        ("Engineering & R&D",      "manufacturing", None),
-    "media and entertainment":                              ("Marketing & Comms",      "generic",    None),
-}
-
-# Normalized lookup
-_PROFILE_LEVEL_MAP_NORM: dict[str, tuple[str, str, int | None]] = {
-    k.lower().strip(): v for k, v in _PROFILE_LEVEL_MAP.items()
-}
-
-
-def _lookup_profile_level(raw: str) -> tuple[str, str, int | None] | None:
-    """Return (dept_primary, industry_hint, forced_layer) for a ProfileLevel string, or None."""
-    if not raw:
-        return None
-    key = raw.lower().strip()
-    if key in _PROFILE_LEVEL_MAP_NORM:
-        return _PROFILE_LEVEL_MAP_NORM[key]
-    # Partial match for long/variant values
-    for k, v in _PROFILE_LEVEL_MAP_NORM.items():
-        if k in key or key in k:
-            return v
-    return None
-
-
-def _get(record: dict, *canonical_names: str) -> str:
-    """Return first non-empty value matching any canonical field name."""
-    # Try direct canonical key first
-    for name in canonical_names:
-        val = record.get(name, "")
-        if val and str(val).strip() and str(val).strip().lower() not in ("nan", "none", "null"):
-            return str(val).strip()
-
-    # Try normalised key lookup
-    for raw_key, raw_val in record.items():
-        normalised_key = str(raw_key).lower().strip()
-        canonical = _FIELD_ALIASES.get(normalised_key)
-        if canonical in canonical_names:
-            if raw_val and str(raw_val).strip().lower() not in ("nan", "none", "null"):
-                return str(raw_val).strip()
-
-    return ""
-
-
-def _extract_name(record: dict) -> str:
-    """Extract full name, handling separate First/Last or combined FullName."""
-    first = _get(record, "FirstName")
-    last  = _get(record, "LastName")
-    if first or last:
-        return f"{first} {last}".strip()
-
-    full = _get(record, "FullName", "Name", "name")
-    if full:
-        return full
-
-    return "Unknown"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -661,30 +373,20 @@ def _extract_name(record: dict) -> str:
 
 class InferenceEngine:
     """
-    Classifies a list of raw person records into ClassifiedRecord objects.
-    Uses the NLPEngine (with YAML industry directories) for all decisions.
+    Classifies raw person records into ClassifiedRecord objects.
+
+    Uses the keyword-scoring classifier (classifier.py) with:
+      - job_title + linkedin_headline as primary NLP signals
+      - job_function as a soft tiebreaker only
+      - department field is completely ignored
     """
 
-    def __init__(self):
-        self.nlp = get_nlp()
-
     def classify_record(self, record: dict) -> ClassifiedRecord:
-        """
-        Classify a single raw record dict.
-
-        Field priority (highest → lowest):
-          Title      : Designation / JOB_TITLE  >  linkedin_headline
-          Company    : Company  >  job_org_linkedin_url slug  >  email_domain
-          Region     : job_country_code  >  country_code  >  Location text
-          Function   : ProfileLevel  >  vendor_function (JOB_FUNCTION)  >  NLP  >  linkedin_headline
-          Layer      : ProfileLevel  >  vendor_level (JOB_LEVEL)  >  NLP  >  linkedin_headline
-          Industry   : Industry_Hint  >  linkedin_industry
-        """
-        # ── Title ─────────────────────────────────────────────────────────
-        designation = _get(record, "Designation") or ""
-        headline    = _get(record, "linkedin_headline") or ""
-        if not designation:
-            designation = headline
+        # ── Extract primary NLP signals ───────────────────────────────────
+        job_title  = _get(record, "Designation") or ""
+        headline   = _get(record, "linkedin_headline") or ""
+        job_function = _get(record, "job_function") or ""
+        job_level  = _get(record, "job_level") or ""
 
         # ── Company ───────────────────────────────────────────────────────
         company = _get(record, "Company") or ""
@@ -698,229 +400,113 @@ class InferenceEngine:
             if email_dom:
                 company = email_dom.split(".")[0].title()
 
-        # ── Industry hint ─────────────────────────────────────────────────
-        industry_hint = _get(record, "Industry_Hint") or _get(record, "linkedin_industry") or ""
+        # ── Location ──────────────────────────────────────────────────────
+        city         = _get(record, "city") or ""
+        country_name = _get(record, "country_name") or ""
+        location     = _get(record, "Location") or city or country_name
 
-        # ── Location (legacy text string) ─────────────────────────────────
-        location = (_get(record, "Location")
-                    or _get(record, "job_country")
-                    or _get(record, "country_name") or "")
-
+        # ── LinkedIn URL ──────────────────────────────────────────────────
         linkedin_url = _get(record, "LinkedInURL") or ""
-        full_name    = _extract_name(record)
 
-        # ── ProTrail ProfileLevel ─────────────────────────────────────────
-        profile_level = _get(record, "ProfileLevel")
-        raw_dept      = _get(record, "Department")
-        pl_result     = _lookup_profile_level(profile_level)
+        # ── Full name ─────────────────────────────────────────────────────
+        full_name = _extract_name(record)
 
-        if pl_result and not industry_hint:
-            industry_hint = pl_result[1]
+        # ── Record ID ─────────────────────────────────────────────────────
+        rec_id = _get(record, "id") or str(uuid.uuid4())
 
-        # ── NLP classification ────────────────────────────────────────────
-        result: ClassificationResult = self.nlp.classify(
-            designation=designation,
-            company=company,
-            industry_hint=industry_hint,
-            location=location,
+        # ── Effective title for classification ────────────────────────────
+        effective_title = job_title or headline
+
+        # ── Core classification via classifier.py ─────────────────────────
+        # department field intentionally not passed — ignored per design
+        result: TitleClassification = _classify_title(
+            job_title=effective_title,
+            linkedin_headline=headline,
+            job_function=job_function,
+            job_level=job_level,
         )
 
         dept_primary   = result.dept_primary
         dept_secondary = result.dept_secondary
-        dept_tertiary  = result.dept_tertiary
+        dept_tertiary  = ""
         layer          = result.layer
 
-        # ── Override 1: ProfileLevel (highest priority structured signal) ──
-        if pl_result:
-            pl_dept, _pl_hint, pl_layer = pl_result
-            if result.dept_primary in ("General",) or pl_dept != "General":
-                dept_primary = pl_dept
-            if pl_layer is not None and result.match_method in ("fallback",):
-                layer = pl_layer
-
-        # ── Override 2: vendor_function (JOB_FUNCTION) ───────────────────
-        # job_function is a structured LinkedIn taxonomy field — more reliable
-        # than free-text NLP when NLP is uncertain.  Also handles unmapped
-        # values by running classify_dept_from_text on the raw string.
-        vendor_function = _get(record, "vendor_function") or ""
-        vendor_function_dept: Optional[str] = None
-        if vendor_function:
-            vendor_function_dept = _dept_from_vendor_function(vendor_function)
-            if not vendor_function_dept:
-                # Not in static map — try NLP on the function string itself
-                fn_refined = self.nlp.classify_dept_from_text(vendor_function, "")
-                if fn_refined[0] and fn_refined[0] not in ("General", "Unclassified", ""):
-                    vendor_function_dept = fn_refined[0]
-            if vendor_function_dept and (
-                dept_primary in ("General", "Unclassified", "")
-                or result.match_method == "fallback"
-                or result.confidence < 0.5
-            ):
-                dept_primary   = vendor_function_dept
-                # The NLP secondary/tertiary were derived from the now-discarded
-                # NLP primary — keep them only when vendor_function agrees with
-                # the NLP primary (same dept).  Otherwise they create nonsense
-                # pairings like "Engineering / IT > M&A Advisory".
-                if vendor_function_dept != result.dept_primary:
-                    dept_secondary = ""
-                    dept_tertiary  = ""
-                logger.debug(f"vendor_function: '{vendor_function}' → {vendor_function_dept}")
-
-        # ── Override 3: vendor_level (JOB_LEVEL) ─────────────────────────
-        vendor_level = _get(record, "vendor_level") or ""
-        if vendor_level and result.match_method in ("fallback",):
-            mapped_layer = _layer_from_vendor_level(vendor_level)
-            if mapped_layer is not None:
-                layer = mapped_layer
-                logger.debug(f"vendor_level override: '{vendor_level}' → L{mapped_layer}")
-
-        # ── Department refinement from free-text Department field ──────────
-        # Refines primary dept and sets secondary/tertiary.  When vendor_function
-        # already gave a confident primary dept, raw_dept only updates secondary
-        # and tertiary — it does not override the primary.
-        if raw_dept and raw_dept.lower() not in ("nan", "none", ""):
-            rd_key = raw_dept.strip().lower()
-            if rd_key in _RAW_DEPT_ELEVATE:
-                rd_primary, rd_secondary = _RAW_DEPT_ELEVATE[rd_key]
-                # _RAW_DEPT_ELEVATE is always authoritative — explicit dept data
-                # beats vendor_function (which can be a generic LinkedIn tag like
-                # "Information Technology" even for traders / bankers).
-                dept_primary   = rd_primary
-                if rd_secondary:
-                    dept_secondary = rd_secondary
-            else:
-                refined = self.nlp.classify_dept_from_text(raw_dept, dept_primary)
-                if refined[0] and refined[0] not in ("General", "Unclassified", ""):
-                    if not vendor_function_dept:
-                        dept_primary = refined[0]
-                # Only set secondary from NLP when vendor_function isn't controlling
-                # primary — mixing vendor_function primary with raw_dept secondary
-                # creates nonsense pairings (e.g. Engineering / IT + Fixed Income).
-                if refined[1] and not dept_secondary and not vendor_function_dept:
-                    dept_secondary = refined[1]
-                if refined[2] and not dept_tertiary:
-                    dept_tertiary = refined[2]
-
-        # ── linkedin_headline as additional dept / layer signal ────────────
-        # When designation alone left the dept uncertain, try the headline.
-        # Headline often contains richer role info: "VP of Finance at Morgan Stanley".
-        if (headline
-                and headline.strip().lower() != designation.strip().lower()
-                and (dept_primary in ("General", "Unclassified", "")
-                     or result.match_method == "fallback"
-                     or not vendor_function_dept)):
-            hl = self.nlp.classify(
-                designation=headline,
-                company=company,
-                industry_hint=industry_hint,
-                location=location,
-            )
-            if hl.dept_primary not in ("General", "Unclassified", "") and hl.match_method != "fallback":
-                if dept_primary in ("General", "Unclassified", "") or result.match_method == "fallback":
-                    dept_primary = hl.dept_primary
-                    logger.debug(f"linkedin_headline dept: '{headline}' → {hl.dept_primary}")
-            if hl.layer > 0 and hl.layer < layer and result.match_method == "fallback":
-                layer = hl.layer
-
-        # ── Board title override (highest priority after dept field) ─────────
-        # "Independent Director", "Non-Executive Chairman" etc. are Board roles.
-        # NLP keyword engine misreads "Director" as L5 line-management; override it.
-        if _is_board_title(designation):
-            layer        = 0
-            dept_primary = "Board of Management"
-            dept_secondary = ""
-            dept_tertiary  = ""
-            logger.debug(f"Board title override: '{designation}' → L0 Board of Management")
-
-        # ── Bare dept name as designation → IC, not a leader ─────────────
-        elif not _is_board_title(designation):
-            bare_dept, is_bare = _bare_dept_check(designation)
+        # ── Bare dept name safety net ─────────────────────────────────────
+        # When the designation is *only* a dept keyword with no seniority
+        # signal (e.g. bare "Sales"), cap the layer at 8+ (never a leader).
+        if effective_title:
+            bare_dept, is_bare = _bare_dept_check(effective_title)
             if is_bare and bare_dept:
                 dept_primary = bare_dept
-                layer = max(layer, 8)   # floor at Staff/IC — never a head/manager
+                layer = max(layer, 8)
                 logger.debug(
-                    f"Bare dept designation '{designation}' → {bare_dept} L{layer}"
+                    "Bare dept designation '%s' → %s L%d",
+                    effective_title, bare_dept, layer,
                 )
 
-        # ── Sector ────────────────────────────────────────────────────────
-        sector = self.nlp.classify_sector(company, designation, industry_hint)
+        # ── Industry hint for sector ──────────────────────────────────────
+        industry_hint = _get(record, "Industry_Hint") or ""
 
-        # ── Region — country code wins over text parsing ──────────────────
-        # Priority: JOB_LOCATION_COUNTRY_CODE > COUNTRY_CODE > Location text
-        region: Optional[str] = None
-        for code_field in ("job_country_code", "country_code"):
-            code = _get(record, code_field) or ""
-            if code:
-                region = _region_from_country_code(code)
-                if region:
-                    break
-        if not region:
-            region = self.nlp.classify_region(location)
+        # ── Sector ────────────────────────────────────────────────────────
+        sector = _classify_sector(company, effective_title, industry_hint)
+
+        # ── Region ────────────────────────────────────────────────────────
+        region = _classify_region(country_name, city)
 
         return ClassifiedRecord(
-            id=str(uuid.uuid4()),
+            id=rec_id,
             full_name=full_name,
-            designation=designation,
+            designation=effective_title,
             company=company,
             linkedin_url=linkedin_url,
             location=location,
             sector=sector,
-            region=region or "Global",
+            region=region,
             layer=layer,
             dept_primary=dept_primary,
             dept_secondary=dept_secondary,
             dept_tertiary=dept_tertiary,
             nlp_confidence=result.confidence,
-            nlp_industry=result.matched_industry,
-            nlp_method=result.match_method,
+            nlp_industry="generic",
+            nlp_method=result.method,
         )
 
     def classify_all(self, records: list[dict]) -> list[ClassifiedRecord]:
         """
-        Classify all records. Skips records with no name or designation.
-        Compound designations like "CEO and CHRO" are split and produce
-        two ClassifiedRecord entries so each title lands in its own dept.
+        Classify all records. Skips empty records.
+        Compound designations like "CEO and CHRO" produce two entries.
         """
         classified: list[ClassifiedRecord] = []
         skipped = 0
 
         for i, rec in enumerate(records):
             try:
-                designation = _get(rec, "Designation")
+                designation = _get(rec, "Designation") or _get(rec, "linkedin_headline") or ""
                 titles = _split_compound_title(designation)
 
                 if len(titles) > 1:
-                    # Compound title — classify each part separately
-                    for title in titles:
+                    for t in titles:
                         rec_copy = dict(rec)
-                        rec_copy["Designation"] = title
+                        rec_copy["Designation"] = t
                         cr = self.classify_record(rec_copy)
                         if cr.full_name not in ("Unknown", "") or cr.designation:
                             classified.append(cr)
                     continue
 
                 cr = self.classify_record(rec)
-                # Skip truly empty records
                 if cr.full_name in ("Unknown", "") and not cr.designation:
                     skipped += 1
                     continue
                 classified.append(cr)
+
             except Exception as e:
-                logger.warning(f"Record {i} classification failed: {e}")
+                logger.warning("Record %d classification failed: %s", i, e)
                 skipped += 1
 
-        logger.info(
-            f"Classified {len(classified)} records "
-            f"(skipped {skipped}) using {len(self.nlp.loaded_industries)} industry directories"
-        )
+        logger.info("Classified %d records (skipped %d)", len(classified), skipped)
         return classified
 
 
-# ─────────────────────────────────────────────────────────────────
-# CONVENIENCE FUNCTION
-# ─────────────────────────────────────────────────────────────────
-
 def classify_records(records: list[dict]) -> list[ClassifiedRecord]:
     """Module-level convenience wrapper."""
-    engine = InferenceEngine()
-    return engine.classify_all(records)
+    return InferenceEngine().classify_all(records)
