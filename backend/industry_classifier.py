@@ -76,7 +76,7 @@ _SEARCH_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
-_SEARCH_TIMEOUT  = 8    # seconds per HTTP request
+_SEARCH_TIMEOUT  = 4    # seconds per HTTP request (kept short — runs sync during upload)
 _SNIPPET_MAX     = 6_000  # max chars of search snippets to send to LLM
 
 

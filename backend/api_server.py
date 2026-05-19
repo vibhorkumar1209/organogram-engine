@@ -381,11 +381,15 @@ async def upload_file(file: UploadFile = File(...),
     # knowledge tagged "llm_leadership_ai".
     # The background thread below then runs the full scrape and can upgrade
     # "llm_leadership_ai" entries to "llm_leadership_web" when web data lands.
+    # Sync injection uses LLM knowledge only (domain="") — no web scraping.
+    # Web scraping happens in the background thread below and can take 40 s+;
+    # running it synchronously here blocks the upload response and starves the
+    # Haiku knowledge call that actually injects BOD/EM.
     _inject_knowledge_leadership(
         _dag, company_name,
         region=_dag.G.nodes.get("root_global", {}).get("label", "Global HQ"),
         sector="Private",
-        domain=_domain,
+        domain="",
     )
 
     # ── Web-scrape enrichment in background — keeps upload fast ──────────────
