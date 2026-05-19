@@ -1405,14 +1405,22 @@ def _inject_knowledge_leadership(
     company_name: str,
     region: str = "Global HQ",
     sector: str = "Private",
+    domain: str = "",
 ) -> None:
     """
-    Fast synchronous BOD/EM injection using LLM training knowledge only
-    (no web scraping).  Called inline during upload so board members appear
-    in the initial response without waiting for the background thread.
+    Synchronous BOD/EM injection called inline during upload.
 
-    The background thread may later overwrite/refine these entries with
-    web-scraped data; deduplication by name prevents duplicates.
+    When *domain* is provided (inferred from email_domain or company_website),
+    tries the company's own website first (web-sourced leadership); falls back
+    to LLM training-data knowledge.  Without domain, uses knowledge only (fast).
+
+    nlp_method is set to:
+      "llm_leadership_web" — people found on the company's own website
+      "llm_leadership_ai"  — people sourced from LLM training knowledge
+
+    The background thread (_enrich_with_llm_leadership) runs after this and
+    will upgrade any "llm_leadership_ai" entries to "llm_leadership_web" when
+    the full web scrape yields results.
     """
     try:
         from llm_fallback import llm_fetch_leadership
@@ -1420,12 +1428,15 @@ def _inject_knowledge_leadership(
         return
 
     try:
-        leadership = llm_fetch_leadership(company_name, domain="")
+        leadership = llm_fetch_leadership(company_name, domain=domain)
     except Exception:
         return
 
     if not leadership.get("board") and not leadership.get("executives"):
         return
+
+    source   = leadership.get("_source", "ai")
+    nlp_meth = "llm_leadership_web" if source == "web" else "llm_leadership_ai"
 
     existing_keys: set[str] = {
         _name_key(dag.G.nodes[n].get("label", ""))
@@ -1460,7 +1471,7 @@ def _inject_knowledge_leadership(
             dept_tertiary="",
             nlp_confidence=0.9,
             nlp_industry="llm",
-            nlp_method="llm_leadership",
+            nlp_method=nlp_meth,
         ))
 
     dag.repair_governance_edges()
@@ -1523,26 +1534,50 @@ def _enrich_with_llm_leadership(
             existing_keys.add(_name_key(attrs.get("label", "")))
 
     # ── Fetch and inject per company ─────────────────────────────────
+    # Build index of AI-only nodes so web data can upgrade them.
+    ai_only_keys: set[str] = {
+        _name_key(dag.G.nodes[n].get("label", ""))
+        for n in dag.G.nodes
+        if (dag.G.nodes[n].get("node_type") == "person"
+            and dag.G.nodes[n].get("metadata", {}).get("nlp_method") == "llm_leadership_ai")
+    }
+
     for co, ctx in companies.items():
-        # Use the company's own website as primary source; LLM knowledge as fallback
         leadership = llm_fetch_leadership(co, domain=domain if co == company_name else "")
         region = ctx["region"]
         sector = ctx["sector"]
 
-        injections: list[tuple[int, str, str, str]] = []  # (layer, name, title, dept)
+        source   = leadership.get("_source", "ai")
+        nlp_meth = "llm_leadership_web" if source == "web" else "llm_leadership_ai"
+
+        injections: list[tuple[int, str, str, str]] = []
         for person in leadership.get("board", []):
             injections.append((0, person["name"], person["title"], "Board of Management"))
         for person in leadership.get("executives", []):
             injections.append((1, person["name"], person["title"], "Executive Management"))
 
+        from inference_logic import ClassifiedRecord
         for layer, name, title, dept_primary in injections:
             key = _name_key(name)
+
+            # Web source can upgrade an AI-only entry: update the existing node's
+            # nlp_method in-place instead of creating a duplicate.
+            if key in existing_keys and source == "web" and key in ai_only_keys:
+                for nid in dag.G.nodes:
+                    attrs = dag.G.nodes[nid]
+                    if (attrs.get("node_type") == "person"
+                            and _name_key(attrs.get("label", "")) == key):
+                        meta = dict(attrs.get("metadata", {}))
+                        meta["nlp_method"] = "llm_leadership_web"
+                        dag.G.nodes[nid]["metadata"] = meta
+                        ai_only_keys.discard(key)
+                        break
+                continue
+
             if key in existing_keys:
-                continue   # already in DAG from uploaded data
+                continue
             existing_keys.add(key)
 
-            # Build a minimal ClassifiedRecord and insert
-            from inference_logic import ClassifiedRecord
             rec = ClassifiedRecord(
                 id=f"llm_{uuid.uuid4().hex[:12]}",
                 full_name=name,
@@ -1558,7 +1593,7 @@ def _enrich_with_llm_leadership(
                 dept_tertiary="",
                 nlp_confidence=0.9,
                 nlp_industry="llm",
-                nlp_method="llm_leadership",
+                nlp_method=nlp_meth,
             )
             dag.insert_person(rec)
 

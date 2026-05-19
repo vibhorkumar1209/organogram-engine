@@ -7,18 +7,19 @@ interface Props {
   onClose:    () => void
 }
 
+// Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
 const LAYER_LABELS: Record<number, string> = {
-  0: 'Board / Apex',
-  1: 'C-Suite',
-  2: 'EVP / MD',
-  3: 'VP / Director',
-  4: 'Senior Director',
-  5: 'Director / Head',
-  6: 'Senior Manager',
-  7: 'Manager',
-  8: 'Senior IC',
-  9: 'IC / Analyst',
-  10: 'Graduate / Intern',
+  0:  'Board of Management',     // G0 — Non-Executive / Supervisory
+  1:  'C-Suite',                 // G1 — CEO, CFO, COO, CTO, CMO, CHRO …
+  2:  'Executive VP',            // G2 — EVP / Executive Director
+  3:  'SVP / Managing Director', // G3 — SVP, MD, Group President
+  4:  'VP / Head of',            // G4 — VP, Head of Function
+  5:  'Senior Director / AVP',   // G5 — Senior Director, Associate VP
+  6:  'Director',                // G6 — Director
+  7:  'Senior Manager',          // G7 — Senior Manager, Associate Director
+  8:  'Manager',                 // G8 — Manager, Supervisor
+  9:  'Senior / Lead / Staff',   // G9 — Senior IC, Lead, Principal, Staff
+  10: 'Analyst / Specialist',    // G10 — Analyst, Specialist, Associate, IC
 }
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -235,6 +236,27 @@ const PersonRow: React.FC<{
                 💰{(Number(p.metadata.pay) / 1_000_000).toFixed(1)}M
               </span>
             )}
+            {/* Source badge — website vs AI knowledge vs uploaded data */}
+            {(() => {
+              const m = String(p.metadata?.nlp_method ?? '')
+              if (m.includes('web'))
+                return (
+                  <span style={{ fontSize: 8, color: '#10b981', background: '#052e16',
+                    borderRadius: 3, padding: '1px 5px', border: '1px solid #064e3b',
+                    marginLeft: 'auto' }}>
+                    🌐 Website
+                  </span>
+                )
+              if (m.includes('llm_leadership'))
+                return (
+                  <span style={{ fontSize: 8, color: '#60a5fa', background: '#0c1d2e',
+                    borderRadius: 3, padding: '1px 5px', border: '1px solid #1e3a5f',
+                    marginLeft: 'auto' }}>
+                    ✦ AI Knowledge
+                  </span>
+                )
+              return null
+            })()}
           </div>
         </div>
 

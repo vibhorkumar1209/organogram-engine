@@ -368,6 +368,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         return _LEADERSHIP_CACHE[cache_key]
 
     # ── Strategy: website scrape first, fall back to LLM knowledge ──────────
+    # Result always includes "_source": "web" | "ai" so callers can badge data.
     web_text = _fetch_leadership_text(domain) if domain else ""
 
     if web_text:
@@ -380,8 +381,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             user_msg=f"Company: {company_name}\n\nWebsite content:\n{web_text}",
             label=f"{company_name} [web]",
         )
-        # If website scrape yielded something, use it
         if result.get("board") or result.get("executives"):
+            result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info(
@@ -390,14 +391,13 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         )
 
     # ── LLM knowledge fallback ───────────────────────────────────────────────
-    # Used when: domain is absent, scraping fails, or scraped page had no leaders.
-    # Only invoked for named companies (avoids hallucination for unknown orgs).
     logger.info(f"Using LLM knowledge for '{company_name}' leadership")
     result = _call_claude(
         system=_SYSTEM_FROM_KNOWLEDGE,
         user_msg=f"Company: {company_name}",
         label=f"{company_name} [knowledge]",
     )
+    result["_source"] = "ai"
     _LEADERSHIP_CACHE[cache_key] = result
     return result
 

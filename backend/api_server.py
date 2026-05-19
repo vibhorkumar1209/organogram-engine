@@ -374,14 +374,18 @@ async def upload_file(file: UploadFile = File(...),
         raise HTTPException(status_code=500,
                             detail=f"Pipeline failed: {e}\n{traceback.format_exc()}")
 
-    # ── Sync knowledge BOD injection — runs before response returns (~3s) ───────
-    # Calls LLM with training-data knowledge only (no web scraping) so board
-    # members appear immediately in the upload response.  The background thread
-    # below then optionally refines with live website data.
+    # ── Sync BOD/EM injection ─────────────────────────────────────────────────
+    # Passes the inferred domain so the company's own website is tried first.
+    # When the domain resolves (web-sourced), leadership is tagged "llm_leadership_web".
+    # When not found on the website or no domain, falls back to LLM training
+    # knowledge tagged "llm_leadership_ai".
+    # The background thread below then runs the full scrape and can upgrade
+    # "llm_leadership_ai" entries to "llm_leadership_web" when web data lands.
     _inject_knowledge_leadership(
         _dag, company_name,
         region=_dag.G.nodes.get("root_global", {}).get("label", "Global HQ"),
         sector="Private",
+        domain=_domain,
     )
 
     # ── Web-scrape enrichment in background — keeps upload fast ──────────────
