@@ -90,8 +90,10 @@ def _strip_html(html: str) -> str:
 _LEADERSHIP_PATHS = [
     "/leadership",
     "/about/leadership",
-    "/about-us/leadership",          # Morgan Stanley, many US banks
+    "/about-us/leadership",
     "/about-us/our-leadership",
+    "/about-us/governance/board-of-directors",  # Morgan Stanley
+    "/about-us/governance",
     "/management",
     "/about/management",
     "/executive-team",
@@ -100,20 +102,28 @@ _LEADERSHIP_PATHS = [
     "/about/board-of-directors",
     "/about-us/board-of-directors",
     "/governance/board-of-directors",
+    "/governance/board",
     "/investors/governance/board-of-directors",
+    "/investor-relations/governance/board-of-directors",
+    "/investor-relations/corporate-governance",
+    "/corporate-governance/board-of-directors",
     "/team",
     "/about",
     "/about-us",
     "/company/leadership",
     "/company/management",
-    "/en/about/leadership",          # some multinational sites
+    "/en/about/leadership",
     "/en/about-us/leadership",
 ]
 
+_SEARCH_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 _WEB_TIMEOUT = 8          # seconds per HTTP request
 _MAX_PAGE_CHARS = 20_000  # chars to pass to Claude per page
 _MAX_PAGES = 4            # allow up to 4 pages (BOD + exec committee may be separate)
-_TOTAL_BUDGET = 40        # hard cap on total scraping time (seconds)
+_TOTAL_BUDGET = 30        # hard cap on website scraping time (seconds)
 
 # Link patterns that indicate a sub-page with leadership content
 _LEADERSHIP_LINK_RE = re.compile(
@@ -263,8 +273,14 @@ def _fetch_leadership_text(domain: str) -> str:
 _SYSTEM_FROM_WEB = """\
 You are a corporate intelligence assistant.
 
-You are given text scraped from one or more pages of a company's own website. \
-Extract the current Board of Directors and Executive Management / C-Suite team.
+You are given text from two sources about a company:
+1. Pages scraped from the company's own website (most authoritative).
+2. Search engine result snippets from DuckDuckGo (supplementary — useful when the \
+   company site is JavaScript-rendered and the scraped HTML is sparse).
+
+Extract the current Board of Directors and Executive Management / C-Suite team \
+using ALL available context. Prefer explicit website content, but use search \
+snippets to fill gaps.
 
 The website may present these under different headings such as:
 - Board of Directors, Board of Trustees, Supervisory Board, Advisory Board
@@ -274,10 +290,10 @@ The website may present these under different headings such as:
 Schema:
 {
   "board": [
-    {"name": "Full Name", "title": "Exact title from the website"}
+    {"name": "Full Name", "title": "Exact title (e.g. Chairman, Independent Director)"}
   ],
   "executives": [
-    {"name": "Full Name", "title": "Exact C-Suite title from the website"}
+    {"name": "Full Name", "title": "Exact C-Suite title (e.g. CEO, CFO, COO)"}
   ]
 }
 
@@ -292,16 +308,17 @@ Rules:
   Chief Commercial Officer, and equivalent. \
   Do NOT include VPs, SVPs, MDs, or Directors unless they sit on \
   the Operating/Executive Committee explicitly listed on the website.
-- Use the exact names and titles as they appear on the website.
-- If the scraped text does not contain leadership information, return \
+- Use names and titles as they appear in the source material.
+- If the combined context does not contain leadership information, return \
   {"board": [], "executives": []}.
 - Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 _SYSTEM_FROM_KNOWLEDGE = """\
 You are a corporate intelligence assistant with knowledge of public companies.
 
-Return the CURRENT Board of Directors and C-Suite Executive Management for the \
-named company, based on your training knowledge.
+Return the Board of Directors and C-Suite Executive Management for the named company \
+based on your training knowledge. For well-known public companies return what you know \
+even if it may be slightly dated — best-effort is strongly preferred over an empty result.
 
 Schema:
 {
@@ -314,17 +331,64 @@ Schema:
 }
 
 Rules:
-- board: Non-executive directors, independent directors, chairman only.
+- board: Chairman, Non-executive directors, independent directors only.
   Do NOT include C-Suite executives in the board list.
-- executives: Members of the company's Operating Committee, Executive Committee, \
-  Leadership Team, or Management Committee, plus classic C-Suite — CEO, President, \
-  COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, \
-  Chief Strategy Officer, Chief Digital Officer, Chief Commercial Officer, and equivalent. \
-  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on the Operating/Executive Committee.
-- Only include people you are highly confident are currently in role.
-- If you have no reliable knowledge of this company's leadership, return \
-  {"board": [], "executives": []}.
+- executives: Classic C-Suite — CEO, President, COO, CFO, CTO, CIO, CISO, CMO, \
+  CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, \
+  Chief Commercial Officer, and Operating/Executive Committee members.
+  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on the committee.
+- Return your best knowledge. Do NOT return empty just because data may be slightly dated.
+- Only return {"board": [], "executives": []} if you have absolutely no knowledge of this company.
 - Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUCKDUCKGO SNIPPET SEARCH  (supplements direct scraping for JS-heavy sites)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ddg_leadership_snippets(company_name: str) -> str:
+    """
+    Search DuckDuckGo for company leadership and return result snippets.
+    DDG snippets often name board members / executives directly and work
+    even when the company's own site is JavaScript-rendered (no static HTML).
+    Returns "" on any failure.
+    """
+    try:
+        import httpx
+        from urllib.parse import quote_plus
+    except ImportError:
+        return ""
+
+    queries = [
+        f'"{company_name}" board of directors chairman independent director',
+        f'"{company_name}" CEO CFO COO chief executive management team',
+    ]
+    snippets: list[str] = []
+    for query in queries:
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        try:
+            resp = httpx.get(
+                url,
+                headers={"User-Agent": _SEARCH_UA, "Accept-Language": "en-US,en;q=0.9"},
+                timeout=5,
+                follow_redirects=True,
+            )
+            if resp.status_code != 200:
+                continue
+            for m in re.finditer(
+                r'class="result__snippet"[^>]*>(.*?)</a>',
+                resp.text, flags=re.DOTALL | re.IGNORECASE
+            ):
+                s = re.sub(r"<[^>]+>", " ", m.group(1))
+                s = re.sub(r"\s+", " ", s).strip()
+                if s and len(s) > 30:
+                    snippets.append(s)
+            if len(snippets) >= 10:
+                break
+        except Exception as exc:
+            logger.debug("DDG leadership search failed: %s", exc)
+
+    return " | ".join(snippets[:10])[:6_000]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,30 +431,39 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Strategy: website scrape first, fall back to LLM knowledge ──────────
-    # Result always includes "_source": "web" | "ai" so callers can badge data.
+    # ── Step 1: parallel web scrape + DDG snippet search ─────────────────────
     web_text = _fetch_leadership_text(domain) if domain else ""
+    ddg_text = _ddg_leadership_snippets(company_name)
 
-    if web_text:
-        logger.info(
-            f"Scraping leadership for '{company_name}' from {domain} "
-            f"({len(web_text)} chars)"
-        )
+    logger.info(
+        f"Leadership context for '{company_name}': "
+        f"web={len(web_text)} chars, ddg={len(ddg_text)} chars"
+    )
+
+    # ── Step 2: if any web context found, extract via Claude ─────────────────
+    if web_text or ddg_text:
+        parts: list[str] = [f"Company: {company_name}"]
+        if web_text:
+            parts.append(f"[Website content]\n{web_text}")
+        if ddg_text:
+            parts.append(f"[Search result snippets]\n{ddg_text}")
+        user_msg = "\n\n".join(parts)
+
         result = _call_claude(
             system=_SYSTEM_FROM_WEB,
-            user_msg=f"Company: {company_name}\n\nWebsite content:\n{web_text}",
-            label=f"{company_name} [web]",
+            user_msg=user_msg,
+            label=f"{company_name} [web+ddg]",
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info(
-            f"Website scrape returned no leaders for '{company_name}' — "
+            f"Web+DDG context returned no leaders for '{company_name}' — "
             f"falling back to LLM knowledge"
         )
 
-    # ── LLM knowledge fallback ───────────────────────────────────────────────
+    # ── Step 3: LLM knowledge fallback ───────────────────────────────────────
     logger.info(f"Using LLM knowledge for '{company_name}' leadership")
     result = _call_claude(
         system=_SYSTEM_FROM_KNOWLEDGE,
