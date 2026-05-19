@@ -54,20 +54,27 @@ function nodeColor(node: OrgNode, fallback: string): string {
 interface ExecTreeNode {
   person:    OrgNode
   reports:   ExecTreeNode[]
-  isLast:    boolean   // used for connector rendering
+  isLast:    boolean
 }
 
-function buildExecTree(people: OrgNode[]): ExecTreeNode[] {
-  if (!people.length) return []
+// Detect CEO / President as the apex of EM (exclude deputy/vice variants)
+function isCeoTitle(person: OrgNode): boolean {
+  const d = ((person.metadata?.designation as string) ?? '').toLowerCase()
+  const text = d || person.label.toLowerCase()
+  if (/\b(deputy|vice|assistant|associate)\b/.test(text)) return false
+  return (
+    /\bchief\s+executive\b/.test(text) ||
+    /\bceo\b/.test(text) ||
+    /^(?:group\s+)?president$/.test(text) ||
+    /^(?:group\s+)?managing\s+director$/.test(text)
+  )
+}
 
-  // Sort by layer asc
-  const sorted = [...people].sort((a, b) => {
-    const la = a.layer ?? 99
-    const lb = b.layer ?? 99
-    return la !== lb ? la - lb : a.label.localeCompare(b.label)
-  })
+// Core layer-group tree: each layer group reports to the layer above.
+// Distributes children evenly across the parent group.
+function buildLayerTree(sorted: OrgNode[]): ExecTreeNode[] {
+  if (!sorted.length) return []
 
-  // Group consecutive same-layer people
   interface LayerGroup { layer: number; nodes: ExecTreeNode[] }
   const groups: LayerGroup[] = []
   for (const p of sorted) {
@@ -81,19 +88,10 @@ function buildExecTree(people: OrgNode[]): ExecTreeNode[] {
     }
   }
 
-  // Build tree: each group's nodes become children of ALL nodes in the group above
-  // (in practice we assign them to the first node of the parent group as primary manager)
-  // We distribute reportees across parent nodes round-robin for a balanced tree,
-  // but since we don't have actual reporting data, we put all under the group's first node.
-  // The visual is indentation by layer, not strict manager→reportee.
-
-  // Mark isLast within each parent's reports list after assignment
   const assignReports = (parentGroup: LayerGroup, childGroup: LayerGroup) => {
-    // If only 1 parent, all children go under it
     if (parentGroup.nodes.length === 1) {
       parentGroup.nodes[0].reports = childGroup.nodes
     } else {
-      // Distribute roughly evenly
       const perParent = Math.ceil(childGroup.nodes.length / parentGroup.nodes.length)
       let ci = 0
       for (const parent of parentGroup.nodes) {
@@ -101,7 +99,6 @@ function buildExecTree(people: OrgNode[]): ExecTreeNode[] {
         ci += perParent
       }
     }
-    // Mark isLast
     for (const parent of parentGroup.nodes) {
       parent.reports.forEach((r, i) => { r.isLast = i === parent.reports.length - 1 })
     }
@@ -111,10 +108,45 @@ function buildExecTree(people: OrgNode[]): ExecTreeNode[] {
     assignReports(groups[i - 1], groups[i])
   }
 
-  // Root = first group's nodes
   const roots = groups[0]?.nodes ?? []
   roots.forEach((r, i) => { r.isLast = i === roots.length - 1 })
   return roots
+}
+
+// Main tree builder.
+// Executive Management: CEO is promoted to single root; all other C-Suite
+// at the same layer become CEO's direct reports; deeper layers (EVP→SVP→VP…)
+// cascade under their C-Suite parent via buildLayerTree.
+// All other depts (incl. BOD): standard layer-group tree.
+function buildExecTree(people: OrgNode[], isEM: boolean = false): ExecTreeNode[] {
+  if (!people.length) return []
+
+  const sorted = [...people].sort((a, b) => {
+    const la = a.layer ?? 99
+    const lb = b.layer ?? 99
+    return la !== lb ? la - lb : a.label.localeCompare(b.label)
+  })
+
+  if (!isEM) return buildLayerTree(sorted)
+
+  // EM: CEO at top, C-Suite peers as direct reports, deeper layers cascade
+  const topLayer = sorted[0]?.layer ?? 99
+  const topGroup = sorted.filter(p => (p.layer ?? 99) === topLayer)
+  const deeper   = sorted.filter(p => (p.layer ?? 99) !== topLayer)
+  const ceoIdx   = topGroup.findIndex(p => isCeoTitle(p))
+
+  // No identifiable CEO or only one person at top — fall back to standard tree
+  if (ceoIdx < 0 || topGroup.length <= 1) return buildLayerTree(sorted)
+
+  const ceo   = topGroup[ceoIdx]
+  const peers = topGroup.filter((_, i) => i !== ceoIdx)
+
+  // peers (same layer as CEO) + deeper form the sub-tree under CEO.
+  // buildLayerTree naturally puts peers at root of sub-tree, deeper layers below.
+  const subTree = buildLayerTree([...peers, ...deeper])
+  subTree.forEach((r, i) => { r.isLast = i === subTree.length - 1 })
+
+  return [{ person: ceo, reports: subTree, isLast: true }]
 }
 
 // ── Person row ────────────────────────────────────────────────────────
@@ -318,9 +350,10 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
     })
 
   const isBoard = deptNode?.node_id === 'dept__board_of_management'
+  const isEM    = deptNode?.node_id === 'dept__executive_management'
   const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
 
-  const tree = executives ? buildExecTree(executives) : []
+  const tree = executives ? buildExecTree(executives, isEM) : []
 
   // Layer distribution summary
   const byLayer: Record<number, number> = {}

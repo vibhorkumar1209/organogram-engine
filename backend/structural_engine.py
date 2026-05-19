@@ -1425,10 +1425,23 @@ def _is_board_chairman(title: str) -> bool:
     Vice-Chair, Deputy Chair, and Lead Independent Director are NOT the Chair.
     """
     t = title.lower().strip()
-    # Exclude vice / deputy roles
     if any(exc in t for exc in ("vice", "deputy")):
         return False
     return "chairman" in t or "chairwoman" in t or "chairperson" in t
+
+
+def _is_ceo(title: str) -> bool:
+    """
+    Return True when *title* is the CEO / apex of Executive Management.
+    Covers: CEO, Chief Executive Officer, (Group) President, Group MD.
+    Excludes Deputy/Vice/Assistant CEO.
+    """
+    t = title.lower().strip()
+    if any(exc in t for exc in ("deputy", "vice", "assistant", "associate")):
+        return False
+    return bool(re.search(r"\bchief\s+executive\b|\bceo\b", t)) or \
+           bool(re.search(r"^(?:group\s+)?president$", t)) or \
+           bool(re.search(r"^(?:group\s+)?managing\s+director$", t))
 
 
 def _inject_knowledge_leadership(
@@ -1478,11 +1491,12 @@ def _inject_knowledge_leadership(
     from inference_logic import ClassifiedRecord
     injections: list[tuple[int, str, str, str]] = []
     for p in leadership.get("board", []):
-        # Chairman sits at layer 0 (top of board); all other directors at layer 1
-        # so the ExecPanel tree shows Chairman → Directors hierarchy.
+        # Chairman → layer 0 (root of board); all other directors → layer 1.
         layer = 0 if _is_board_chairman(p["title"]) else 1
         injections.append((layer, p["name"], p["title"], "Board of Management"))
     for p in leadership.get("executives", []):
+        # All C-Suite are G1 (layer 1). CEO is at the same grade but the
+        # ExecPanel frontend detects CEO by title and promotes it to tree root.
         injections.append((1, p["name"], p["title"], "Executive Management"))
 
     for layer, name, title, dept_primary in injections:
@@ -1589,6 +1603,7 @@ def _enrich_with_llm_leadership(
             layer = 0 if _is_board_chairman(person["title"]) else 1
             injections.append((layer, person["name"], person["title"], "Board of Management"))
         for person in leadership.get("executives", []):
+            # All C-Suite are G1 (layer 1). ExecPanel frontend promotes CEO to root.
             injections.append((1, person["name"], person["title"], "Executive Management"))
 
         from inference_logic import ClassifiedRecord
