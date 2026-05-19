@@ -106,6 +106,22 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
 
+  const handleReset = async () => {
+    try { await fetch(`${API}/reset`, { method: 'POST' }) } catch {}
+    setStatus('idle')
+    setStatusMsg('')
+    setDeptTree(null)
+    setViewTree(null)
+    setStats(null)
+    setIndustry('')
+    setAllNodes([])
+    setPanelDept(null)
+    setPanelExecs(null)
+    setColWarning(null)
+    setHighlight(null)
+    setCompanyWebsite('')
+  }
+
   // Ping backend on load so Render wakes before first upload
   useEffect(() => {
     fetch(`${API}/ping`).catch(() => {/* ignore — just waking Render */})
@@ -386,6 +402,24 @@ export default function App() {
         >
           Demo
         </button>
+
+        {status !== 'idle' && (
+          <button
+            onClick={handleReset}
+            title="Clear loaded data"
+            style={{
+              background: 'transparent', border: '1px solid #3b1e1e', borderRadius: 7,
+              padding: '5px 10px', color: '#E63946', fontSize: 11, cursor: 'pointer',
+              whiteSpace: 'nowrap', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <polyline points="1 4 1 10 7 10"/>
+              <path d="M3.51 15a9 9 0 1 0 .49-3.77"/>
+            </svg>
+            Reset
+          </button>
+        )}
       </header>
 
       {/* ── MAIN AREA ─────────────────────────────────────────── */}

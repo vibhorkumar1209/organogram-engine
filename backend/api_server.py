@@ -577,6 +577,16 @@ def get_industries():
     }
 
 
+@app.post("/reset")
+async def reset_data():
+    """Clear all loaded data and return to idle state."""
+    global _dag, _db, _classified_records
+    _dag = None
+    _db  = None
+    _classified_records = []
+    return {"status": "reset"}
+
+
 @app.get("/executives")
 def get_executives(dept_id: str = Query(...)):
     """

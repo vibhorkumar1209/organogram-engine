@@ -413,7 +413,7 @@ def _call_claude(system: str, user_msg: str, label: str) -> dict:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=2048,
             system=system,
             messages=[{"role": "user", "content": user_msg}],
