@@ -104,48 +104,61 @@ VENDOR_FUNCTION_MAP: dict[str, str] = {
     "people":                   "Human Resources",
     "people & culture":         "Human Resources",
     "talent":                   "Human Resources",
-    # Legal & Compliance
-    "legal":                    "Legal & Compliance",
-    "compliance":               "Legal & Compliance",
-    "regulatory":               "Legal & Compliance",
-    "regulatory affairs":       "Legal & Compliance",
-    # Risk Management
-    "risk":                     "Risk Management",
-    "credit":                   "Risk Management",
-    # Engineering / IT
-    "it":                       "Engineering / IT",
-    "information technology":   "Engineering / IT",
-    "technology":               "Engineering / IT",
-    "engineering":              "Engineering / IT",
-    "software":                 "Engineering / IT",
-    "data":                     "Engineering / IT",
-    "data science":             "Engineering / IT",
-    "analytics":                "Engineering / IT",
-    # Sales
-    "sales":                    "Sales",
-    "business development":     "Sales",
+    # Legal, Risk & Compliance (merged per Global_Org_Hierarchy.xlsx)
+    "legal":                    "Legal, Risk & Compliance",
+    "compliance":               "Legal, Risk & Compliance",
+    "regulatory":               "Legal, Risk & Compliance",
+    "regulatory affairs":       "Legal, Risk & Compliance",
+    "risk":                     "Legal, Risk & Compliance",
+    "credit":                   "Legal, Risk & Compliance",
+    # Information Technology (infra, apps, cybersecurity, data)
+    "it":                       "Information Technology",
+    "information technology":   "Information Technology",
+    "technology":               "Information Technology",
+    "data":                     "Information Technology",
+    "data science":             "Information Technology",
+    "analytics":                "Information Technology",
+    "cybersecurity":            "Information Technology",
+    "information security":     "Information Technology",
+    # Engineering (software / platform / hardware development)
+    "engineering":              "Engineering",
+    "software":                 "Engineering",
+    "software engineering":     "Engineering",
+    "platform engineering":     "Engineering",
+    "devops":                   "Engineering",
+    # Sales & Business Development
+    "sales":                    "Sales & Business Development",
+    "business development":     "Sales & Business Development",
+    "partnerships":             "Sales & Business Development",
     # Marketing
     "marketing":                "Marketing",
-    "communications":           "Marketing",
     "brand":                    "Marketing",
-    "public relations":         "Marketing",
-    # Customer Success
-    "customer service":         "Customer Success",
-    "customer success":         "Customer Success",
-    "customer experience":      "Customer Success",
-    "customer support":         "Customer Success",
-    "support":                  "Customer Success",
+    # Corporate Communications & Public Affairs
+    "communications":           "Corporate Communications & Public Affairs",
+    "public relations":         "Corporate Communications & Public Affairs",
+    "public affairs":           "Corporate Communications & Public Affairs",
+    "government relations":     "Corporate Communications & Public Affairs",
+    # Customer Success & Service
+    "customer service":         "Customer Success & Service",
+    "customer success":         "Customer Success & Service",
+    "customer experience":      "Customer Success & Service",
+    "customer support":         "Customer Success & Service",
+    "support":                  "Customer Success & Service",
     # Operations
     "operations":               "Operations",
     "general management":       "Operations",
     "quality":                  "Operations",
     "quality assurance":        "Operations",
     "qa":                       "Operations",
-    "facilities":               "Operations",
     "education":                "Operations",
     "academic":                 "Operations",
-    "underwriting":             "Operations",
-    "claims":                   "Operations",
+    # Facilities, Real Estate & Workplace
+    "facilities":               "Facilities, Real Estate & Workplace",
+    "real estate":              "Facilities, Real Estate & Workplace",
+    "workplace":                "Facilities, Real Estate & Workplace",
+    # Insurance-specific (keep as standalone canonical primaries)
+    "underwriting":             "Underwriting",
+    "claims":                   "Claims",
     # Supply Chain
     "supply chain":             "Supply Chain",
     "logistics":                "Supply Chain",
@@ -161,22 +174,22 @@ VENDOR_FUNCTION_MAP: dict[str, str] = {
     "product management":       "Product Management",
     "design":                   "Product Management",
     "ux":                       "Product Management",
-    # Strategy
-    "strategy":                 "Strategy",
-    "consulting":               "Strategy",
-    "programme":                "Strategy",
-    "program":                  "Strategy",
-    "programme management":     "Strategy",
-    "program management":       "Strategy",
-    "pmo":                      "Strategy",
-    "project management":       "Strategy",
-    "transformation":           "Strategy",
-    "executive":                "Strategy",
-    "corporate development":    "Corporate Development",
-    "advisory":                 "Corporate Development",
-    "trading":                  "Corporate Development",
-    "investment":               "Corporate Development",
-    "research analyst":         "Corporate Development",
+    # Strategy & Corporate Development
+    "strategy":                 "Strategy & Corporate Development",
+    "consulting":               "Strategy & Corporate Development",
+    "programme":                "Strategy & Corporate Development",
+    "program":                  "Strategy & Corporate Development",
+    "programme management":     "Strategy & Corporate Development",
+    "program management":       "Strategy & Corporate Development",
+    "pmo":                      "Strategy & Corporate Development",
+    "project management":       "Strategy & Corporate Development",
+    "transformation":           "Strategy & Corporate Development",
+    "executive":                "Strategy & Corporate Development",
+    "corporate development":    "Strategy & Corporate Development",
+    "advisory":                 "Strategy & Corporate Development",
+    "investment":               "Investment Management",
+    "trading":                  "Sales & Trading",
+    "research analyst":         "Research & Development",
     # R&D
     "r&d":                      "Research & Development",
     "research":                 "Research & Development",
@@ -232,14 +245,19 @@ def map_vendor_function(
             if any(k in title_l for k in keywords):
                 return target
 
-    # Disambiguate "Engineering / IT" — facilities engineers → Operations
-    if engine_function == "Engineering / IT":
+    # Facilities-titled people tagged as Engineering → Facilities, Real Estate & Workplace
+    if engine_function == "Engineering":
         if any(k in title_l for k in ("facilit", "real estate", "workplace", "property")):
-            return "Operations"
+            return "Facilities, Real Estate & Workplace"
 
-    # Disambiguate "Engineering / IT" — process industries treat as R&D
-    if engine_function == "Engineering / IT" and archetype_id == "process_industries":
+    # Process-industries Engineering → R&D
+    if engine_function == "Engineering" and archetype_id == "process_industries":
         return "Research & Development"
+
+    # IT-tagged facilities/real-estate roles → Facilities, Real Estate & Workplace
+    if engine_function == "Information Technology":
+        if any(k in title_l for k in ("facilit", "real estate", "workplace", "property")):
+            return "Facilities, Real Estate & Workplace"
 
     return engine_function
 
