@@ -32,6 +32,97 @@ logger = logging.getLogger(__name__)
 # HTML UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# JAVASCRIPT DATA EXTRACTION  (Next.js / React / Angular embedded JSON)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _walk_json_for_people(obj: object, depth: int = 0) -> list[str]:
+    """
+    Recursively walk a parsed JSON object looking for {name, title} pairs.
+    Works for any nesting depth up to 6 levels.
+    """
+    if depth > 6:
+        return []
+    results: list[str] = []
+    if isinstance(obj, dict):
+        name  = str(obj.get("name")      or obj.get("fullName")    or
+                    obj.get("personName") or obj.get("displayName") or "").strip()
+        title = str(obj.get("title")     or obj.get("jobTitle")    or
+                    obj.get("position")  or obj.get("role")        or
+                    obj.get("designation") or "").strip()
+        if name and title and len(name.split()) >= 2 and len(name) < 60:
+            results.append(f"{name} — {title}")
+        for v in obj.values():
+            results.extend(_walk_json_for_people(v, depth + 1))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(_walk_json_for_people(item, depth + 1))
+    return results
+
+
+def _extract_js_data(html: str) -> str:
+    """
+    Pull leadership data from JavaScript embedded in the page.
+
+    Targets:
+    - Next.js  __NEXT_DATA__ JSON blobs (most major financial sites use Next.js)
+    - Generic  window.__INITIAL_STATE__  /  window.__APP_DATA__  patterns
+    - Inline script blocks with arrays keyed on boardMembers / directors /
+      executives / leadershipTeam / teamMembers
+    - JSON-formatted data attributes on DOM elements
+
+    Returns a string of "Name — Title" lines (may be empty).
+    """
+    candidates: list[str] = []
+
+    # ── Next.js: <script id="__NEXT_DATA__" type="application/json">
+    m = re.search(
+        r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        html, flags=re.DOTALL | re.IGNORECASE,
+    )
+    if m:
+        try:
+            candidates.extend(_walk_json_for_people(json.loads(m.group(1))))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # ── Generic window.__* state patterns in <script> blocks
+    for pat in [
+        r'window\.__(?:INITIAL_STATE|APP_DATA|DATA|STATE|PRELOADED_STATE)__\s*=\s*(\{.*?\});',
+        r'var\s+(?:initialData|pageData|appData|stateData)\s*=\s*(\{.*?\});',
+    ]:
+        for m in re.finditer(pat, html, flags=re.DOTALL | re.IGNORECASE):
+            try:
+                candidates.extend(_walk_json_for_people(json.loads(m.group(1))))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # ── Keyed arrays: "boardMembers":[...], "directors":[...] etc.
+    _ARRAY_KEYS = (
+        r'boardMembers?|directors?|executives?|leadership(?:Team)?'
+        r'|teamMembers?|managementTeam|committeeMembers?'
+    )
+    for m in re.finditer(
+        rf'"(?:{_ARRAY_KEYS})"\s*:\s*(\[.*?\])',
+        html, flags=re.DOTALL | re.IGNORECASE,
+    ):
+        try:
+            candidates.extend(_walk_json_for_people(json.loads(m.group(1))))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    lines: list[str] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            lines.append(c)
+
+    logger.debug("JS data extraction: %d name/title pairs found", len(lines))
+    return "\n".join(lines[:80])
+
+
 def _extract_json_ld(html: str) -> str:
     """
     Pull text from JSON-LD <script type="application/ld+json"> blocks.
@@ -67,6 +158,96 @@ def _extract_json_ld(html: str) -> str:
                         if name and title:
                             snippets.append(f"{name} — {title}")
     return "\n".join(snippets)
+
+
+def _scrape_wikipedia(company_name: str) -> str:
+    """
+    Search Wikipedia for the company article and extract leadership sections.
+    Wikipedia is static HTML and often has comprehensive board / exec tables
+    for public companies.  Returns a plain-text excerpt (≤ 6 KB) or "".
+    """
+    try:
+        import httpx
+        from urllib.parse import quote_plus
+    except ImportError:
+        return ""
+
+    try:
+        # Step 1: opensearch to find the right article title
+        search = httpx.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "opensearch", "search": company_name,
+                "limit": 3, "format": "json",
+            },
+            timeout=4,
+            headers={"User-Agent": _SEARCH_UA},
+        )
+        if search.status_code != 200:
+            return ""
+        payload = search.json()
+        titles = payload[1] if len(payload) > 1 else []
+        urls   = payload[3] if len(payload) > 3 else []
+        if not titles:
+            return ""
+
+        page_url = urls[0] if urls else f"https://en.wikipedia.org/wiki/{quote_plus(titles[0])}"
+
+        # Step 2: fetch the article HTML (mobile version — lighter, easier to strip)
+        page_url_mobile = page_url.replace("en.wikipedia.org", "en.m.wikipedia.org")
+        resp = httpx.get(
+            page_url_mobile, timeout=6,
+            headers={"User-Agent": _SEARCH_UA},
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            resp = httpx.get(page_url, timeout=6,
+                             headers={"User-Agent": _SEARCH_UA},
+                             follow_redirects=True)
+        if resp.status_code != 200:
+            return ""
+
+        text = _strip_html(resp.text)
+
+        # Step 3: carve out the relevant sections
+        _LEADERSHIP_KW = re.compile(
+            r"^(board\s+of\s+directors?|board\s+members?|directors?|"
+            r"executive\s+(?:team|officers?|management)|"
+            r"leadership|senior\s+management|management\s+team)",
+            re.IGNORECASE,
+        )
+        _STOP_KW = re.compile(
+            r"^(history|products?|services?|finances?|controversy|see\s+also"
+            r"|references|external\s+links|operations?|subsidiaries)",
+            re.IGNORECASE,
+        )
+
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        relevant: list[str] = []
+        in_section = False
+        for line in lines:
+            if _LEADERSHIP_KW.match(line):
+                in_section = True
+                relevant.append(f"=== {line} ===")
+                continue
+            if in_section:
+                if _STOP_KW.match(line) and len(line) < 60:
+                    in_section = False
+                    continue
+                relevant.append(line)
+                if len(relevant) > 150:
+                    break
+
+        result = "\n".join(relevant[:120])[:6_000]
+        if result:
+            logger.debug(
+                "Wikipedia extracted %d chars for '%s'", len(result), company_name
+            )
+        return result
+
+    except Exception as exc:
+        logger.debug("Wikipedia leadership scrape failed: %s", exc)
+        return ""
 
 
 def _strip_html(html: str) -> str:
@@ -107,32 +288,49 @@ _LEADERSHIP_PATHS = [
     "/investor-relations/governance/board-of-directors",
     "/investor-relations/corporate-governance",
     "/corporate-governance/board-of-directors",
+    "/corporate-governance",
+    "/who-we-are/leadership",
+    "/who-we-are/board-of-directors",
+    "/people/board",
+    "/people/leadership",
+    "/our-people/leadership",
     "/team",
     "/about",
     "/about-us",
     "/company/leadership",
     "/company/management",
+    "/company/board-of-directors",
     "/en/about/leadership",
     "/en/about-us/leadership",
+    "/en/who-we-are/leadership",
+    "/global/about/leadership",
+    "/global/governance/board-of-directors",
+    "/press-room/bios",
+    "/media/bios",
 ]
 
 _SEARCH_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
-_WEB_TIMEOUT = 8          # seconds per HTTP request
-_MAX_PAGE_CHARS = 20_000  # chars to pass to Claude per page
-_MAX_PAGES = 4            # allow up to 4 pages (BOD + exec committee may be separate)
-_TOTAL_BUDGET = 30        # hard cap on website scraping time (seconds)
+_WEB_TIMEOUT = 7          # seconds per HTTP request
+_MAX_PAGE_CHARS = 18_000  # chars to pass to Claude per page
+_MAX_PAGES = 8            # up to 8 pages (BOD + exec + committee + individual profiles)
+_TOTAL_BUDGET = 35        # hard cap on website scraping time (seconds)
 
 # Link patterns that indicate a sub-page with leadership content
 _LEADERSHIP_LINK_RE = re.compile(
     r'href=["\']([^"\']*(?:'
-    r'board[-_]of[-_]directors|board-of-directors'
+    r'board[-_]of[-_]directors?|board-of-directors?'
     r'|operating[-_]committee|leadership[-_]team'
     r'|executive[-_]committee|management[-_]committee'
-    r'|senior[-_]leadership|our[-_]leaders'
+    r'|senior[-_]leadership|our[-_]leaders?'
     r'|supervisory[-_]board|advisory[-_]board'
+    r'|governance[-_/]board|corporate[-_]governance'
+    r'|audit[-_]committee|nominations[-_]committee'
+    r'|compensation[-_]committee|risk[-_]committee'
+    r'|board[-_]members?|director[-_]profiles?'
+    r'|executive[-_]profiles?|management[-_]team'
     r')[^"\']*)["\']',
     re.IGNORECASE,
 )
@@ -166,9 +364,13 @@ def _fetch_leadership_text(domain: str) -> str:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
+    # Try main site + www + IR subdomains (investor-relations pages often have
+    # full governance/board listings even when the marketing site is JS-heavy)
     base_candidates = [
         f"https://{domain}",
         f"https://www.{domain}",
+        f"https://ir.{domain}",
+        f"https://investors.{domain}",
     ]
 
     collected: list[str] = []
@@ -194,22 +396,35 @@ def _fetch_leadership_text(domain: str) -> str:
 
                 raw_html = r.text
 
-                # Try structured JSON-LD first (works even for JS-heavy SPAs
-                # that embed Person schema server-side)
+                # ── Three extraction layers for each page ──────────────────
+                # 1. JavaScript embedded data (Next.js/__NEXT_DATA__, etc.)
+                #    Works on modern SPAs that embed state in the HTML even
+                #    though visible text is rendered by JS at runtime.
+                js_text = _extract_js_data(raw_html)
+
+                # 2. JSON-LD structured data (<script type="application/ld+json">)
                 ld_text = _extract_json_ld(raw_html)
 
-                # Plain-text strip
+                # 3. Plain-text strip (works for static-HTML sites)
                 text = _strip_html(raw_html)
 
-                # Merge: prefer JSON-LD when visible text is sparse (SPA)
+                # Merge all layers; JS data and JSON-LD win over thin plain text
+                parts_for_page: list[str] = []
+                if js_text:
+                    parts_for_page.append(f"[JS Data]\n{js_text}")
                 if ld_text:
-                    combined = f"{ld_text}\n\n{text[:_MAX_PAGE_CHARS]}"
-                else:
-                    combined = text[:_MAX_PAGE_CHARS]
+                    parts_for_page.append(f"[Structured Data]\n{ld_text}")
+                # Include plain text only when substantial or no structured data
+                if len(text) >= 400 or (not js_text and not ld_text):
+                    parts_for_page.append(text[:_MAX_PAGE_CHARS])
 
-                # A page is "useful" if either the visible text is substantial
-                # OR we found JSON-LD person data
-                if len(text) < 200 and not ld_text:
+                combined = "\n\n".join(parts_for_page) if parts_for_page else ""
+
+                # A page is "useful" if any layer produced content
+                if not combined.strip():
+                    logger.debug(f"Page produced no content, skipping: {url}")
+                    continue
+                if len(text) < 200 and not js_text and not ld_text:
                     logger.debug(f"Page too thin ({len(text)} chars), skipping: {url}")
                     continue
 
@@ -243,10 +458,16 @@ def _fetch_leadership_text(domain: str) -> str:
                                     )
                                     ct2 = r2.headers.get("content-type", "")
                                     if r2.status_code == 200 and "text/html" in ct2:
+                                        js2 = _extract_js_data(r2.text)
                                         ld2 = _extract_json_ld(r2.text)
                                         t2  = _strip_html(r2.text)
-                                        if len(t2) >= 200 or ld2:
-                                            c2 = f"{ld2}\n\n{t2[:_MAX_PAGE_CHARS]}" if ld2 else t2[:_MAX_PAGE_CHARS]
+                                        sub_parts: list[str] = []
+                                        if js2: sub_parts.append(f"[JS Data]\n{js2}")
+                                        if ld2: sub_parts.append(f"[Structured Data]\n{ld2}")
+                                        if len(t2) >= 400 or (not js2 and not ld2):
+                                            sub_parts.append(t2[:_MAX_PAGE_CHARS])
+                                        c2 = "\n\n".join(sub_parts)
+                                        if c2.strip():
                                             collected.append(f"[Page: {linked_url}]\n{c2}")
                                             logger.debug(
                                                 f"Scraped linked leadership page: {linked_url} "
@@ -273,14 +494,15 @@ def _fetch_leadership_text(domain: str) -> str:
 _SYSTEM_FROM_WEB = """\
 You are a corporate intelligence assistant.
 
-You are given text from two sources about a company:
+You are given text from up to three sources about a company:
 1. Pages scraped from the company's own website (most authoritative).
-2. Search engine result snippets from DuckDuckGo (supplementary — useful when the \
-   company site is JavaScript-rendered and the scraped HTML is sparse).
+2. Search engine result snippets from DuckDuckGo (useful when the company site is \
+   JavaScript-rendered and the scraped HTML is sparse).
+3. Wikipedia article excerpt (reliable for board composition of public companies).
 
 Extract the current Board of Directors and Executive Management / C-Suite team \
 using ALL available context. Prefer explicit website content, but use search \
-snippets to fill gaps.
+snippets and Wikipedia to fill gaps.
 
 The website may present these under different headings such as:
 - Board of Directors, Board of Trustees, Supervisory Board, Advisory Board
@@ -349,9 +571,13 @@ Rules:
 def _ddg_leadership_snippets(company_name: str) -> str:
     """
     Search DuckDuckGo for company leadership and return result snippets.
-    DDG snippets often name board members / executives directly and work
-    even when the company's own site is JavaScript-rendered (no static HTML).
-    Returns "" on any failure.
+
+    Uses three strategies in order:
+      1. DuckDuckGo HTML search (html.duckduckgo.com/html/) — most snippets
+      2. DuckDuckGo Lite (lite.duckduckgo.com/lite/) — fallback if HTML blocked
+      3. DuckDuckGo Instant Answer API — zero-click company summary
+
+    Returns a pipe-joined string of up to 15 snippets (max 8 KB) or "".
     """
     try:
         import httpx
@@ -359,36 +585,130 @@ def _ddg_leadership_snippets(company_name: str) -> str:
     except ImportError:
         return ""
 
+    # Four targeted queries: BOD-focused first, then exec team
     queries = [
-        f'"{company_name}" board of directors chairman independent director',
-        f'"{company_name}" CEO CFO COO chief executive management team',
+        f'"{company_name}" board of directors chairman non-executive independent director',
+        f'"{company_name}" board members list directors site:reuters.com OR site:bloomberg.com OR site:ft.com',
+        f'"{company_name}" CEO CFO COO president chief executive operating committee',
+        f'"{company_name}" executive management leadership team annual report',
     ]
+
+    ddg_headers = {
+        "User-Agent": _SEARCH_UA,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+
     snippets: list[str] = []
-    for query in queries:
-        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-        try:
-            resp = httpx.get(
-                url,
-                headers={"User-Agent": _SEARCH_UA, "Accept-Language": "en-US,en;q=0.9"},
-                timeout=5,
-                follow_redirects=True,
-            )
-            if resp.status_code != 200:
-                continue
+
+    def _parse_ddg_html(html: str) -> list[str]:
+        """Extract snippets from DDG HTML — handles both <a> and <div> wrapper."""
+        found: list[str] = []
+        # Primary pattern: class="result__snippet" on any element
+        for m in re.finditer(
+            r'class="result__snippet"[^>]*>(.*?)</(?:a|div|span|td)>',
+            html, flags=re.DOTALL | re.IGNORECASE
+        ):
+            s = re.sub(r"<[^>]+>", " ", m.group(1))
+            s = re.sub(r"\s+", " ", s).strip()
+            if s and len(s) > 30:
+                found.append(s)
+        # Fallback: any element with snippet-like class
+        if not found:
             for m in re.finditer(
-                r'class="result__snippet"[^>]*>(.*?)</a>',
-                resp.text, flags=re.DOTALL | re.IGNORECASE
+                r'class="[^"]*snippet[^"]*"[^>]*>(.*?)</(?:a|div|span|td)>',
+                html, flags=re.DOTALL | re.IGNORECASE
             ):
                 s = re.sub(r"<[^>]+>", " ", m.group(1))
                 s = re.sub(r"\s+", " ", s).strip()
                 if s and len(s) > 30:
-                    snippets.append(s)
-            if len(snippets) >= 10:
-                break
-        except Exception as exc:
-            logger.debug("DDG leadership search failed: %s", exc)
+                    found.append(s)
+        return found
 
-    return " | ".join(snippets[:10])[:6_000]
+    def _parse_lite_html(html: str) -> list[str]:
+        """Extract snippets from DDG Lite HTML (td.result-snippet)."""
+        found: list[str] = []
+        for m in re.finditer(
+            r'class="result-snippet"[^>]*>(.*?)</(?:td|div|span)>',
+            html, flags=re.DOTALL | re.IGNORECASE
+        ):
+            s = re.sub(r"<[^>]+>", " ", m.group(1))
+            s = re.sub(r"\s+", " ", s).strip()
+            if s and len(s) > 30:
+                found.append(s)
+        return found
+
+    for query in queries:
+        if len(snippets) >= 15:
+            break
+        enc = quote_plus(query)
+
+        # Strategy 1: DDG HTML
+        try:
+            resp = httpx.get(
+                f"https://html.duckduckgo.com/html/?q={enc}",
+                headers=ddg_headers, timeout=5, follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                found = _parse_ddg_html(resp.text)
+                snippets.extend(found)
+                if found:
+                    continue   # good result — move to next query
+        except Exception as exc:
+            logger.debug("DDG HTML search failed: %s", exc)
+
+        # Strategy 2: DDG Lite (simpler HTML, less likely to be blocked)
+        try:
+            resp_lite = httpx.get(
+                f"https://lite.duckduckgo.com/lite/?q={enc}",
+                headers=ddg_headers, timeout=5, follow_redirects=True,
+            )
+            if resp_lite.status_code == 200:
+                snippets.extend(_parse_lite_html(resp_lite.text))
+        except Exception as exc:
+            logger.debug("DDG Lite search failed: %s", exc)
+
+    # Strategy 3: DDG Instant Answer API (company overview, often names key people)
+    if len(snippets) < 5:
+        try:
+            ia_resp = httpx.get(
+                "https://api.duckduckgo.com/",
+                params={
+                    "q": f"{company_name} board of directors executives",
+                    "format": "json",
+                    "no_html": "1",
+                    "skip_disambig": "1",
+                },
+                headers={"User-Agent": _SEARCH_UA},
+                timeout=5,
+            )
+            if ia_resp.status_code == 200:
+                ia = ia_resp.json()
+                # AbstractText: paragraph from Wikipedia/Infobox
+                abstract = ia.get("AbstractText", "").strip()
+                if abstract and len(abstract) > 50:
+                    snippets.append(f"[Overview] {abstract}")
+                # RelatedTopics often list executives
+                for topic in ia.get("RelatedTopics", [])[:10]:
+                    if isinstance(topic, dict):
+                        txt = topic.get("Text", "").strip()
+                        if txt and len(txt) > 30:
+                            snippets.append(txt)
+        except Exception as exc:
+            logger.debug("DDG Instant Answer failed: %s", exc)
+
+    # Deduplicate preserving order
+    seen_set: set[str] = set()
+    unique: list[str] = []
+    for s in snippets:
+        key = s[:80]
+        if key not in seen_set:
+            seen_set.add(key)
+            unique.append(s)
+
+    result = " | ".join(unique[:15])[:8_000]
+    logger.debug("DDG snippets for '%s': %d items, %d chars", company_name, len(unique), len(result))
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -431,36 +751,39 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 1: parallel web scrape + DDG snippet search ─────────────────────
-    web_text = _fetch_leadership_text(domain) if domain else ""
-    ddg_text = _ddg_leadership_snippets(company_name)
+    # ── Step 1: scrape website + DDG snippets + Wikipedia ────────────────────
+    web_text  = _fetch_leadership_text(domain) if domain else ""
+    ddg_text  = _ddg_leadership_snippets(company_name)
+    wiki_text = _scrape_wikipedia(company_name)
 
     logger.info(
-        f"Leadership context for '{company_name}': "
-        f"web={len(web_text)} chars, ddg={len(ddg_text)} chars"
+        "Leadership context for '%s': web=%d chars, ddg=%d chars, wiki=%d chars",
+        company_name, len(web_text), len(ddg_text), len(wiki_text),
     )
 
-    # ── Step 2: if any web context found, extract via Claude ─────────────────
-    if web_text or ddg_text:
+    # ── Step 2: if any context found, extract via Claude ─────────────────────
+    if web_text or ddg_text or wiki_text:
         parts: list[str] = [f"Company: {company_name}"]
         if web_text:
             parts.append(f"[Website content]\n{web_text}")
         if ddg_text:
             parts.append(f"[Search result snippets]\n{ddg_text}")
+        if wiki_text:
+            parts.append(f"[Wikipedia excerpt]\n{wiki_text}")
         user_msg = "\n\n".join(parts)
 
         result = _call_claude(
             system=_SYSTEM_FROM_WEB,
             user_msg=user_msg,
-            label=f"{company_name} [web+ddg]",
+            label=f"{company_name} [web+ddg+wiki]",
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info(
-            f"Web+DDG context returned no leaders for '{company_name}' — "
-            f"falling back to LLM knowledge"
+            "Web+DDG+Wiki context returned no leaders for '%s' — "
+            "falling back to LLM knowledge", company_name
         )
 
     # ── Step 3: LLM knowledge fallback ───────────────────────────────────────
