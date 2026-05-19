@@ -1647,10 +1647,28 @@ def _enrich_with_llm_leadership(
             )
             dag.insert_person(rec)
 
+    # ── Guarantee BOD node always exists ─────────────────────────────────
+    # BOD is only created when board members are found.  If web + LLM returned
+    # no board, the node never exists and the org chart shows no BOD card.
+    # Always create a placeholder so the chart always shows BOD → EM → depts.
+    bod_id = dag._node_id("dept", "Board of Management")
+    if bod_id not in dag.G:
+        ctx0   = list(companies.values())[0] if companies else {}
+        dag._ensure_node(
+            bod_id,
+            node_type=NODE_DEPT_P,
+            label="Board of Management",
+            layer=0,
+            sector=ctx0.get("sector", "Private"),
+            color="#3491E8",
+            is_ghost=False,
+            has_more=False,
+            metadata={"people_count": 0},
+        )
+        dag._ensure_edge("root_global", bod_id)
+        logger.info("BOD placeholder created (no board members found via web/LLM)")
+
     # ── Repair governance edges ───────────────────────────────────────────
-    # Uploaded records often lack L0/L1 people, so EM and functional depts
-    # fall back to root_global as their parent.  After injecting BOD/EM here,
-    # fix those stale edges so the hierarchy is correct.
     dag.repair_governance_edges()
 
 

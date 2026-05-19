@@ -160,8 +160,9 @@ export default function App() {
 
   // ── Fetch dept-only structure ──────────────────────────────────────
   const loadDeptStructure = async () => {
-    // max_depth=4 covers:  root(0) → BOD(1) → EM(2) → depts(3) → sub-depts(4)
-    const res = await fetch(`${API}/tree?root=root_global&max_depth=4`)
+    // max_depth=3: root(0) → BOD(1) → EM(2) → direct depts(3).
+    // Sub-departments expand lazily on click (has_more=true triggers lazy fetch).
+    const res = await fetch(`${API}/tree?root=root_global&max_depth=3`)
     if (!res.ok) throw new Error(await res.text())
     const raw: OrgNode = await res.json()
     const filtered = filterToDeptNodes(raw)

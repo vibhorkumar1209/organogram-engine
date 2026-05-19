@@ -57,16 +57,21 @@ interface ExecTreeNode {
   isLast:    boolean
 }
 
-// Detect CEO / President as the apex of EM (exclude deputy/vice variants)
+// Detect the GLOBAL CEO / Group President as the apex of EM.
+// Excludes: co-/deputy/vice CEO; regional CEOs (EMEA, APAC…);
+//           plain "Managing Director" (EVP-equivalent, not group CEO).
 function isCeoTitle(person: OrgNode): boolean {
   const d = ((person.metadata?.designation as string) ?? '').toLowerCase()
   const text = d || person.label.toLowerCase()
-  if (/\b(deputy|vice|assistant|associate)\b/.test(text)) return false
+  // Exclude co-/deputy/vice/assistant qualifiers
+  if (/\b(co-?|deputy|vice|assistant|associate)\b/.test(text)) return false
+  // Exclude regional / divisional scope (these are NOT the global CEO)
+  if (/\b(emea|apac|asia|pacific|europe|america|africa|middle\s+east|regional|divisional|country|international)\b/.test(text)) return false
   return (
-    /\bchief\s+executive\b/.test(text) ||
+    /\bchief\s+executive\b/.test(text) ||           // Chief Executive Officer, CEO
     /\bceo\b/.test(text) ||
-    /^(?:group\s+)?president$/.test(text) ||
-    /^(?:group\s+)?managing\s+director$/.test(text)
+    /^(?:group\s+)?president$/.test(text) ||         // President or Group President (exact)
+    /^group\s+(?:chief\s+executive|managing\s+director)$/.test(text)  // Group CEO / Group MD only
   )
 }
 
