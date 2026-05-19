@@ -712,7 +712,14 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
     if layer == 0:
         return "Board of Management"
     if layer == 1:
-        # True C-Suite (CEO, CFO, COO, CTO, CMO …) → always Executive Management
+        # Board directors (Vice-Chair, Lead Independent Director, etc.) are
+        # injected with layer=1 but must stay in Board of Management — not EM.
+        _BOD_DEPT_NAMES = frozenset(
+            {"board of management", "board of directors", "board"}
+        )
+        if dept_primary.strip().lower() in _BOD_DEPT_NAMES:
+            return "Board of Management"
+        # True C-Suite (CEO, CFO, COO, CTO, CMO …) → Executive Management
         return "Executive Management"
     # L2 (EVP / MD) and below: use actual functional department.
     # An "EVP of Finance" belongs in Finance, not Executive Management.
@@ -1412,6 +1419,18 @@ def _name_key(name: str) -> str:
     return " ".join(words[:2])
 
 
+def _is_board_chairman(title: str) -> bool:
+    """
+    Return True when *title* indicates the Chair/Chairman of the board.
+    Vice-Chair, Deputy Chair, and Lead Independent Director are NOT the Chair.
+    """
+    t = title.lower().strip()
+    # Exclude vice / deputy roles
+    if any(exc in t for exc in ("vice", "deputy")):
+        return False
+    return "chairman" in t or "chairwoman" in t or "chairperson" in t
+
+
 def _inject_knowledge_leadership(
     dag: OrganogramDAG,
     company_name: str,
@@ -1459,7 +1478,10 @@ def _inject_knowledge_leadership(
     from inference_logic import ClassifiedRecord
     injections: list[tuple[int, str, str, str]] = []
     for p in leadership.get("board", []):
-        injections.append((0, p["name"], p["title"], "Board of Management"))
+        # Chairman sits at layer 0 (top of board); all other directors at layer 1
+        # so the ExecPanel tree shows Chairman → Directors hierarchy.
+        layer = 0 if _is_board_chairman(p["title"]) else 1
+        injections.append((layer, p["name"], p["title"], "Board of Management"))
     for p in leadership.get("executives", []):
         injections.append((1, p["name"], p["title"], "Executive Management"))
 
@@ -1564,7 +1586,8 @@ def _enrich_with_llm_leadership(
 
         injections: list[tuple[int, str, str, str]] = []
         for person in leadership.get("board", []):
-            injections.append((0, person["name"], person["title"], "Board of Management"))
+            layer = 0 if _is_board_chairman(person["title"]) else 1
+            injections.append((layer, person["name"], person["title"], "Board of Management"))
         for person in leadership.get("executives", []):
             injections.append((1, person["name"], person["title"], "Executive Management"))
 

@@ -22,6 +22,12 @@ const LAYER_LABELS: Record<number, string> = {
   10: 'Analyst / Specialist',    // G10 — Analyst, Specialist, Associate, IC
 }
 
+// Board of Management card uses its own hierarchy labels
+const BOD_LAYER_LABELS: Record<number, string> = {
+  0: 'Chairman',
+  1: 'Director',
+}
+
 const SECTOR_COLORS: Record<string, string> = {
   Automotive: '#F59E0B',
   Govt:       '#3B82F6',
@@ -311,6 +317,9 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
       return next
     })
 
+  const isBoard = deptNode?.node_id === 'dept__board_of_management'
+  const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
+
   const tree = executives ? buildExecTree(executives) : []
 
   // Layer distribution summary
@@ -323,7 +332,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
   }
   const layerSummary = Object.entries(byLayer)
     .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([l, n]) => `${n} ${LAYER_LABELS[Number(l)] ?? `L${l}`}`)
+    .map(([l, n]) => `${n} ${labels[Number(l)] ?? LAYER_LABELS[Number(l)] ?? `L${l}`}`)
     .join(' · ')
 
   return (
@@ -351,7 +360,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
               fontSize: 9, color: '#334155', letterSpacing: 1.2,
               textTransform: 'uppercase', marginBottom: 4,
             }}>
-              Executives
+              {isBoard ? 'Board of Directors' : 'Executives'}
             </div>
             <div style={{
               fontSize: 14, fontWeight: 700, color,

@@ -586,15 +586,20 @@ def get_executives(dept_id: str = Query(...)):
 
     people: list[dict] = []
 
-    def collect(nid: str, visited: set):
+    def collect(nid: str, visited: set, depth: int = 0):
         if nid in visited:
             return
         visited.add(nid)
         attrs = dict(dag.G.nodes.get(nid, {}))
-        if attrs.get("node_type") == "person":
+        node_type = attrs.get("node_type", "")
+        if node_type == "person":
             people.append(attrs)
+        # Stop at child dept_primary boundaries — prevents BOD from including
+        # Executive Management people (EM sits under BOD in the DAG).
+        if depth > 0 and node_type == "dept_primary":
+            return
         for child in dag.G.successors(nid):
-            collect(child, visited)
+            collect(child, visited, depth + 1)
 
     collect(dept_id, set())
 
