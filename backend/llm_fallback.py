@@ -530,6 +530,10 @@ Rules:
   Chief Commercial Officer, and equivalent. \
   Do NOT include VPs, SVPs, MDs, or Directors unless they sit on \
   the Operating/Executive Committee explicitly listed on the website.
+- CRITICAL: EXCLUDE all former, retired, ex-, past, or emeritus \
+  office-holders. Only include people currently serving in the role. \
+  Do NOT include anyone whose title or context says "Former", "Ex-", \
+  "Retired", "Past", "Emeritus", "Ex-CEO", "Former Chairman", etc.
 - Use names and titles as they appear in the source material.
 - If the combined context does not contain leadership information, return \
   {"board": [], "executives": []}.
@@ -559,7 +563,10 @@ Rules:
   CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, \
   Chief Commercial Officer, and Operating/Executive Committee members.
   Do NOT include VPs, SVPs, MDs, or Directors unless they sit on the committee.
-- Return your best knowledge. Do NOT return empty just because data may be slightly dated.
+- CRITICAL: EXCLUDE all former, retired, ex-, past, or emeritus office-holders. \
+  Only include people currently serving in the role. Do NOT include anyone described \
+  as "Former CEO", "Ex-Chairman", "Retired Director", "Emeritus", etc.
+- Return your best knowledge of CURRENT leadership. Do NOT return empty just because data may be slightly dated.
 - Only return {"board": [], "executives": []} if you have absolutely no knowledge of this company.
 - Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
@@ -839,14 +846,45 @@ def _call_claude(system: str, user_msg: str, label: str) -> dict:
     return {"board": [], "executives": []}
 
 
+_RETIRED_RE = re.compile(
+    r"^\s*(?:former|ex[- ]|retired|late|emeritus|past\s+)",
+    re.IGNORECASE,
+)
+_RETIRED_TITLE_RE = re.compile(
+    r"\b(?:former|retired|emeritus|ex[- ](?:ceo|cfo|coo|cto|chairman|director|president))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_retired(name: str, title: str) -> bool:
+    """Return True when the name or title signals a former/retired executive."""
+    # Title starts with "Former …", "Ex-CEO", "Retired …", "Emeritus …", "Past …"
+    if _RETIRED_RE.search(title):
+        return True
+    # Title contains "retired", "emeritus", "former" anywhere
+    if _RETIRED_TITLE_RE.search(title):
+        return True
+    # Name itself prefixed: "Former CEO John Smith" style (LLM sometimes does this)
+    if _RETIRED_RE.search(name):
+        return True
+    return False
+
+
 def _clean_list(raw: list) -> list[dict]:
-    """Validate and normalise a list of {name, title} dicts."""
+    """Validate, normalise, and de-retire a list of {name, title} dicts.
+    Drops former / retired / emeritus / ex- executives — only current
+    office-holders should appear in the org structure.
+    """
     out = []
     for item in raw:
         if not isinstance(item, dict):
             continue
         name  = str(item.get("name",  "") or "").strip()
         title = str(item.get("title", "") or "").strip()
-        if name and title and len(name.split()) >= 2:
-            out.append({"name": name, "title": title})
+        if not name or not title or len(name.split()) < 2:
+            continue
+        if _is_retired(name, title):
+            logger.debug("Skipping retired/former executive: %s — %s", name, title)
+            continue
+        out.append({"name": name, "title": title})
     return out

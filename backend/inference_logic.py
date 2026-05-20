@@ -30,6 +30,7 @@ Layer scale (people nodes):
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -87,6 +88,14 @@ _BARE_DEPT_NAMES: dict[str, str] = {
     "real estate":              "Facilities, Real Estate & Workplace",
     "workplace":                "Facilities, Real Estate & Workplace",
 }
+
+# Titles that indicate a former / retired / non-current role — skip these records
+_FORMER_TITLE_RE = re.compile(
+    r"^\s*(?:former|ex[- ]|retired|late\s+|past\s+|emeritus)"
+    r"|"
+    r"\b(?:former|retired|emeritus)\b",
+    re.IGNORECASE,
+)
 
 _SENIORITY_WORDS: frozenset[str] = frozenset({
     "chief", "head", "director", "vp", "vice president", "svp", "evp",
@@ -496,7 +505,20 @@ class InferenceEngine:
 
         for i, rec in enumerate(records):
             try:
+                # ── Skip former / retired / non-current employees ─────────
+                job_is_current = str(_get(rec, "job_is_current") or "").strip().lower()
+                if job_is_current in ("false", "0", "no", "n"):
+                    skipped += 1
+                    continue
+
                 designation = _get(rec, "Designation") or _get(rec, "linkedin_headline") or ""
+
+                # Skip titles that explicitly signal a former/retired role
+                if designation and _FORMER_TITLE_RE.search(designation):
+                    logger.debug("Skipping former/retired record: %s", designation)
+                    skipped += 1
+                    continue
+
                 titles = _split_compound_title(designation)
 
                 if len(titles) > 1:
