@@ -709,18 +709,25 @@ def _canonical_dept(dept_primary: str, layer: int) -> str:
     compound or unfamiliar names before this function is called.
     """
     # Layer-based hard overrides (most important — independent of NLP dept)
+    # Per Global_Designation_Hierarchy.xlsx:
+    #   G0 = Board Chairman (apex)   → Board of Management
+    #   G1 = Vice Chair / Comm Chair → Board of Management  (if dept says so)
+    #        OR C-Suite              → Executive Management
+    #   G2 = Regular NEDs / INEDs   → Board of Management  (if dept says so)
+    #        OR EVP-level execs      → their functional dept
+    _BOD_DEPT_NAMES = frozenset({"board of management", "board of directors", "board"})
     if layer == 0:
         return "Board of Management"
     if layer == 1:
-        # Board directors (Vice-Chair, Lead Independent Director, etc.) are
-        # injected with layer=1 but must stay in Board of Management — not EM.
-        _BOD_DEPT_NAMES = frozenset(
-            {"board of management", "board of directors", "board"}
-        )
         if dept_primary.strip().lower() in _BOD_DEPT_NAMES:
             return "Board of Management"
         # True C-Suite (CEO, CFO, COO, CTO, CMO …) → Executive Management
         return "Executive Management"
+    if layer == 2:
+        # Regular NEDs / INEDs (board members at layer 2) stay in BOD;
+        # EVP-level functional execs fall through to functional dept logic below.
+        if dept_primary.strip().lower() in _BOD_DEPT_NAMES:
+            return "Board of Management"
     # L2 (EVP / MD) and below: use actual functional department.
     # An "EVP of Finance" belongs in Finance, not Executive Management.
 
@@ -1421,13 +1428,104 @@ def _name_key(name: str) -> str:
 
 def _is_board_chairman(title: str) -> bool:
     """
-    Return True when *title* indicates the Chair/Chairman of the board.
-    Vice-Chair, Deputy Chair, and Lead Independent Director are NOT the Chair.
+    Return True when *title* is the Chair/Chairman of the board (apex, layer 0).
+    Per Global_Designation_Hierarchy.xlsx: Chairman, Non-Executive Chairman,
+    Board Chair, Executive Chairman are all the board apex.
+    Excludes: Vice-Chair, Deputy Chair, Committee Chairs (they are layer 1 directors).
     """
     t = title.lower().strip()
+    # Exclude vice/deputy chair and committee chairs
     if any(exc in t for exc in ("vice", "deputy")):
         return False
-    return "chairman" in t or "chairwoman" in t or "chairperson" in t
+    if "committee" in t:
+        return False   # "Audit Committee Chairman" → director, not THE chairman
+    # Broad chairman match — covers Executive Chairman, Non-Exec Chairman, etc.
+    if "chairman" in t or "chairwoman" in t or "chairperson" in t:
+        return True
+    # "Board Chair", "Chair of the Board", "Executive Chair" (no -man/-woman suffix)
+    if re.search(r"\bboard\s+chair\b", t):
+        return True
+    if re.search(r"\bchair\s+of\s+(?:the\s+)?board", t):
+        return True
+    if re.search(r"\bexecutive\s+chair\b", t):
+        return True
+    if t == "chair":
+        return True
+    return False
+
+
+# Committee chair patterns — from Global_Designation_Hierarchy.xlsx §Board Committees
+_COMMITTEE_CHAIR_RE = re.compile(
+    r"(?:audit|compensation|remuneration|nomination|nominating|governance|"
+    r"risk|technology|innovation|safety|environment|esg|sustainability|"
+    r"public\s+policy|ethics|finance|investment|executive|strategy|scientific)"
+    r"\s+committee",
+    re.IGNORECASE,
+)
+
+_COMMITTEE_NAME_MAP: dict[str, str] = {
+    "audit":        "audit_chair",
+    "compensation": "comp_chair",
+    "remuneration": "comp_chair",
+    "nomination":   "nom_chair",
+    "nominating":   "nom_chair",
+    "governance":   "nom_chair",
+    "risk":         "risk_chair",
+    "technology":   "tech_chair",
+    "innovation":   "tech_chair",
+    "esg":          "esg_chair",
+    "sustainability": "esg_chair",
+    "environment":  "esg_chair",
+    "finance":      "finance_chair",
+    "investment":   "finance_chair",
+}
+
+
+def _is_vice_chair(title: str) -> bool:
+    """
+    Return True for Vice Chairman / Deputy Chairman — senior board role
+    below THE Chairman, but senior to regular NEDs. Layer 1 in BOD.
+    """
+    t = title.lower().strip()
+    return bool(re.search(r"\bvice[- ]?chair(?:man|woman|person)?\b", t)) or \
+           bool(re.search(r"\bdeputy\s+chair(?:man|woman|person)?\b", t))
+
+
+def _is_committee_chair(title: str) -> bool:
+    """
+    Return True when the title indicates the person chairs a specific
+    board committee (Audit, Compensation, Nominations, Risk, Technology…).
+    Layer 1 in BOD (senior director role per Excel).
+    """
+    t = title.lower().strip()
+    if not _COMMITTEE_CHAIR_RE.search(t):
+        return False
+    return bool(re.search(r"\bchair(?:man|woman|person)?\b", t))
+
+
+def _board_sub_role(title: str) -> str:
+    """
+    Classify a board member's sub-role for metadata storage.
+    Used by ExecPanel.tsx to display committee badges.
+
+    Returns one of: "chairman", "vice_chair", "lead_director",
+    "<committee>_chair" (e.g. "audit_chair"), or "director".
+    """
+    t = title.lower().strip()
+    if _is_board_chairman(title):
+        return "chairman"
+    if _is_vice_chair(title):
+        return "vice_chair"
+    if re.search(r"\b(?:lead|senior)\s+independent\s+director\b", t):
+        return "lead_director"
+    if re.search(r"\bpresiding\s+director\b", t):
+        return "lead_director"
+    if _is_committee_chair(title):
+        for key, role in _COMMITTEE_NAME_MAP.items():
+            if key in t:
+                return role
+        return "committee_chair"
+    return "director"
 
 
 def _is_ceo(title: str) -> bool:
@@ -1489,23 +1587,34 @@ def _inject_knowledge_leadership(
     }
 
     from inference_logic import ClassifiedRecord
-    injections: list[tuple[int, str, str, str]] = []
-    for p in leadership.get("board", []):
-        # Chairman → layer 0 (root of board); all other directors → layer 1.
-        layer = 0 if _is_board_chairman(p["title"]) else 1
-        injections.append((layer, p["name"], p["title"], "Board of Management"))
-    for p in leadership.get("executives", []):
-        # All C-Suite are G1 (layer 1). CEO is at the same grade but the
-        # ExecPanel frontend detects CEO by title and promotes it to tree root.
-        injections.append((1, p["name"], p["title"], "Executive Management"))
 
-    for layer, name, title, dept_primary in injections:
+    # ── BOD: 3-layer hierarchy per Global_Designation_Hierarchy.xlsx ─────
+    # layer 0: Chairman / Board Chair (sole apex)
+    # layer 1: Vice Chair + Committee Chairs (senior board roles)
+    # layer 2: Regular NEDs / INEDs
+    # ── EM: CEO promoted by ExecPanel frontend; all C-Suite at layer 1 ───
+    injections: list[tuple[int, str, str, str, str]] = []  # (layer, name, title, dept, sub_role)
+    for p in leadership.get("board", []):
+        title = p["title"]
+        if _is_board_chairman(title):
+            layer = 0
+        elif _is_vice_chair(title) or _is_committee_chair(title):
+            layer = 1   # Senior board role
+        else:
+            layer = 2   # Regular NED / INED
+        sub_role = _board_sub_role(title)
+        injections.append((layer, p["name"], title, "Board of Management", sub_role))
+    for p in leadership.get("executives", []):
+        injections.append((1, p["name"], p["title"], "Executive Management", ""))
+
+    for layer, name, title, dept_primary, sub_role in injections:
         key = _name_key(name)
         if key in existing_keys:
             continue
         existing_keys.add(key)
+        person_uid = f"llm_{uuid.uuid4().hex[:12]}"
         dag.insert_person(ClassifiedRecord(
-            id=f"llm_{uuid.uuid4().hex[:12]}",
+            id=person_uid,
             full_name=name,
             designation=title,
             company=company_name,
@@ -1521,6 +1630,9 @@ def _inject_knowledge_leadership(
             nlp_industry="llm",
             nlp_method=nlp_meth,
         ))
+        # Attach board sub-role metadata for ExecPanel committee badge display
+        if sub_role and person_uid in dag.G:
+            dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
 
     dag.repair_governance_edges()
 
@@ -1598,16 +1710,27 @@ def _enrich_with_llm_leadership(
         source   = leadership.get("_source", "ai")
         nlp_meth = "llm_leadership_web" if source == "web" else "llm_leadership_ai"
 
-        injections: list[tuple[int, str, str, str]] = []
+        # ── BOD: 3-layer hierarchy per Global_Designation_Hierarchy.xlsx ──
+        # layer 0: Chairman (apex)
+        # layer 1: Vice Chair + Committee Chairs (senior board roles)
+        # layer 2: Regular NEDs / INEDs
+        # ── EM: all C-Suite at layer 1; CEO promoted by frontend ────────
+        injections: list[tuple[int, str, str, str, str]] = []
         for person in leadership.get("board", []):
-            layer = 0 if _is_board_chairman(person["title"]) else 1
-            injections.append((layer, person["name"], person["title"], "Board of Management"))
+            title = person["title"]
+            if _is_board_chairman(title):
+                layer = 0
+            elif _is_vice_chair(title) or _is_committee_chair(title):
+                layer = 1
+            else:
+                layer = 2   # Regular NED / INED
+            sub_role = _board_sub_role(title)
+            injections.append((layer, person["name"], title, "Board of Management", sub_role))
         for person in leadership.get("executives", []):
-            # All C-Suite are G1 (layer 1). ExecPanel frontend promotes CEO to root.
-            injections.append((1, person["name"], person["title"], "Executive Management"))
+            injections.append((1, person["name"], person["title"], "Executive Management", ""))
 
         from inference_logic import ClassifiedRecord
-        for layer, name, title, dept_primary in injections:
+        for layer, name, title, dept_primary, sub_role in injections:
             key = _name_key(name)
 
             # Web source can upgrade an AI-only entry: update the existing node's
@@ -1619,6 +1742,8 @@ def _enrich_with_llm_leadership(
                             and _name_key(attrs.get("label", "")) == key):
                         meta = dict(attrs.get("metadata", {}))
                         meta["nlp_method"] = "llm_leadership_web"
+                        if sub_role:
+                            meta["board_sub_role"] = sub_role
                         dag.G.nodes[nid]["metadata"] = meta
                         ai_only_keys.discard(key)
                         break
@@ -1628,8 +1753,9 @@ def _enrich_with_llm_leadership(
                 continue
             existing_keys.add(key)
 
+            person_uid = f"llm_{uuid.uuid4().hex[:12]}"
             rec = ClassifiedRecord(
-                id=f"llm_{uuid.uuid4().hex[:12]}",
+                id=person_uid,
                 full_name=name,
                 designation=title,
                 company=co,
@@ -1646,6 +1772,9 @@ def _enrich_with_llm_leadership(
                 nlp_method=nlp_meth,
             )
             dag.insert_person(rec)
+            # Attach board sub-role for ExecPanel committee badge display
+            if sub_role and person_uid in dag.G:
+                dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
 
     # ── Guarantee BOD node always exists ─────────────────────────────────
     # BOD is only created when board members are found.  If web + LLM returned

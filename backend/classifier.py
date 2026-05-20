@@ -74,23 +74,66 @@ class TitleClassification:
 _LAYER_RULES: list[tuple[int, list[str]]] = [
 
     # G0 — Board / Non-Executive
+    # Reference: Global_Designation_Hierarchy.xlsx — "G0 — Board" rows
     (0, [
+        # ── Non-Executive / Independent Director patterns ──────────────────
         r"non[- ]?executive\s+director",
         r"independent\s+(?:non[- ]?executive\s+)?director",
         r"independent\s+non[- ]?executive",
-        r"supervisory\s+board",
-        r"board\s+of\s+(?:directors?|trustees?)",
-        r"board\s+(?:member|director|trustee)",
-        r"non[- ]?executive\s+chair(?:man|woman|person)?",
-        r"lead\s+independent\s+director",
+        r"\bined\b",                               # INED acronym
+        r"\bned\b",                                # NED acronym
         r"outside\s+director",
         r"external\s+director",
-        r"\bned\b",
-        r"^chairman$", r"^chairwoman$", r"^chairperson$", r"^chair$",
+        r"lead\s+independent\s+director",
+        r"senior\s+independent\s+director",        # common UK/European title
+        r"presiding\s+director",                   # US governance equivalent
+        # ── Supervisory / Governing Board ──────────────────────────────────
+        r"supervisory\s+board",
+        r"board\s+of\s+(?:directors?|trustees?|governors?|regents?)",
+        r"board\s+(?:member|director|trustee|governor|regent)",
+        # ── Trustee / Governor (Non-Profit / NGO / Public Sector) ──────────
+        r"\btrustee\b",
+        r"\bgovernor\b",
+        # ── Chairman / Chair variants (all forms, exec + non-exec) ─────────
+        # Broad match — in professional leadership data "chairman" = board chair
+        r"\bchairman\b",
+        r"\bchairwoman\b",
+        r"\bchairperson\b",
+        r"\bboard\s+chair\b",                      # "Board Chair" (no man/woman suffix)
+        r"\bchair\s+of\s+(?:the\s+)?board",        # "Chair of the Board"
+        r"^chair$",                                 # standalone "Chair"
+        r"non[- ]?executive\s+chair(?:man|woman|person)?",
+        # ── Board Committee Chairs (Global_Designation_Hierarchy.xlsx §Board Committees)
+        # Both "X Committee Chair" and "Chair of the X Committee" forms
+        r"audit\s+committee\s+chair(?:man|woman|person)?",
+        r"chair(?:man|woman|person)?\s+(?:of\s+(?:the\s+)?)?audit\s+committee",
+        r"compensation\s+committee\s+chair(?:man|woman|person)?",
+        r"remuneration\s+committee\s+chair(?:man|woman|person)?",
+        r"chair(?:man|woman|person)?\s+(?:of\s+(?:the\s+)?)?(?:compensation|remuneration)\s+committee",
+        r"nomination(?:s)?\s+(?:and\s+)?(?:governance\s+)?committee\s+chair(?:man|woman|person)?",
+        r"nominating\s+(?:and\s+)?(?:governance\s+)?committee\s+chair(?:man|woman|person)?",
+        r"governance\s+committee\s+chair(?:man|woman|person)?",
+        r"chair(?:man|woman|person)?\s+(?:of\s+(?:the\s+)?)?(?:nomination|nominating|governance)\s+committee",
+        r"risk\s+committee\s+chair(?:man|woman|person)?",
+        r"chair(?:man|woman|person)?\s+(?:of\s+(?:the\s+)?)?risk\s+committee",
+        r"technology\s+(?:and\s+innovation\s+)?committee\s+chair(?:man|woman|person)?",
+        r"innovation\s+committee\s+chair(?:man|woman|person)?",
+        r"safety\s+(?:and\s+)?(?:health\s+)?committee\s+chair(?:man|woman|person)?",
+        r"environment(?:al)?\s+(?:and\s+sustainability\s+)?committee\s+chair(?:man|woman|person)?",
+        r"sustainability\s+committee\s+chair(?:man|woman|person)?",
+        r"esg\s+committee\s+chair(?:man|woman|person)?",
+        r"public\s+policy\s+committee\s+chair(?:man|woman|person)?",
+        r"ethics\s+committee\s+chair(?:man|woman|person)?",
+        r"finance\s+committee\s+chair(?:man|woman|person)?",
+        r"investment\s+committee\s+chair(?:man|woman|person)?",
+        r"executive\s+committee\s+chair(?:man|woman|person)?",
     ]),
 
-    # G1 — C-Suite (CEO, CFO, CTO, COO, CMO, CHRO, CIO, CRO, CPO, CDO, CLO …)
+    # G1 — C-Suite
+    # Reference: Global_Designation_Hierarchy.xlsx — "G1 — C-Suite" rows
+    # All "Chief X Officer" patterns + key standalone titles + industry-specific
     (1, [
+        # ── Standard C-Suite (universal) ───────────────────────────────────
         r"\bchief\s+executive\b",               r"\bceo\b",
         r"\bchief\s+financial\b",               r"\bcfo\b",
         r"\bchief\s+(?:technology|technical)\b",r"\bcto\b",
@@ -98,11 +141,11 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bchief\s+marketing\b",               r"\bcmo\b",
         r"\bchief\s+(?:human\s+resources?|people|talent)\b", r"\bchro\b",
         r"\bchief\s+information\b",             r"\bcio\b",
-        r"\bchief\s+revenue\b",
+        r"\bchief\s+revenue\b",                 r"\bcro\b",
         r"\bchief\s+product\b",                 r"\bcpo\b",
         r"\bchief\s+data\b",                    r"\bcdo\b",
         r"\bchief\s+(?:legal|law)\b",           r"\bclo\b",
-        r"\bchief\s+risk\b",                    r"\bcro\b",
+        r"\bchief\s+risk\b",
         r"\bchief\s+commercial\b",
         r"\bchief\s+strategy\b",                r"\bcso\b",
         r"\bchief\s+(?:digital|transformation)\b",
@@ -113,8 +156,26 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bchief\s+(?:supply\s+chain|procurement|purchasing)\b",
         r"\bchief\s+(?:communications?|public\s+affairs)\b",
         r"\bchief\s+customer\b",
-        r"\bchief\s+science\b",                 r"\bcso\b",
-        # Founder / President / Managing Partner as standalone titles
+        r"\bchief\s+science\b",
+        # ── Additional C-Suite from Global_Designation_Hierarchy.xlsx ──────
+        r"\bchief\s+investment\b",              # CIO in Financial Markets (G1 per Excel)
+        r"\bchief\s+administrative\b",          # Chief Administrative Officer (CAO)
+        r"\bcao\b",                             # CAO acronym
+        r"\bchief\s+of\s+staff\b",             # Chief of Staff (COO-equivalent at large cos)
+        r"\bchief\s+(?:ai|artificial\s+intelligence)\b",  # Chief AI Officer
+        r"\bcaio\b",                            # CAIO
+        r"\bchief\s+experience\b",              r"\bcxo\b",   # Chief Experience Officer
+        r"\bchief\s+client\b",                  # Chief Client Officer (CCO — alt CCO)
+        r"\bchief\s+scientific\b",              # Chief Scientific Officer (Pharma/Biotech)
+        r"\bchief\s+medical\b",                 # Chief Medical Officer (Healthcare)
+        r"\bchief\s+nursing\b",                 # Chief Nursing Officer (Healthcare)
+        r"\bchief\s+pharmacy\b",                # Chief Pharmacy Officer (Healthcare)
+        r"\bchief\s+actuarial\b",               # Chief Actuarial Officer (Insurance)
+        r"\bchief\s+underwriting\b",            # Chief Underwriting Officer (Insurance)
+        r"\bchief\s+claims\b",                  # Chief Claims Officer (Insurance)
+        r"\bchief\s+accounting\b",              # Chief Accounting Officer
+        r"\bchief\s+audit\s+executive\b",       # Chief Audit Executive (large companies)
+        # ── Standalone apex titles ─────────────────────────────────────────
         r"^(?:co-?)?founder(?:\s*&\s*(?:co-?)?(?:ceo|cto|coo))?$",
         r"^(?:group\s+)?president$",
         r"^owner$",
@@ -215,12 +276,17 @@ _FINANCIAL_LAYER_RULES: list[tuple[int, list[str]]] = [
         r"supervisory\s+board", r"board\s+(?:member|director|trustee)",
         r"\bned\b", r"^chair(?:man|woman|person)?$",
     ]),
-    # G1 — CEO / President / Group Head
+    # G1 — CEO / Group Head / C-Suite in Financial Markets context
+    # Reference: Global_Designation_Hierarchy.xlsx — "Financial Markets" sheet G1 rows
     (1, [
         r"\bchief\s+executive\b", r"\bceo\b", r"^(?:group\s+)?president$",
         r"\bchief\s+financial\b", r"\bcfo\b",
         r"\bchief\s+(?:operating|technology|risk|legal|compliance|commercial)\b",
         r"\bcoo\b", r"\bcto\b", r"\bcro\b",
+        # Chief Investment Officer (G1 in Financial Markets per Excel)
+        r"\bchief\s+investment\b",
+        r"\bcio\b",                             # CIO = Chief Investment Officer in finance
+        r"\bchief\s+administrative\b",          # CAO
         r"^(?:co-?)?founder$",
     ]),
     # G2 — Global Head / Senior Managing Director / Senior Partner

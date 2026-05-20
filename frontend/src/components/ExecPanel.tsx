@@ -22,10 +22,29 @@ const LAYER_LABELS: Record<number, string> = {
   10: 'Analyst / Specialist',    // G10 — Analyst, Specialist, Associate, IC
 }
 
-// Board of Management card uses its own hierarchy labels
+// Board of Management card — 3-layer hierarchy per Global_Designation_Hierarchy.xlsx
+// G0: Chairman (apex) | G1: Vice Chair / Committee Chairs | G2: NEDs / INEDs
 const BOD_LAYER_LABELS: Record<number, string> = {
   0: 'Chairman',
-  1: 'Director',
+  1: 'Committee Chair',
+  2: 'Non-Executive Director',
+}
+
+// Human-readable labels for board sub-roles (stored in node metadata.board_sub_role)
+function getBoardRoleLabel(role: string): string {
+  const MAP: Record<string, string> = {
+    vice_chair:     'Vice Chair',
+    lead_director:  'Lead Director',
+    audit_chair:    'Audit Committee',
+    comp_chair:     'Comp & Rem',
+    nom_chair:      'Nom & Gov',
+    risk_chair:     'Risk Committee',
+    tech_chair:     'Tech & Innovation',
+    esg_chair:      'ESG / Sustainability',
+    finance_chair:  'Finance Committee',
+    committee_chair:'Committee Chair',
+  }
+  return MAP[role] ?? ''
 }
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -118,12 +137,48 @@ function buildLayerTree(sorted: OrgNode[]): ExecTreeNode[] {
   return roots
 }
 
+// BOD-specific tree builder.
+// Per Global_Designation_Hierarchy.xlsx:
+//   layer 0: Chairman (sole apex)
+//   layer 1: Vice Chair + Committee Chairs (senior board roles)
+//   layer 2: Regular NEDs / INEDs
+// All non-Chairman directors are shown as FLAT direct reports of the Chairman
+// (they all report to the Chairman per the Excel — not to each other).
+// Directors are sorted: layer 1 (Committee Chairs/Vice Chair) first, then layer 2 (NEDs).
+function buildBODTree(sorted: OrgNode[]): ExecTreeNode[] {
+  if (!sorted.length) return []
+
+  const chairmen = sorted.filter(p => (p.layer ?? 99) === 0)
+  const others   = sorted
+    .filter(p => (p.layer ?? 99) !== 0)
+    .sort((a, b) => {
+      const la = a.layer ?? 99; const lb = b.layer ?? 99
+      return la !== lb ? la - lb : a.label.localeCompare(b.label)
+    })
+
+  if (!chairmen.length) {
+    // No Chairman detected — show all directors flat
+    return sorted.map((p, i) => ({ person: p, reports: [], isLast: i === sorted.length - 1 }))
+  }
+
+  // All other directors as flat direct reports of the Chairman
+  const reportNodes = others.map((p, i) => ({
+    person: p, reports: [], isLast: i === others.length - 1,
+  }))
+
+  // When there are multiple co-chairs (rare), first gets all reports
+  return chairmen.map((p, i) => ({
+    person: p,
+    reports: i === 0 ? reportNodes : [],
+    isLast: i === chairmen.length - 1,
+  }))
+}
+
 // Main tree builder.
-// Executive Management: CEO is promoted to single root; all other C-Suite
-// at the same layer become CEO's direct reports; deeper layers (EVP→SVP→VP…)
-// cascade under their C-Suite parent via buildLayerTree.
-// All other depts (incl. BOD): standard layer-group tree.
-function buildExecTree(people: OrgNode[], isEM: boolean = false): ExecTreeNode[] {
+// BOD: Chairman at apex, all other directors flat below (buildBODTree).
+// EM:  CEO promoted to single root; all other C-Suite as direct reports.
+// Other depts: standard layer-group tree (buildLayerTree).
+function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean = false): ExecTreeNode[] {
   if (!people.length) return []
 
   const sorted = [...people].sort((a, b) => {
@@ -131,6 +186,9 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false): ExecTreeNode[]
     const lb = b.layer ?? 99
     return la !== lb ? la - lb : a.label.localeCompare(b.label)
   })
+
+  // BOD: special flat-under-chairman tree
+  if (isBOD) return buildBODTree(sorted)
 
   if (!isEM) return buildLayerTree(sorted)
 
@@ -254,6 +312,23 @@ const PersonRow: React.FC<{
               {String(p.metadata.designation).slice(0, 36)}
             </div>
           )}
+          {/* Committee / sub-role badge — shown for board members with a specific role */}
+          {(() => {
+            const subRole = p.metadata?.board_sub_role as string | undefined
+            if (!subRole || subRole === 'director' || subRole === 'chairman') return null
+            const roleLabel = getBoardRoleLabel(subRole)
+            if (!roleLabel) return null
+            return (
+              <div style={{
+                display: 'inline-block', marginTop: 2,
+                fontSize: 8, color: '#f59e0b',
+                background: '#1c1500', borderRadius: 3,
+                padding: '1px 5px', border: '1px solid #3d2900',
+              }}>
+                {roleLabel}
+              </div>
+            )
+          })()}
           {/* Footer: region + location + linkedin + pay + source */}
           <div style={{ display: 'flex', gap: 7, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {p.metadata?.region && (
@@ -358,7 +433,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
   const isEM    = deptNode?.node_id === 'dept__executive_management'
   const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
 
-  const tree = executives ? buildExecTree(executives, isEM) : []
+  const tree = executives ? buildExecTree(executives, isEM, isBoard) : []
 
   // Layer distribution summary
   const byLayer: Record<number, number> = {}
