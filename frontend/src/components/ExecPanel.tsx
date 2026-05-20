@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import type { OrgNode } from '../types'
 
 interface Props {
@@ -440,13 +440,44 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
       return next
     })
 
+  // Region sub-card collapse state (all expanded by default)
+  const [collapsedRegions, setCollapsedRegions] = useState<Set<string>>(new Set())
+  const toggleRegion = (region: string) =>
+    setCollapsedRegions(prev => {
+      const next = new Set(prev)
+      if (next.has(region)) next.delete(region); else next.add(region)
+      return next
+    })
+
   const isBoard = deptNode?.node_id === 'dept__board_of_management'
   const isEM    = deptNode?.node_id === 'dept__executive_management'
   const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
 
-  const tree = executives ? buildExecTree(executives, isEM, isBoard) : []
+  // ── Geographic grouping ──────────────────────────────────────────────
+  // Group executives by their region metadata.
+  // Primary region = region of the most-senior person (lowest layer number);
+  // that region gets the full hierarchy tree (Chairman / CEO at apex).
+  // All other regions get a local layer tree (regional head at apex).
+  const regionGroups = useMemo<[string, OrgNode[]][]>(() => {
+    if (!executives || executives.length === 0) return []
+    const map = new Map<string, OrgNode[]>()
+    for (const p of executives) {
+      const r = ((p.metadata?.region as string) || '').trim() || 'Global HQ'
+      if (!map.has(r)) map.set(r, [])
+      map.get(r)!.push(p)
+    }
+    // Determine primary region from the apex person
+    const apex = [...executives].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
+    const primary = ((apex?.metadata?.region as string) || '').trim() || 'Global HQ'
+    // Sort: primary first, then by headcount descending
+    return [...map.entries()].sort(([ra, a], [rb, b]) => {
+      if (ra === primary) return -1
+      if (rb === primary) return 1
+      return b.length - a.length
+    })
+  }, [executives])
 
-  // Layer distribution summary
+  // Layer distribution summary (header)
   const byLayer: Record<number, number> = {}
   if (executives) {
     for (const p of executives) {
@@ -516,7 +547,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
           <span>▼ collapse</span>
           <span>▶ expand</span>
           <span style={{ marginLeft: 'auto' }}>
-            {tree.length} top-level · {executives.length} total
+            {regionGroups.length} region{regionGroups.length !== 1 ? 's' : ''} · {executives?.length ?? 0} total
           </span>
         </div>
       )}
@@ -544,19 +575,62 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
           </div>
         )}
 
-        {/* Hierarchical tree */}
-        {tree.map((root, ri) => (
-          <PersonRow
-            key={root.person.node_id}
-            node={root}
-            depth={0}
-            isLast={ri === tree.length - 1}
-            parentLines={[]}
-            color={color}
-            onToggle={toggleCollapse}
-            collapsed={collapsed}
-          />
-        ))}
+        {/* ── Geographic sub-cards ─────────────────────────────── */}
+        {regionGroups.map(([region, regionExecs], gi) => {
+          // Primary region uses the full hierarchy builder (Chairman / CEO apex).
+          // Non-primary regions use a local layer tree (regional head at apex).
+          const isPrimary    = gi === 0
+          const regionTree   = buildExecTree(regionExecs, isEM && isPrimary, isBoard)
+          const isRgnCollapsed = collapsedRegions.has(region)
+
+          return (
+            <div key={region}>
+              {/* Region sub-card header */}
+              <div
+                onClick={() => toggleRegion(region)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '6px 14px 6px 11px',
+                  background: '#050c14',
+                  borderTop:   gi === 0 ? 'none' : '1px solid #080f18',
+                  borderBottom: isRgnCollapsed ? 'none' : '1px solid #080f18',
+                  borderLeft:  `3px solid ${color}${isPrimary ? '55' : '25'}`,
+                  cursor: 'pointer', userSelect: 'none',
+                }}
+              >
+                <span style={{ fontSize: 8.5, color: color + (isPrimary ? '99' : '55') }}>🌐</span>
+                <span style={{
+                  fontSize: 8.5, fontWeight: 700, letterSpacing: 1.1,
+                  textTransform: 'uppercase',
+                  color: isPrimary ? '#2a5878' : '#1a3a52',
+                  flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {region}
+                </span>
+                <span style={{ fontSize: 8, color: '#122a3d', flexShrink: 0 }}>
+                  {regionExecs.length} {regionExecs.length === 1 ? 'exec' : 'execs'}
+                </span>
+                <span style={{ fontSize: 7.5, color: '#1a3045', marginLeft: 6, flexShrink: 0 }}>
+                  {isRgnCollapsed ? '▸' : '▾'}
+                </span>
+              </div>
+
+              {/* People tree for this region */}
+              {!isRgnCollapsed && regionTree.map((root, ri) => (
+                <PersonRow
+                  key={root.person.node_id}
+                  node={root}
+                  depth={0}
+                  isLast={ri === regionTree.length - 1}
+                  parentLines={[]}
+                  color={color}
+                  onToggle={toggleCollapse}
+                  collapsed={collapsed}
+                />
+              ))}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
