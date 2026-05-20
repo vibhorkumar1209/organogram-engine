@@ -77,20 +77,31 @@ interface ExecTreeNode {
 }
 
 // Detect the GLOBAL CEO / Group President as the apex of EM.
-// Excludes: co-/deputy/vice CEO; regional CEOs (EMEA, APAC…);
-//           plain "Managing Director" (EVP-equivalent, not group CEO).
+// Excludes: co-/deputy/vice CEO; regional/country CEOs; plain MD (EVP, not group CEO).
 function isCeoTitle(person: OrgNode): boolean {
   const d = ((person.metadata?.designation as string) ?? '').toLowerCase()
   const text = d || person.label.toLowerCase()
+
   // Exclude co-/deputy/vice/assistant qualifiers
   if (/\b(co-?|deputy|vice|assistant|associate)\b/.test(text)) return false
-  // Exclude regional / divisional scope (these are NOT the global CEO)
-  if (/\b(emea|apac|asia|pacific|europe|america|africa|middle\s+east|regional|divisional|country|international)\b/.test(text)) return false
+
+  // Exclude regional / country / divisional scope — NOT the global CEO.
+  // Covers major geographies and common regional abbreviations.
+  if (/\b(emea|apac|apj|latam|mena|asean|gcc|anz|asia|pacific|europe|america|americas|africa|middle\s+east|regional|divisional|country|international|australia|new\s+zealand|india|china|japan|south\s+korea|uk|u\.k\.|germany|france|italy|spain|canada|brazil|singapore|hong\s+kong|south\s+east\s+asia|southeast\s+asia)\b/.test(text)) return false
+
+  // Exclude "[non-global word] CEO" patterns — e.g. "australia ceo", "uk ceo".
+  // Allowed global prefixes: group, global, interim, acting, incoming.
+  const m = text.match(/(\w+)\s+ceo\b/)
+  if (m && m[1]) {
+    const globalPfx = new Set(['group', 'global', 'chief', 'interim', 'acting', 'incoming', 'the'])
+    if (!globalPfx.has(m[1])) return false
+  }
+
   return (
-    /\bchief\s+executive\b/.test(text) ||           // Chief Executive Officer, CEO
-    /\bceo\b/.test(text) ||
+    /\bchief\s+executive\b/.test(text) ||           // Chief Executive Officer / Chief Executive
+    /\bceo\b/.test(text) ||                          // CEO / Group CEO
     /^(?:group\s+)?president$/.test(text) ||         // President or Group President (exact)
-    /^group\s+(?:chief\s+executive|managing\s+director)$/.test(text)  // Group CEO / Group MD only
+    /^group\s+(?:chief\s+executive|managing\s+director)$/.test(text)  // Group MD only
   )
 }
 

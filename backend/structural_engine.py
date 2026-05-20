@@ -988,11 +988,39 @@ class OrganogramDAG:
 
     # ─── Insert person with ghost-node bridging ─
     def insert_person(self, rec: ClassifiedRecord):
-        # Enforce canonical department names and layer-based overrides
-        # (Board L0 → "Board of Management", C-Suite L1-2 → "Executive Management")
+        # ── Step 1: Initial canonical dept using NLP layer ───────────────
         dept_p = _canonical_dept(rec.dept_primary, rec.layer)
-        dept_s = _canonical_subdept(rec.dept_secondary if rec.layer > 2 else "")
-        dept_t = rec.dept_tertiary  if rec.layer > 2 else ""
+
+        # ── Step 2: BOD 3-layer re-classification ────────────────────────
+        # When CSV data is uploaded, the NLP classifier assigns G0 (layer 0)
+        # to ALL board members — regular NEDs, committee chairs, and the
+        # chairman alike.  Apply the 3-tier BOD hierarchy from
+        # Global_Designation_Hierarchy.xlsx so ExecPanel renders correctly:
+        #   layer 0 → Chairman (board apex)
+        #   layer 1 → Vice Chair / Committee Chairs (senior board roles)
+        #   layer 2 → Regular NEDs / INEDs
+        # Also: an executive who is also a board member (executive director)
+        # should remain in Executive Management, not Board of Management.
+        layer = rec.layer
+        board_sub = ""
+        if dept_p == "Board of Management":
+            designation = rec.designation or ""
+            if _is_ceo(designation) and not _is_board_chairman(designation):
+                # Executive director who is also CEO → Executive Management
+                dept_p = "Executive Management"
+                layer  = 1
+            elif _is_board_chairman(designation):
+                layer     = 0
+                board_sub = _board_sub_role(designation)
+            elif _is_vice_chair(designation) or _is_committee_chair(designation):
+                layer     = 1
+                board_sub = _board_sub_role(designation)
+            else:
+                layer     = 2   # Regular NED / INED
+                board_sub = _board_sub_role(designation)
+
+        dept_s = _canonical_subdept(rec.dept_secondary if layer > 2 else "")
+        dept_t = rec.dept_tertiary  if layer > 2 else ""
         # If sub-dept remapped to "" (merge into parent) treat as no sub-dept
         if not dept_s:
             dept_t = ""
@@ -1000,7 +1028,7 @@ class OrganogramDAG:
         # ── Elevate compound dept names to correct (primary, secondary) ──
         # e.g. dept_p="Customer Experience" → dept_p="Marketing", dept_s="Customer Experience"
         #      dept_p="Sales & Account Management" → dept_p="Sales", dept_s="Account Management"
-        if rec.layer > 2 and not dept_s:
+        if layer > 2 and not dept_s:
             elevate_key = dept_p.lower()
             if elevate_key in _DEPT_ELEVATE:
                 dept_p, dept_s = _DEPT_ELEVATE[elevate_key]
@@ -1011,31 +1039,40 @@ class OrganogramDAG:
         )
 
         person_id = rec.id
+        metadata: dict = {
+            "designation":    rec.designation,
+            "company":        rec.company,
+            "linkedin_url":   rec.linkedin_url,
+            "location":       rec.location,
+            "region":         getattr(rec, "region", "") or "",
+            "dept_primary":   dept_p,
+            "dept_secondary": dept_s,
+            "nlp_confidence": round(getattr(rec, "nlp_confidence", 0.0), 2),
+            "nlp_industry":   getattr(rec, "nlp_industry", "generic"),
+            "nlp_method":     getattr(rec, "nlp_method", "fallback"),
+        }
+        if board_sub:
+            metadata["board_sub_role"] = board_sub
+
         self._ensure_node(person_id, **{
             "node_id":    person_id,
             "node_type":  NODE_PERSON,
             "label":      rec.full_name,
-            "layer":      rec.layer,
+            "layer":      layer,          # ← re-classified BOD layer
             "sector":     rec.sector,
             "color":      SECTOR_COLORS.get(rec.sector, "#64748B"),
             "is_ghost":   False,
             "expanded":   False,
-            "metadata": {
-                "designation":    rec.designation,
-                "company":        rec.company,
-                "linkedin_url":   rec.linkedin_url,
-                "location":       rec.location,
-                "region":         getattr(rec, "region", "") or "",
-                "dept_primary":   dept_p,
-                "dept_secondary": dept_s,
-                "nlp_confidence": round(getattr(rec, "nlp_confidence", 0.0), 2),
-                "nlp_industry":   getattr(rec, "nlp_industry", "generic"),
-                "nlp_method":     getattr(rec, "nlp_method", "fallback"),
-            },
+            "metadata":   metadata,
         })
 
-        # Build ghost chain from layer 4 → rec.layer
+        # Build ghost chain using the re-classified layer.
+        # Temporarily override rec.layer so _insert_with_ghosts uses the
+        # correct layer for ghost chain depth calculation.
+        _orig_layer = rec.layer
+        rec.layer   = layer
         self._insert_with_ghosts(leaf_dept_id, person_id, rec)
+        rec.layer   = _orig_layer
 
     def _real_person_at_layer(self, parent_id: str, target_layer: int) -> Optional[str]:
         """
@@ -1426,21 +1463,38 @@ def _name_key(name: str) -> str:
     return " ".join(words[:2])
 
 
+# Regional/country chair qualifier — prevents "U.S. Chairman", "Asia Chairman",
+# "Australia Chair" from being treated as THE board chairman.
+_REGIONAL_CHAIR_RE = re.compile(
+    r'\b(?:u\.?s\.?a?|uk|u\.k\.|emea|apac|apj|latam|mena|asean|gcc|'
+    r'asia|europe|america|americas|africa|pacific|oceania|'
+    r'australia|new\s+zealand|india|china|japan|south\s+korea|'
+    r'canada|brazil|germany|france|italy|spain|mexico|'
+    r'singapore|hong\s+kong|south\s+east\s+asia|anz|'
+    r'regional|country|local|subsidiary|advisory)\s+'
+    r'chair(?:man|woman|person)?',
+    re.IGNORECASE,
+)
+
+
 def _is_board_chairman(title: str) -> bool:
     """
     Return True when *title* is the Chair/Chairman of the board (apex, layer 0).
     Per Global_Designation_Hierarchy.xlsx: Chairman, Non-Executive Chairman,
     Board Chair, Executive Chairman are all the board apex.
-    Excludes: Vice-Chair, Deputy Chair, Committee Chairs (they are layer 1 directors).
+    Excludes: Vice-Chair, Deputy Chair, Committee Chairs, regional/country Chairs.
     """
     t = title.lower().strip()
-    # Exclude vice/deputy chair and committee chairs
-    if any(exc in t for exc in ("vice", "deputy")):
+    # Exclude vice/deputy/assistant chair and committee chairs
+    if re.search(r'\b(vice|deputy|assistant)\b', t):
         return False
     if "committee" in t:
         return False   # "Audit Committee Chairman" → director, not THE chairman
-    # Broad chairman match — covers Executive Chairman, Non-Exec Chairman, etc.
-    if "chairman" in t or "chairwoman" in t or "chairperson" in t:
+    # Exclude regional/country chairman ("U.S. Chairman", "Asia Chair", etc.)
+    if _REGIONAL_CHAIR_RE.search(t):
+        return False
+    # Board chairman — covers Executive Chairman, Non-Exec Chairman, etc.
+    if re.search(r'\bchairman\b|\bchairwoman\b|\bchairperson\b', t):
         return True
     # "Board Chair", "Chair of the Board", "Executive Chair" (no -man/-woman suffix)
     if re.search(r"\bboard\s+chair\b", t):
