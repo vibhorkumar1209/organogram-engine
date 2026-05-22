@@ -889,8 +889,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     Scraping priority:
       1. Jina Reader (r.jina.ai) — JS-rendered pages, clean markdown.
          Activated when JINA_API_KEY is set.  Best for React/Next.js sites.
-      2. Raw HTTP (httpx + BeautifulSoup) — fallback when Jina unavailable.
-      3. LLM training-data knowledge — final fallback when web yields nothing.
+      2. Raw HTTP (httpx) — fallback when Jina unavailable or returns nothing.
+      Web-only: no AI training-knowledge fallback.
 
     Search augmentation:
       - With JINA_API_KEY: Jina Search (s.jina.ai) — full rendered snippets.
@@ -975,18 +975,13 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info(
-            "Web+search+wiki context returned no leaders for '%s' — "
-            "falling back to LLM knowledge", company_name
+            "Web+search+wiki context returned no leaders for '%s'", company_name
         )
 
-    # ── Step 5: LLM knowledge fallback ───────────────────────────────────────
-    logger.info("Using LLM knowledge for '%s' leadership", company_name)
-    result = _call_claude(
-        system=_SYSTEM_FROM_KNOWLEDGE,
-        user_msg=f"Company: {company_name}",
-        label=f"{company_name} [knowledge]",
-    )
-    result["_source"] = "ai"
+    # ── Step 5: Web-only — no AI knowledge fallback ──────────────────────────
+    # User requirement: results from web pages only, not LLM training knowledge.
+    logger.info("Web sources found no leaders for '%s' — returning empty", company_name)
+    result: dict = {"board": [], "executives": [], "_source": "web"}
     _LEADERSHIP_CACHE[cache_key] = result
     return result
 

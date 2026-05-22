@@ -203,14 +203,22 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
 
   if (!isEM) return buildLayerTree(sorted)
 
-  // EM: CEO at top, C-Suite peers as direct reports, deeper layers cascade
+  // EM: CEO at top, C-Suite peers as direct reports, deeper layers cascade.
   const topLayer = sorted[0]?.layer ?? 99
   const topGroup = sorted.filter(p => (p.layer ?? 99) === topLayer)
   const deeper   = sorted.filter(p => (p.layer ?? 99) !== topLayer)
   const ceoIdx   = topGroup.findIndex(p => isCeoTitle(p))
 
-  // No identifiable CEO or only one person at top — fall back to standard tree
-  if (ceoIdx < 0 || topGroup.length <= 1) return buildLayerTree(sorted)
+  // Only one person at top → standard layer tree (they're the natural apex)
+  if (topGroup.length <= 1) return buildLayerTree(sorted)
+
+  // No identifiable global CEO → flat list; avoids falsely nesting C-Suite
+  // under whoever happens to sort first (e.g. a regional head or COO).
+  if (ceoIdx < 0) {
+    return sorted.map((p, i) => ({
+      person: p, reports: [], isLast: i === sorted.length - 1,
+    }))
+  }
 
   const ceo   = topGroup[ceoIdx]
   const peers = topGroup.filter((_, i) => i !== ceoIdx)

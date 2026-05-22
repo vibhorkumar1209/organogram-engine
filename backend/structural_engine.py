@@ -1003,12 +1003,19 @@ class OrganogramDAG:
         # should remain in Executive Management, not Board of Management.
         layer = rec.layer
         board_sub = ""
+        designation = rec.designation or ""
+
+        # ── Regional exec demotion (CSV path) ────────────────────────────
+        # When NLP classifies "Australia CEO" as G1 (layer 1), keep them in
+        # Executive Management but at layer 2 so they don't hijack the apex.
+        if dept_p == "Executive Management" and layer == 1 and _is_regional_exec(designation):
+            layer = 2
+
         if dept_p == "Board of Management":
-            designation = rec.designation or ""
             if _is_ceo(designation) and not _is_board_chairman(designation):
                 # Executive director who is also CEO → Executive Management
                 dept_p = "Executive Management"
-                layer  = 1
+                layer  = 2 if _is_regional_exec(designation) else 1
             elif _is_board_chairman(designation):
                 layer     = 0
                 board_sub = _board_sub_role(designation)
@@ -1596,6 +1603,55 @@ def _is_ceo(title: str) -> bool:
            bool(re.search(r"^(?:group\s+)?managing\s+director$", t))
 
 
+# Geographic terms that signal a regional/country scope in an exec title.
+# Used by _is_regional_exec to distinguish "Australia CEO" (L2) from
+# "CEO" (L1 global apex).
+_REGIONAL_GEO_RE = re.compile(
+    r"\b(?:u\.?s\.?a?|uk|u\.k\.|emea|apac|apj|latam|mena|asean|gcc|anz|"
+    r"asia(?:[- ]pacific)?|europe(?:an)?|america[ns]?|africa[n]?|pacific|"
+    r"oceania|australia[n]?|new\s+zealand|india[n]?|china|japan(?:ese)?|"
+    r"south\s+korea[n]?|canada(?:ian)?|brazil(?:ian)?|"
+    r"germany|german|france|french|italy|italian|spain|spanish|mexico|"
+    r"singapore|hong\s+kong|greater\s+china|"
+    r"south(?:east|ern)?\s+asia|middle\s+east(?:\s+and\s+africa)?|"
+    r"regional|country|local)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_regional_exec(title: str) -> bool:
+    """
+    Return True when *title* is a regional/country leadership role —
+    e.g. "CEO, Australia", "Head of EMEA", "Australia CEO",
+    "Managing Director, Singapore", "President APAC".
+
+    Regional executives sit at layer 2 in Executive Management so they do
+    not compete with the global CEO for the apex position in the org chart.
+    Layer 2 regional heads appear beneath the global C-Suite in the EM tree.
+    """
+    t = title.lower().strip()
+
+    # Must have a geographic qualifier to be regional at all
+    if not _REGIONAL_GEO_RE.search(t):
+        return False
+
+    # "Group CEO", "Global CEO", "Global Chief Executive" are the global apex —
+    # never treat them as regional even though they may mention geographies
+    if re.search(r"\b(group|global)\s+(?:ceo|chief\s+executive|president|managing)", t):
+        return False
+
+    # Require a senior role keyword alongside the geographic term
+    if re.search(r"\b(ceo|chief\s+executive|president|managing\s+director)\b", t):
+        return True
+
+    # "Head of [region]" pattern — match when geographic term follows "head of"
+    m = re.search(r"\bhead\s+of\s+(.+)", t)
+    if m and _REGIONAL_GEO_RE.search(m.group(1)):
+        return True
+
+    return False
+
+
 def _inject_knowledge_leadership(
     dag: OrganogramDAG,
     company_name: str,
@@ -1646,7 +1702,8 @@ def _inject_knowledge_leadership(
     # layer 0: Chairman / Board Chair (sole apex)
     # layer 1: Vice Chair + Committee Chairs (senior board roles)
     # layer 2: Regular NEDs / INEDs
-    # ── EM: CEO promoted by ExecPanel frontend; all C-Suite at layer 1 ───
+    # ── EM: CEO at layer 1 (frontend promotes to apex); global C-Suite at
+    #        layer 1; regional/country heads at layer 2 (beneath C-Suite) ─
     injections: list[tuple[int, str, str, str, str]] = []  # (layer, name, title, dept, sub_role)
     for p in leadership.get("board", []):
         title = p["title"]
@@ -1659,7 +1716,11 @@ def _inject_knowledge_leadership(
         sub_role = _board_sub_role(title)
         injections.append((layer, p["name"], title, "Board of Management", sub_role))
     for p in leadership.get("executives", []):
-        injections.append((1, p["name"], p["title"], "Executive Management", ""))
+        title = p["title"]
+        # Regional/country heads (e.g. "CEO Australia", "Head of EMEA") sit at
+        # layer 2 so they appear beneath global C-Suite, not at the same level.
+        em_layer = 2 if _is_regional_exec(title) else 1
+        injections.append((em_layer, p["name"], title, "Executive Management", ""))
 
     for layer, name, title, dept_primary, sub_role in injections:
         key = _name_key(name)
@@ -1768,7 +1829,8 @@ def _enrich_with_llm_leadership(
         # layer 0: Chairman (apex)
         # layer 1: Vice Chair + Committee Chairs (senior board roles)
         # layer 2: Regular NEDs / INEDs
-        # ── EM: all C-Suite at layer 1; CEO promoted by frontend ────────
+        # ── EM: global C-Suite at layer 1 (CEO promoted by frontend);
+        #        regional/country heads at layer 2 ────────────────────────
         injections: list[tuple[int, str, str, str, str]] = []
         for person in leadership.get("board", []):
             title = person["title"]
@@ -1781,7 +1843,9 @@ def _enrich_with_llm_leadership(
             sub_role = _board_sub_role(title)
             injections.append((layer, person["name"], title, "Board of Management", sub_role))
         for person in leadership.get("executives", []):
-            injections.append((1, person["name"], person["title"], "Executive Management", ""))
+            title = person["title"]
+            em_layer = 2 if _is_regional_exec(title) else 1
+            injections.append((em_layer, person["name"], title, "Executive Management", ""))
 
         from inference_logic import ClassifiedRecord
         for layer, name, title, dept_primary, sub_role in injections:
