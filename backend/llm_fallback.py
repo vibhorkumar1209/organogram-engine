@@ -300,11 +300,29 @@ _LEADERSHIP_PATHS = [
     "/company/leadership",
     "/company/management",
     "/company/board-of-directors",
+    # International / global company URL patterns
     "/en/about/leadership",
     "/en/about-us/leadership",
     "/en/who-we-are/leadership",
+    "/en/about/governance",
     "/global/about/leadership",
     "/global/governance/board-of-directors",
+    "/global/en/about/leadership",
+    "/global/en/about/governance",           # Deloitte
+    "/global/en/about/leadership.html",
+    "/global/en/about/governance.html",
+    "/gx/en/about/leadership",               # PwC global
+    "/gx/en/about/governance",
+    "/us/en/about/leadership",
+    "/uk/en/about/leadership",
+    "/worldwide/about/leadership",
+    "/pages/about/leadership",
+    "/pages/about-deloitte/articles/global-leadership",
+    "/about/our-firm/leadership",
+    "/about/firm-leadership",
+    "/our-firm/leadership",
+    "/our-company/leadership",
+    "/our-company/board-of-directors",
     "/press-room/bios",
     "/media/bios",
 ]
@@ -871,6 +889,96 @@ def _jina_search_snippets(company_name: str, jina_key: str) -> str:
     return result
 
 
+# URL pattern matching leadership-type pages in search results
+_LEADERSHIP_URL_RE = re.compile(
+    r'https?://[^\s\)\"\'<>\]\[]+(?:'
+    r'leadership|board[-_]?of[-_]?directors?|executive[-_]?(?:team|committee|management)'
+    r'|governance|about(?:[-_]us)?|management[-_]?team|our[-_]?(?:people|leaders?|team)'
+    r'|who[-_]we[-_]are|our[-_]firm|operating[-_]committee|supervisory[-_]board'
+    r')[^\s\)\"\'<>\]\[]*',
+    re.IGNORECASE,
+)
+
+
+def _jina_search_and_fetch(company_name: str, domain: str, jina_key: str) -> str:
+    """
+    Discover the company's actual leadership page URLs via Jina Search,
+    then fetch those pages via Jina Reader for full JS-rendered content.
+
+    Solves the case where _LEADERSHIP_PATHS doesn't match the company's URL
+    structure (e.g. Deloitte's /global/en/about/governance.html, PwC's
+    /gx/en/about/leadership.html).
+
+    Returns concatenated markdown from found pages (≤ 3 pages), or "".
+    """
+    if not jina_key:
+        return ""
+
+    try:
+        import httpx
+        from urllib.parse import quote
+    except ImportError:
+        return ""
+
+    domain_filter = f" site:{domain}" if domain else ""
+    queries = [
+        f"{company_name} board of directors governance leadership page{domain_filter}",
+        f"{company_name} executive management team leadership{domain_filter}",
+    ]
+
+    found_urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    for query in queries:
+        try:
+            resp = httpx.get(
+                f"https://s.jina.ai/{quote(query)}",
+                headers={
+                    "Authorization":   f"Bearer {jina_key}",
+                    "Accept":          "text/plain",
+                    "X-Return-Format": "text",
+                },
+                timeout=_JINA_SEARCH_TIMEOUT,
+            )
+            if resp.status_code != 200:
+                continue
+            text = resp.text
+            for url in _LEADERSHIP_URL_RE.findall(text):
+                url = url.rstrip(".,;)")
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                # Prioritise URLs from the company's own domain
+                if domain and domain in url:
+                    found_urls.insert(0, url)
+                else:
+                    found_urls.append(url)
+        except Exception as exc:
+            logger.debug("Jina search-and-fetch query failed: %s", exc)
+
+    if not found_urls:
+        logger.debug("Jina search-and-fetch: no leadership URLs found for '%s'", company_name)
+        return ""
+
+    logger.info("Jina search-and-fetch: %d candidate URLs for '%s'", len(found_urls), company_name)
+    collected: list[str] = []
+    for url in found_urls[:6]:
+        if len(collected) >= 3:
+            break
+        text = _jina_fetch_page(url, jina_key)
+        if not text:
+            continue
+        lower = text.lower()
+        if any(kw in lower for kw in [
+            "director", "chairman", "chief", "ceo", "president",
+            "officer", "executive", "board", "governance", "management",
+        ]):
+            collected.append(f"[Page: {url}]\n{text}")
+            logger.info("Jina search-found page: %s (%d chars)", url, len(text))
+
+    return "\n\n---\n\n".join(collected)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CACHE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -886,16 +994,14 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     """
     Fetch Board of Directors and Executive Management for a company.
 
-    Scraping priority:
-      1. Jina Reader (r.jina.ai) — JS-rendered pages, clean markdown.
-         Activated when JINA_API_KEY is set.  Best for React/Next.js sites.
-      2. Raw HTTP (httpx) — fallback when Jina unavailable or returns nothing.
-      Web-only: no AI training-knowledge fallback.
-
-    Search augmentation:
-      - With JINA_API_KEY: Jina Search (s.jina.ai) — full rendered snippets.
-      - Without:           DuckDuckGo HTML/Lite snippets.
-      - Always:            Wikipedia static-HTML extraction.
+    Scraping priority (web-only, no AI knowledge fallback):
+      1a. Jina Reader — path-based (known _LEADERSHIP_PATHS, JS-rendered).
+      1b. Jina Search-and-Fetch — discovers actual leadership page URLs via
+          search, then fetches them via Jina Reader. Handles companies whose
+          URL doesn't match known paths (Deloitte, PwC, McKinsey, etc.).
+      1c. Raw HTTP — httpx direct fetch, static-HTML sites only.
+      2.  Search snippets: Jina Search text → DuckDuckGo fallback.
+      3.  Wikipedia static-HTML extraction (always, good for public companies).
 
     Results are cached in-process (keyed on company_name + domain).
 
@@ -919,18 +1025,24 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 1: Website scraping ─────────────────────────────────────────────
-    # Jina Reader (primary, JS-rendered) → raw HTTP (fallback)
+    # ── Step 1a: Jina Reader — path-based (known URL patterns) ──────────────
+    web_text = ""
     if jina_key and domain:
         web_text = _jina_fetch_leadership(domain, jina_key)
-        if not web_text:
-            # Jina found nothing useful — try raw HTTP as fallback
-            logger.info("Jina found no pages for %s — falling back to raw HTTP", domain)
-            web_text = _fetch_leadership_text(domain)
-    elif domain:
+        logger.info("Step 1a Jina path-based for '%s': %d chars", domain, len(web_text))
+
+    # ── Step 1b: Jina Search-and-Fetch — discover actual leadership URLs ─────
+    # Handles companies whose URL structure doesn't match _LEADERSHIP_PATHS
+    # (e.g. Deloitte /global/en/about/governance.html, PwC /gx/en/about/leadership)
+    if jina_key and not web_text:
+        web_text = _jina_search_and_fetch(company_name, domain, jina_key)
+        if web_text:
+            logger.info("Step 1b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
+
+    # ── Step 1c: Raw HTTP fallback (when Jina unavailable or still empty) ────
+    if not web_text and domain:
+        logger.info("Falling back to raw HTTP for %s", domain)
         web_text = _fetch_leadership_text(domain)
-    else:
-        web_text = ""
 
     # ── Step 2: Search snippets ───────────────────────────────────────────────
     # Jina Search (primary) → DuckDuckGo (fallback)
@@ -945,7 +1057,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     wiki_text = _scrape_wikipedia(company_name)
 
     logger.info(
-        "Leadership context for '%s': web=%d chars (%s), search=%d chars, wiki=%d chars",
+        "Leadership context '%s': web=%d chars (%s), search=%d chars, wiki=%d chars",
         company_name,
         len(web_text),
         "jina" if (jina_key and web_text) else ("raw_http" if web_text else "none"),
