@@ -719,6 +719,159 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# JINA AI READER  (r.jina.ai — JS-rendered pages → clean markdown)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_JINA_MAX_PAGE_CHARS = 20_000   # Jina output is already clean — allow more chars
+_JINA_PAGE_TIMEOUT   = 12       # Jina needs time to render JS (seconds)
+_JINA_SEARCH_TIMEOUT = 10       # s.jina.ai search (seconds)
+
+
+def _jina_fetch_page(url: str, jina_key: str,
+                     timeout: float = _JINA_PAGE_TIMEOUT) -> str:
+    """
+    Fetch a single URL through the Jina Reader API (r.jina.ai).
+
+    Jina pre-renders JavaScript before returning clean markdown, making it
+    effective for React/Next.js leadership pages that return empty shells to
+    a plain httpx request.  Returns "" on failure or thin content.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return ""
+    try:
+        resp = httpx.get(
+            f"https://r.jina.ai/{url}",
+            headers={
+                "Authorization":   f"Bearer {jina_key}",
+                "Accept":          "text/plain",
+                "X-Return-Format": "markdown",
+                "X-Timeout":       str(int(min(timeout, 10))),
+                "X-No-Cache":      "false",          # use Jina's cache when possible
+            },
+            timeout=timeout + 2,                     # client timeout > server timeout
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            logger.debug("Jina reader HTTP %d for %s", resp.status_code, url)
+            return ""
+        text = resp.text.strip()
+        # Reject thin pages (404 shells, login walls, redirect stubs)
+        if len(text) < 300:
+            return ""
+        lower = text.lower()
+        # Skip obvious error/gate pages
+        if any(kw in lower for kw in [
+            "page not found", "404 error", "access denied",
+            "sign in to continue", "login to view", "403 forbidden",
+        ]):
+            return ""
+        logger.debug("Jina fetched %s (%d chars)", url, len(text))
+        return text[:_JINA_MAX_PAGE_CHARS]
+    except Exception as exc:
+        logger.debug("Jina page fetch failed for %s: %s", url, exc)
+        return ""
+
+
+def _jina_fetch_leadership(domain: str, jina_key: str) -> str:
+    """
+    Use the Jina Reader API to scrape leadership pages from *domain*.
+
+    Tries the same _LEADERSHIP_PATHS used by the raw-HTTP scraper, but via
+    Jina so that JavaScript-rendered pages (React/Next.js/Angular SPAs) are
+    pre-rendered before text extraction.
+
+    Returns concatenated clean markdown from all useful pages, or "".
+    """
+    if not domain or not jina_key:
+        return ""
+
+    import time
+    deadline = time.monotonic() + _TOTAL_BUDGET
+
+    bases = [
+        f"https://www.{domain}",
+        f"https://{domain}",
+        f"https://ir.{domain}",
+        f"https://investors.{domain}",
+    ]
+
+    collected: list[str] = []
+    tried: set[str] = set()
+
+    for base in bases:
+        for path in _LEADERSHIP_PATHS:
+            if len(collected) >= _MAX_PAGES or time.monotonic() >= deadline:
+                break
+            url = f"{base}{path}"
+            if url in tried:
+                continue
+            tried.add(url)
+            remaining = max(2.0, deadline - time.monotonic())
+            text = _jina_fetch_page(url, jina_key,
+                                    timeout=min(_JINA_PAGE_TIMEOUT, remaining))
+            if text:
+                # Check the returned text has leadership signal before keeping it
+                lower = text.lower()
+                if any(t in lower for t in [
+                    "director", "chairman", "chief", "ceo", "president",
+                    "officer", "executive", "board", "governance", "management",
+                ]):
+                    collected.append(f"[Page: {url}]\n{text}")
+                    logger.info("Jina leadership page: %s (%d chars)", url, len(text))
+        if len(collected) >= _MAX_PAGES or time.monotonic() >= deadline:
+            break
+
+    return "\n\n---\n\n".join(collected)
+
+
+def _jina_search_snippets(company_name: str, jina_key: str) -> str:
+    """
+    Use Jina's s.jina.ai web search to find leadership data.
+
+    Returns clean text from the top search results (≤ 12 KB) or "".
+    Supplements / replaces DuckDuckGo — Jina renders each result page so
+    snippets are fuller than DDG's 200-char extracts.
+    """
+    if not jina_key:
+        return ""
+
+    try:
+        import httpx
+        from urllib.parse import quote
+    except ImportError:
+        return ""
+
+    queries = [
+        f"{company_name} board of directors chairman non-executive independent directors",
+        f"{company_name} CEO CFO COO CTO executive management team C-suite leadership",
+    ]
+
+    parts: list[str] = []
+    for query in queries:
+        try:
+            resp = httpx.get(
+                f"https://s.jina.ai/{quote(query)}",
+                headers={
+                    "Authorization":   f"Bearer {jina_key}",
+                    "Accept":          "text/plain",
+                    "X-Return-Format": "text",
+                },
+                timeout=_JINA_SEARCH_TIMEOUT,
+            )
+            if resp.status_code == 200 and len(resp.text) > 100:
+                parts.append(resp.text[:6_000])
+                logger.debug("Jina search '%s': %d chars", query[:60], len(resp.text))
+        except Exception as exc:
+            logger.debug("Jina search failed for '%s': %s", query[:60], exc)
+
+    result = "\n\n---\n\n".join(parts)[:12_000]
+    logger.info("Jina search for '%s': %d chars total", company_name, len(result))
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CACHE
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -733,12 +886,18 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     """
     Fetch Board of Directors and Executive Management for a company.
 
-    Priority:
-      1. Scrape the company's own website via *domain* (e.g. "rmsindia.com").
-         Tries common leadership/about/team page paths.
-      2. Fall back to Claude's training-data knowledge of the company.
+    Scraping priority:
+      1. Jina Reader (r.jina.ai) — JS-rendered pages, clean markdown.
+         Activated when JINA_API_KEY is set.  Best for React/Next.js sites.
+      2. Raw HTTP (httpx + BeautifulSoup) — fallback when Jina unavailable.
+      3. LLM training-data knowledge — final fallback when web yields nothing.
 
-    Results are cached in-process (keyed on company_name+domain).
+    Search augmentation:
+      - With JINA_API_KEY: Jina Search (s.jina.ai) — full rendered snippets.
+      - Without:           DuckDuckGo HTML/Lite snippets.
+      - Always:            Wikipedia static-HTML extraction.
+
+    Results are cached in-process (keyed on company_name + domain).
 
     Returns:
         {
@@ -754,27 +913,54 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         logger.debug("LLM leadership skipped: ANTHROPIC_API_KEY not set")
         return {"board": [], "executives": []}
 
+    jina_key = os.environ.get("JINA_API_KEY", "")
+
     cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 1: scrape website + DDG snippets + Wikipedia ────────────────────
-    web_text  = _fetch_leadership_text(domain) if domain else ""
-    ddg_text  = _ddg_leadership_snippets(company_name)
+    # ── Step 1: Website scraping ─────────────────────────────────────────────
+    # Jina Reader (primary, JS-rendered) → raw HTTP (fallback)
+    if jina_key and domain:
+        web_text = _jina_fetch_leadership(domain, jina_key)
+        if not web_text:
+            # Jina found nothing useful — try raw HTTP as fallback
+            logger.info("Jina found no pages for %s — falling back to raw HTTP", domain)
+            web_text = _fetch_leadership_text(domain)
+    elif domain:
+        web_text = _fetch_leadership_text(domain)
+    else:
+        web_text = ""
+
+    # ── Step 2: Search snippets ───────────────────────────────────────────────
+    # Jina Search (primary) → DuckDuckGo (fallback)
+    if jina_key:
+        search_text = _jina_search_snippets(company_name, jina_key)
+        if not search_text:
+            search_text = _ddg_leadership_snippets(company_name)
+    else:
+        search_text = _ddg_leadership_snippets(company_name)
+
+    # ── Step 3: Wikipedia (always — valuable for public companies) ───────────
     wiki_text = _scrape_wikipedia(company_name)
 
     logger.info(
-        "Leadership context for '%s': web=%d chars, ddg=%d chars, wiki=%d chars",
-        company_name, len(web_text), len(ddg_text), len(wiki_text),
+        "Leadership context for '%s': web=%d chars (%s), search=%d chars, wiki=%d chars",
+        company_name,
+        len(web_text),
+        "jina" if (jina_key and web_text) else ("raw_http" if web_text else "none"),
+        len(search_text),
+        len(wiki_text),
     )
 
-    # ── Step 2: if any context found, extract via Claude ─────────────────────
-    if web_text or ddg_text or wiki_text:
+    # ── Step 4: Extract via Claude if any context found ───────────────────────
+    if web_text or search_text or wiki_text:
         parts: list[str] = [f"Company: {company_name}"]
         if web_text:
             parts.append(f"[Website content]\n{web_text}")
-        if ddg_text:
-            parts.append(f"[Search result snippets]\n{ddg_text}")
+        if search_text:
+            src_label = "Jina Web Search" if jina_key else "Search result snippets"
+            parts.append(f"[{src_label}]\n{search_text}")
         if wiki_text:
             parts.append(f"[Wikipedia excerpt]\n{wiki_text}")
         user_msg = "\n\n".join(parts)
@@ -782,19 +968,19 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         result = _call_claude(
             system=_SYSTEM_FROM_WEB,
             user_msg=user_msg,
-            label=f"{company_name} [web+ddg+wiki]",
+            label=f"{company_name} [{'jina' if jina_key else 'web'}+search+wiki]",
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info(
-            "Web+DDG+Wiki context returned no leaders for '%s' — "
+            "Web+search+wiki context returned no leaders for '%s' — "
             "falling back to LLM knowledge", company_name
         )
 
-    # ── Step 3: LLM knowledge fallback ───────────────────────────────────────
-    logger.info(f"Using LLM knowledge for '{company_name}' leadership")
+    # ── Step 5: LLM knowledge fallback ───────────────────────────────────────
+    logger.info("Using LLM knowledge for '%s' leadership", company_name)
     result = _call_claude(
         system=_SYSTEM_FROM_KNOWLEDGE,
         user_msg=f"Company: {company_name}",
