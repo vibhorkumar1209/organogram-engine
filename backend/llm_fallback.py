@@ -510,52 +510,50 @@ def _fetch_leadership_text(domain: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_FROM_WEB = """\
-You are a corporate intelligence assistant.
+You are a corporate intelligence assistant extracting leadership data.
 
-You are given text from up to three sources about a company:
-1. Pages scraped from the company's own website (most authoritative).
-2. Search engine result snippets from DuckDuckGo (useful when the company site is \
-   JavaScript-rendered and the scraped HTML is sparse).
-3. Wikipedia article excerpt (reliable for board composition of public companies).
+You are given content scraped from the company website, search snippets, \
+and/or Wikipedia. Extract EVERY person listed as a current board member \
+or senior executive — be exhaustive, not selective.
 
-Extract the current Board of Directors and Executive Management / C-Suite team \
-using ALL available context. Prefer explicit website content, but use search \
-snippets and Wikipedia to fill gaps.
+Sources may label leadership under: Board of Directors, Board of Trustees, \
+Supervisory Board, Executive Committee, Operating Committee, Leadership Team, \
+Management Committee, Group Management Board, Senior Leadership Team.
 
-The website may present these under different headings such as:
-- Board of Directors, Board of Trustees, Supervisory Board, Advisory Board
-- Executive Committee, Operating Committee, Leadership Team, Management Committee,
-  Senior Leadership Team, Group Management Board
-
-Schema:
+Schema — return ONLY this JSON:
 {
   "board": [
-    {"name": "Full Name", "title": "Exact title (e.g. Chairman, Independent Director)"}
+    {"name": "Full Name", "title": "Exact title from source"}
   ],
   "executives": [
-    {"name": "Full Name", "title": "Exact C-Suite title (e.g. CEO, CFO, COO)"}
+    {"name": "Full Name", "title": "Exact title from source"}
   ]
 }
 
-Rules:
-- board: Chairman, Non-Executive Directors, Independent Directors, \
-  Supervisory Board members, Board of Trustees members. \
-  Do NOT include executive directors who also hold a C-Suite role.
-- executives: Members of the Operating Committee, Executive Committee, \
-  Leadership Team, or Management Committee AND classic C-Suite — CEO, President, \
-  COO, CFO, CTO, CIO, CISO, CMO, CHRO / Chief People Officer, CRO, \
-  CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, \
-  Chief Commercial Officer, and equivalent. \
-  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on \
-  the Operating/Executive Committee explicitly listed on the website.
-- CRITICAL: EXCLUDE all former, retired, ex-, past, or emeritus \
-  office-holders. Only include people currently serving in the role. \
-  Do NOT include anyone whose title or context says "Former", "Ex-", \
-  "Retired", "Past", "Emeritus", "Ex-CEO", "Former Chairman", etc.
-- Use names and titles as they appear in the source material.
-- If the combined context does not contain leadership information, return \
-  {"board": [], "executives": []}.
-- Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
+board: Include EVERY person on the board page — Chairman, Vice/Deputy Chairman, \
+Senior Independent Director, Non-Executive Directors, Independent Directors, \
+Executive Directors listed on the board, committee chairs (Audit, Remuneration, \
+Risk, Nominations), Supervisory Board members, Board of Trustees members. \
+Include executive directors even if they also hold a C-Suite role.
+
+executives: Include EVERYONE on the official leadership/management/executive \
+committee page, regardless of title format — CEO, President, COO, CFO, CTO, \
+CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, \
+Chief Digital Officer, Chief Commercial Officer, Managing Partner, and ALL \
+members of the Operating Committee / Executive Committee / Management Committee \
+/ Group Management Board / Leadership Team. \
+For professional services firms: include all managing partners and practice \
+leaders named on the official leadership page. \
+Include regional/country heads if listed on the global leadership page. \
+Title format does not matter — if the company lists them on their official \
+leadership page, include them.
+
+EXCLUDE: former, retired, ex-, past, emeritus office-holders. Anyone described \
+as "Former CEO", "Ex-Chairman", "Retired Director", "Emeritus", etc.
+
+Use names and titles EXACTLY as they appear in the source material.
+If the context contains no leadership information, return {"board": [], "executives": []}.
+Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 _SYSTEM_FROM_KNOWLEDGE = """\
 You are a corporate intelligence assistant with knowledge of public companies.
@@ -815,43 +813,107 @@ def _parallel_run(query: str, api_key: str) -> str:
     return ""
 
 
-def _parallel_fetch_leadership(company_name: str, domain: str,
-                               api_key: str) -> str:
+def _parse_parallel_json(text: str, key: str) -> list[dict]:
     """
-    Use Parallel.AI to research the current BOD and Executive Management of
-    *company_name*.  Returns research text with name/title pairs, or "".
+    Extract a list of {name, title} dicts from Parallel.AI's JSON response.
+    *key* is "board" or "executives".  Returns [] on failure.
+    """
+    if not text:
+        return []
+    # Strip markdown code fences
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+    # Try full parse
+    try:
+        data = json.loads(cleaned)
+        return _clean_list(data.get(key, []))
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Find JSON blob inside prose
+    pattern = rf'"{key}"\s*:\s*\[[\s\S]*?\]'
+    m = re.search(pattern, cleaned)
+    if m:
+        try:
+            data = json.loads("{" + m.group() + "}")
+            return _clean_list(data.get(key, []))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
 
-    Parallel.AI browses the actual website (including JS-rendered pages),
-    annual reports, governance sections, and synthesises into clean output —
-    no URL guessing needed.
+
+def _parallel_fetch_leadership(company_name: str, domain: str,
+                               api_key: str) -> dict | None:
     """
-    domain_hint = f"  Their official website is {domain}." if domain else ""
-    query = (
-        f'Research the CURRENT (not former or retired) Board of Directors and '
-        f'Executive Management team of "{company_name}".{domain_hint}\n\n'
-        f'Sources to check: the company\'s official leadership/governance/about '
-        f'page, annual report, proxy statement, Wikipedia, and news articles.\n\n'
-        f'Return your findings in this exact format:\n\n'
-        f'Board of Directors:\n'
-        f'- [Full Name] — [Exact Title]\n\n'
-        f'Executive Management:\n'
-        f'- [Full Name] — [Exact Title]\n\n'
-        f'Board includes: Chairman, Non-Executive Directors, Independent Directors, '
-        f'Supervisory Board members.\n'
-        f'Executives include: CEO, President, COO, CFO, CTO, CIO, CMO, CHRO, '
-        f'CRO, CLO/General Counsel, Chief Strategy Officer, Chief Digital Officer, '
-        f'and Operating/Executive Committee members.\n'
-        f'EXCLUDE all former, retired, emeritus, or ex- executives.\n'
-        f'Use names and titles exactly as they appear on the official source.'
+    Use Parallel.AI to research BOD and Executive Management.
+
+    Runs two targeted queries CONCURRENTLY (same wall-clock time as one):
+      - Query A: Board of Directors only → returns JSON {"board": [...]}
+      - Query B: Executive Committee / C-suite → returns JSON {"executives": [...]}
+
+    Returns a merged dict {"board": [...], "executives": [...]} or None.
+    Parallel.AI browses JS-rendered pages and annual reports — no URL guessing.
+    """
+    import concurrent.futures
+
+    domain_hint = f"  Their website is {domain}." if domain else ""
+
+    bod_query = (
+        f'List ALL CURRENT members of the Board of Directors (or Supervisory Board '
+        f'/ Board of Trustees) of "{company_name}".{domain_hint}\n\n'
+        f'Check: official governance/board page, annual report, proxy statement, Wikipedia.\n\n'
+        f'Return ONLY this JSON (no explanation, no markdown):\n'
+        f'{{"board": [{{"name": "Full Name", "title": "Exact board title"}}]}}\n\n'
+        f'Include EVERY board member: Chairman, Deputy/Vice-Chairman, Senior Independent '
+        f'Director, Non-Executive Directors, Independent Non-Executive Directors, '
+        f'Executive Directors on the board, and committee chairs.\n'
+        f'EXCLUDE former/retired/emeritus board members.\n'
+        f'Be EXHAUSTIVE — include all members listed, not just the most prominent.'
     )
-    text = _parallel_run(query, api_key)
-    if text and any(kw in text.lower() for kw in
-                    ["director", "chairman", "chief", "ceo", "president",
-                     "officer", "executive", "board"]):
-        logger.info("Parallel.AI leadership for '%s': %d chars", company_name, len(text))
-        return text
-    logger.info("Parallel.AI found no leadership data for '%s'", company_name)
-    return ""
+
+    em_query = (
+        f'List ALL CURRENT members of the Executive/Operating/Management Committee '
+        f'and C-suite leadership of "{company_name}".{domain_hint}\n\n'
+        f'Check: official leadership/executive-committee/management-team page, '
+        f'annual report, proxy statement.\n\n'
+        f'Return ONLY this JSON (no explanation, no markdown):\n'
+        f'{{"executives": [{{"name": "Full Name", "title": "Exact title"}}]}}\n\n'
+        f'Include:\n'
+        f'- Classic C-suite: CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, '
+        f'CRO, General Counsel, Chief Strategy Officer, Chief Digital Officer, '
+        f'Chief Commercial Officer, Managing Partner\n'
+        f'- ALL members of the Operating Committee / Executive Committee / '
+        f'Management Committee / Group Management Board / Leadership Team\n'
+        f'- For professional services firms: ALL managing partners / practice leaders '
+        f'on the official leadership page\n'
+        f'- Regional/country heads if listed on the global leadership page\n'
+        f'EXCLUDE former/retired/emeritus executives.\n'
+        f'Be EXHAUSTIVE — include every person listed, not just the most senior.'
+    )
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            f_bod = pool.submit(_parallel_run, bod_query, api_key)
+            f_em  = pool.submit(_parallel_run, em_query,  api_key)
+            bod_text = f_bod.result(timeout=_PARALLEL_TASK_TIMEOUT + 5)
+            em_text  = f_em.result(timeout=_PARALLEL_TASK_TIMEOUT + 5)
+    except Exception as exc:
+        logger.warning("Parallel.AI concurrent fetch error for '%s': %s", company_name, exc)
+        return None
+
+    board = _parse_parallel_json(bod_text, "board")
+    execs = _parse_parallel_json(em_text,  "executives")
+
+    if not board and not execs:
+        logger.info("Parallel.AI: no parseable leadership for '%s'", company_name)
+        # Return raw text as fallback so Claude can still try
+        combined = "\n\n".join(t for t in [bod_text, em_text] if t)
+        return {"_raw_text": combined} if combined else None
+
+    logger.info(
+        "Parallel.AI for '%s': %d board, %d execs",
+        company_name, len(board), len(execs),
+    )
+    return {"board": board, "executives": execs}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1146,13 +1208,31 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         return _LEADERSHIP_CACHE[cache_key]
 
     # ── Step 0: Parallel.AI research agent (primary — best quality) ──────────
-    # Understands the research question, browses JS-rendered pages, annual
-    # reports, governance sections — no URL guessing needed.
+    # Two concurrent queries (BOD + EM) — browses JS-rendered pages, annual
+    # reports, and governance sections.  Returns JSON parsed directly (no Claude
+    # extraction needed).  Falls back to raw text for the Claude path.
     web_text = ""
     if parallel_key:
-        web_text = _parallel_fetch_leadership(company_name, domain, parallel_key)
-        if web_text:
-            logger.info("Step 0 Parallel.AI for '%s': %d chars", company_name, len(web_text))
+        parallel_result = _parallel_fetch_leadership(company_name, domain, parallel_key)
+        if parallel_result:
+            # JSON parsed successfully → return immediately, skip Claude
+            if parallel_result.get("board") or parallel_result.get("executives"):
+                parallel_result["_source"] = "web"
+                _LEADERSHIP_CACHE[cache_key] = parallel_result
+                logger.info(
+                    "Parallel.AI direct-JSON for '%s': %d board, %d execs",
+                    company_name,
+                    len(parallel_result.get("board", [])),
+                    len(parallel_result.get("executives", [])),
+                )
+                return parallel_result
+            # Raw text fallback (JSON parse failed) — pass to Claude below
+            web_text = parallel_result.get("_raw_text", "")
+            if web_text:
+                logger.info(
+                    "Parallel.AI raw-text fallback for '%s': %d chars",
+                    company_name, len(web_text),
+                )
 
     # ── Step 1a: Jina Reader — path-based (known URL patterns) ──────────────
     if not web_text and jina_key and domain:
@@ -1184,13 +1264,15 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     # ── Step 3: Wikipedia (always — valuable for public companies) ───────────
     wiki_text = _scrape_wikipedia(company_name)
 
+    src_label = (
+        "parallel_raw" if (parallel_key and not jina_key and web_text)
+        else "jina"     if (jina_key and web_text)
+        else "raw_http" if web_text
+        else "none"
+    )
     logger.info(
         "Leadership context '%s': web=%d chars (%s), search=%d chars, wiki=%d chars",
-        company_name,
-        len(web_text),
-        "jina" if (jina_key and web_text) else ("raw_http" if web_text else "none"),
-        len(search_text),
-        len(wiki_text),
+        company_name, len(web_text), src_label, len(search_text), len(wiki_text),
     )
 
     # ── Step 4: Extract via Claude if any context found ───────────────────────
@@ -1238,7 +1320,7 @@ def _call_claude(system: str, user_msg: str, label: str) -> dict:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
+            max_tokens=4096,   # 2048 was truncating large boards (20+ members)
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
