@@ -737,6 +737,124 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PARALLEL.AI  (api.parallel.ai — web research agent, task-based)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PARALLEL_BASE           = "https://api.parallel.ai"
+_PARALLEL_POLL_INTERVAL  = 4    # seconds between status polls
+_PARALLEL_TASK_TIMEOUT   = 80   # seconds to wait for task completion
+_PARALLEL_MAX_CHARS      = 20_000
+
+
+def _parallel_run(query: str, api_key: str) -> str:
+    """
+    Submit a research query to Parallel.AI, poll until done, return text.
+    Returns "" on failure or timeout.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return ""
+
+    import time
+
+    hdrs = {"Content-Type": "application/json", "x-api-key": api_key}
+
+    # ── Create task ───────────────────────────────────────────────────────────
+    try:
+        resp = httpx.post(
+            f"{_PARALLEL_BASE}/v1/tasks/runs",
+            headers=hdrs,
+            json={"input": query, "processor": "base"},
+            timeout=15,
+        )
+        if not resp.is_success:
+            logger.warning("Parallel.AI task creation failed %d: %s",
+                           resp.status_code, resp.text[:200])
+            return ""
+        run_id = resp.json()["run_id"]
+        logger.info("Parallel.AI task created: %s", run_id)
+    except Exception as exc:
+        logger.warning("Parallel.AI create error: %s", exc)
+        return ""
+
+    # ── Poll status ───────────────────────────────────────────────────────────
+    deadline = time.monotonic() + _PARALLEL_TASK_TIMEOUT
+    while time.monotonic() < deadline:
+        time.sleep(_PARALLEL_POLL_INTERVAL)
+        try:
+            st = httpx.get(f"{_PARALLEL_BASE}/v1/tasks/runs/{run_id}",
+                           headers=hdrs, timeout=20)
+            if not st.is_success:
+                continue
+            data = st.json()
+            status = data.get("status", "")
+            if status == "failed":
+                logger.warning("Parallel.AI task failed: %s", run_id)
+                return ""
+            if status == "completed" or not data.get("is_active", True):
+                # ── Fetch result ──────────────────────────────────────────────
+                res = httpx.get(f"{_PARALLEL_BASE}/v1/tasks/runs/{run_id}/result",
+                                headers=hdrs, timeout=30)
+                if not res.is_success:
+                    logger.warning("Parallel.AI result fetch failed %d", res.status_code)
+                    return ""
+                payload = res.json()
+                content = (payload.get("output") or {}).get("content") or {}
+                text = (
+                    content.get("output", "") if isinstance(content, dict)
+                    else (content if isinstance(content, str) else "")
+                )
+                logger.info("Parallel.AI result: %d chars for run %s", len(text), run_id)
+                return text[:_PARALLEL_MAX_CHARS]
+        except Exception as exc:
+            logger.debug("Parallel.AI poll error: %s", exc)
+
+    logger.warning("Parallel.AI timed out after %ds for run %s",
+                   _PARALLEL_TASK_TIMEOUT, run_id)
+    return ""
+
+
+def _parallel_fetch_leadership(company_name: str, domain: str,
+                               api_key: str) -> str:
+    """
+    Use Parallel.AI to research the current BOD and Executive Management of
+    *company_name*.  Returns research text with name/title pairs, or "".
+
+    Parallel.AI browses the actual website (including JS-rendered pages),
+    annual reports, governance sections, and synthesises into clean output —
+    no URL guessing needed.
+    """
+    domain_hint = f"  Their official website is {domain}." if domain else ""
+    query = (
+        f'Research the CURRENT (not former or retired) Board of Directors and '
+        f'Executive Management team of "{company_name}".{domain_hint}\n\n'
+        f'Sources to check: the company\'s official leadership/governance/about '
+        f'page, annual report, proxy statement, Wikipedia, and news articles.\n\n'
+        f'Return your findings in this exact format:\n\n'
+        f'Board of Directors:\n'
+        f'- [Full Name] — [Exact Title]\n\n'
+        f'Executive Management:\n'
+        f'- [Full Name] — [Exact Title]\n\n'
+        f'Board includes: Chairman, Non-Executive Directors, Independent Directors, '
+        f'Supervisory Board members.\n'
+        f'Executives include: CEO, President, COO, CFO, CTO, CIO, CMO, CHRO, '
+        f'CRO, CLO/General Counsel, Chief Strategy Officer, Chief Digital Officer, '
+        f'and Operating/Executive Committee members.\n'
+        f'EXCLUDE all former, retired, emeritus, or ex- executives.\n'
+        f'Use names and titles exactly as they appear on the official source.'
+    )
+    text = _parallel_run(query, api_key)
+    if text and any(kw in text.lower() for kw in
+                    ["director", "chairman", "chief", "ceo", "president",
+                     "officer", "executive", "board"]):
+        logger.info("Parallel.AI leadership for '%s': %d chars", company_name, len(text))
+        return text
+    logger.info("Parallel.AI found no leadership data for '%s'", company_name)
+    return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # JINA AI READER  (r.jina.ai — JS-rendered pages → clean markdown)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -995,13 +1113,14 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     Fetch Board of Directors and Executive Management for a company.
 
     Scraping priority (web-only, no AI knowledge fallback):
-      1a. Jina Reader — path-based (known _LEADERSHIP_PATHS, JS-rendered).
-      1b. Jina Search-and-Fetch — discovers actual leadership page URLs via
-          search, then fetches them via Jina Reader. Handles companies whose
-          URL doesn't match known paths (Deloitte, PwC, McKinsey, etc.).
-      1c. Raw HTTP — httpx direct fetch, static-HTML sites only.
-      2.  Search snippets: Jina Search text → DuckDuckGo fallback.
-      3.  Wikipedia static-HTML extraction (always, good for public companies).
+      0.  Parallel.AI research agent — browses the real site + annual reports,
+          understands the question, returns structured name/title output.
+          Activated when PARALLEL_API_KEY is set. Best overall quality.
+      1a. Jina Reader — path-based (JINA_API_KEY, known _LEADERSHIP_PATHS).
+      1b. Jina Search-and-Fetch — discovers actual leadership URLs via search.
+      1c. Raw HTTP — httpx direct, static-HTML sites.
+      2.  Search snippets: Jina Search → DuckDuckGo fallback.
+      3.  Wikipedia static-HTML (always).
 
     Results are cached in-process (keyed on company_name + domain).
 
@@ -1019,15 +1138,24 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         logger.debug("LLM leadership skipped: ANTHROPIC_API_KEY not set")
         return {"board": [], "executives": []}
 
-    jina_key = os.environ.get("JINA_API_KEY", "")
+    parallel_key = os.environ.get("PARALLEL_API_KEY", "")
+    jina_key     = os.environ.get("JINA_API_KEY", "")
 
     cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 1a: Jina Reader — path-based (known URL patterns) ──────────────
+    # ── Step 0: Parallel.AI research agent (primary — best quality) ──────────
+    # Understands the research question, browses JS-rendered pages, annual
+    # reports, governance sections — no URL guessing needed.
     web_text = ""
-    if jina_key and domain:
+    if parallel_key:
+        web_text = _parallel_fetch_leadership(company_name, domain, parallel_key)
+        if web_text:
+            logger.info("Step 0 Parallel.AI for '%s': %d chars", company_name, len(web_text))
+
+    # ── Step 1a: Jina Reader — path-based (known URL patterns) ──────────────
+    if not web_text and jina_key and domain:
         web_text = _jina_fetch_leadership(domain, jina_key)
         logger.info("Step 1a Jina path-based for '%s': %d chars", domain, len(web_text))
 
