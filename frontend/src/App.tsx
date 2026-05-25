@@ -6,6 +6,34 @@ import { ExecPanel } from './components/ExecPanel'
 
 const API = import.meta.env.VITE_API_URL || '/api'
 
+// ── History ────────────────────────────────────────────────────────────
+const HISTORY_KEY  = 'orgchart_history'
+const HISTORY_MAX  = 12
+
+interface HistoryEntry {
+  id:          string
+  companyName: string
+  timestamp:   number
+  deptTree:    OrgNode
+  stats:       Stats
+  industry:    string
+}
+
+function loadHistory(): HistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') } catch { return [] }
+}
+function persistHistory(entries: HistoryEntry[]) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(entries)) } catch {}
+}
+function relativeTime(ts: number): string {
+  const m = Math.floor((Date.now() - ts) / 60_000)
+  if (m < 1)  return 'Just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
 const DEPT_TYPES = new Set<OrgNode['node_type']>([
   'global', 'dept_primary', 'dept_secondary', 'dept_tertiary',
 ])
@@ -106,6 +134,46 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
 
+  // ── History state ──────────────────────────────────────────────────
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
+
+  const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string) => {
+    const entry: HistoryEntry = {
+      id:          `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      companyName: tree.label || 'Unknown Company',
+      timestamp:   Date.now(),
+      deptTree:    tree,
+      stats:       s,
+      industry:    ind,
+    }
+    setHistory(prev => {
+      // Replace existing entry for same company so history stays tidy
+      const filtered = prev.filter(e => e.companyName !== entry.companyName)
+      const next = [entry, ...filtered].slice(0, HISTORY_MAX)
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
+  const restoreSnapshot = useCallback((entry: HistoryEntry) => {
+    setDeptTree(entry.deptTree)
+    setStats(entry.stats)
+    setIndustry(entry.industry)
+    setStatus('ready')
+    setStatusMsg('')
+    setPanelDept(null); setPanelExecs(null)
+    setHighlight(null)
+    bumpFit()
+  }, [])
+
+  const deleteSnapshot = useCallback((id: string) => {
+    setHistory(prev => {
+      const next = prev.filter(e => e.id !== id)
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
   const handleReset = async () => {
     try { await fetch(`${API}/reset`, { method: 'POST' }) } catch {}
     setStatus('idle')
@@ -150,7 +218,7 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setStats(data.stats)
-      await loadDeptStructure()
+      await loadDeptStructure(data.stats, data.industry ?? '')
     } catch {
       setStatus('error')
       setStatusMsg('Backend not running — using embedded demo. Start with: cd backend && uvicorn api_server:app')
@@ -159,7 +227,7 @@ export default function App() {
   }
 
   // ── Fetch dept-only structure ──────────────────────────────────────
-  const loadDeptStructure = async () => {
+  const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string) => {
     // max_depth=3: root(0) → BOD(1) → EM(2) → direct depts(3).
     // Sub-departments expand lazily on click (has_more=true triggers lazy fetch).
     const res = await fetch(`${API}/tree?root=root_global&max_depth=3`)
@@ -169,6 +237,8 @@ export default function App() {
     setDeptTree(filtered)       // useEffect above will set viewTree
     bumpFit()          // force fit-to-screen on next render
     setStatus('ready')
+    // Auto-save to history whenever a chart successfully loads
+    if (currentStats) saveSnapshot(filtered, currentStats, currentIndustry ?? '')
   }
 
   // ── Handle node click: expand / collapse / open panel ─────────────
@@ -265,7 +335,7 @@ export default function App() {
           `Detected columns: ${data.detected_columns?.join(', ') ?? '(unknown)'}.`
         )
       }
-      await loadDeptStructure()
+      await loadDeptStructure(data.stats, data.industry ?? '')
     } catch (e: any) {
       clearInterval(tick)
       setStatus('error')
@@ -486,6 +556,74 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          {/* ── History ─────────────────────────────────────────── */}
+          {history.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: 10, color: '#334155', letterSpacing: 1,
+                textTransform: 'uppercase', marginBottom: 8,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                History
+                <button
+                  onClick={() => { setHistory([]); persistHistory([]) }}
+                  title="Clear all history"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: '#E63946', fontSize: 9, padding: 0,
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              {history.map(entry => (
+                <div
+                  key={entry.id}
+                  onClick={() => restoreSnapshot(entry)}
+                  title={`Restore ${entry.companyName}`}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 4,
+                    padding: '5px 4px', borderBottom: '1px solid #0c1e2e',
+                    cursor: 'pointer', borderRadius: 4,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#0c1e2e')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {/* Chart icon */}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                    stroke="#3491E8" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                    <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+                  </svg>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 10, color: '#64748b', fontWeight: 600,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {entry.companyName}
+                    </div>
+                    <div style={{ fontSize: 8.5, color: '#334155' }}>
+                      {relativeTime(entry.timestamp)}
+                      {entry.industry ? ` · ${entry.industry}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteSnapshot(entry.id) }}
+                    title="Remove from history"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#334155', fontSize: 12, padding: '0 2px',
+                      lineHeight: 1, flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
         </aside>
 

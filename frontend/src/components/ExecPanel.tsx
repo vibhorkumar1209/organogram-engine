@@ -461,29 +461,81 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
   const isEM    = deptNode?.node_id === 'dept__executive_management'
   const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
 
+  // ── Title-based region inference ────────────────────────────────────
+  // Matches geographic keywords in designation/label so regional executives
+  // land in correct sub-cards even when backend region = 'Global HQ'.
+  // Ordered most-specific first to avoid 'Asia' matching before 'Southeast Asia'.
+  const GEO_PATTERNS: [RegExp, string][] = [
+    [/\bgreater\s+china\b/i,                        'Greater China'],
+    [/\bhong\s+kong\b/i,                            'Hong Kong'],
+    [/\bsouth(?:east|ern)?\s+asia\b|\basean\b/i,   'Southeast Asia'],
+    [/\bnorth(?:ern)?\s+america\b/i,                'North America'],
+    [/\blatin\s+america\b|\blatam\b/i,              'Latin America'],
+    [/\bmiddle\s+east(?:\s+and\s+africa)?\b|\bmena\b/i, 'Middle East & Africa'],
+    [/\bnew\s+zealand\b/i,                          'New Zealand'],
+    [/\banz\b|\baustrali/i,                         'Australia / NZ'],
+    [/\bsouth\s+korea\b/i,                          'South Korea'],
+    [/\bgulf\b|\bgcc\b/i,                           'Gulf / GCC'],
+    [/\bnordics?\b|\bscandinavia\b/i,               'Nordic'],
+    [/\bindia\b|\bindian\b/i,                       'India'],
+    [/\bchina\b|\bchinese\b/i,                      'Greater China'],
+    [/\bjapan\b|\bjapanese\b/i,                     'Japan'],
+    [/\bsingapore\b/i,                              'Singapore'],
+    [/\bapac\b|\basia.?pacific\b|\bapj\b/i,         'Asia Pacific'],
+    [/\bemea\b/i,                                   'EMEA'],
+    [/\beurope\b|\beuropean\b/i,                    'Europe'],
+    [/\bgermany\b|\bgerman\b/i,                     'Germany'],
+    [/\bfrance\b|\bfrench\b/i,                      'France'],
+    [/\bu\.?k\.?\b|\bunited\s+kingdom\b|\bbritish\b/i, 'United Kingdom'],
+    [/\bcanada\b|\bcanadian\b/i,                    'Canada'],
+    [/\bamericas\b/i,                               'Americas'],
+    [/\bbrazil\b|\bbrazilian\b/i,                   'Brazil'],
+    [/\bmexic/i,                                    'Mexico'],
+    [/\bafrica\b|\bafrican\b/i,                     'Africa'],
+    [/\bmiddle\s+east\b/i,                          'Middle East'],
+    [/\basia\b/i,                                   'Asia Pacific'],
+  ]
+
+  function inferRegion(person: OrgNode, forBoard: boolean): string {
+    const backendRegion = ((person.metadata?.region as string) || '').trim()
+    // BOD: always Global HQ (board governs the whole company)
+    if (forBoard) return backendRegion || 'Global HQ'
+    // If backend already set a specific non-HQ region, trust it
+    if (backendRegion && backendRegion !== 'Global HQ') return backendRegion
+    // Infer from designation/label
+    const title = ((person.metadata?.designation as string) || person.label).toLowerCase()
+    // Global/Group scope → HQ
+    if (/\b(global|group)\s+(?:ceo|chief|president|managing|head)\b/.test(title))
+      return backendRegion || 'Global HQ'
+    for (const [pattern, regionName] of GEO_PATTERNS) {
+      if (pattern.test(title)) return regionName
+    }
+    return backendRegion || 'Global HQ'
+  }
+
   // ── Geographic grouping ──────────────────────────────────────────────
-  // Group executives by their region metadata.
-  // Primary region = region of the most-senior person (lowest layer number);
-  // that region gets the full hierarchy tree (Chairman / CEO at apex).
-  // All other regions get a local layer tree (regional head at apex).
+  // Group executives by inferred region.
+  // Primary (HQ) region = region of the apex (lowest layer) person.
+  // Gets the full CEO/Chairman hierarchy. Other regions get local trees.
   const regionGroups = useMemo<[string, OrgNode[]][]>(() => {
     if (!executives || executives.length === 0) return []
     const map = new Map<string, OrgNode[]>()
     for (const p of executives) {
-      const r = ((p.metadata?.region as string) || '').trim() || 'Global HQ'
+      const r = inferRegion(p, isBoard)
       if (!map.has(r)) map.set(r, [])
       map.get(r)!.push(p)
     }
-    // Determine primary region from the apex person
-    const apex = [...executives].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
-    const primary = ((apex?.metadata?.region as string) || '').trim() || 'Global HQ'
+    // Primary = region of the most-senior person
+    const apex    = [...executives].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
+    const primary = inferRegion(apex, isBoard)
     // Sort: primary first, then by headcount descending
     return [...map.entries()].sort(([ra, a], [rb, b]) => {
       if (ra === primary) return -1
       if (rb === primary) return 1
       return b.length - a.length
     })
-  }, [executives])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executives, isBoard])
 
   // Layer distribution summary (header)
   const byLayer: Record<number, number> = {}
@@ -598,27 +650,33 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
                 onClick={() => toggleRegion(region)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
-                  padding: '6px 14px 6px 11px',
-                  background: '#050c14',
-                  borderTop:   gi === 0 ? 'none' : '1px solid #080f18',
-                  borderBottom: isRgnCollapsed ? 'none' : '1px solid #080f18',
-                  borderLeft:  `3px solid ${color}${isPrimary ? '55' : '25'}`,
+                  padding: '5px 12px 5px 10px',
+                  background: isPrimary ? '#071220' : '#060e1a',
+                  borderTop:    gi === 0 ? 'none' : `1px solid #0e1e2e`,
+                  borderBottom: isRgnCollapsed ? 'none' : '1px solid #0e1e2e',
+                  borderLeft:   `3px solid ${color}${isPrimary ? 'cc' : '55'}`,
                   cursor: 'pointer', userSelect: 'none',
                 }}
               >
-                <span style={{ fontSize: 8.5, color: color + (isPrimary ? '99' : '55') }}>🌐</span>
+                <span style={{ fontSize: 9, color: isPrimary ? color + 'cc' : color + '55', flexShrink: 0 }}>
+                  🌐
+                </span>
                 <span style={{
-                  fontSize: 8.5, fontWeight: 700, letterSpacing: 1.1,
+                  fontSize: 9, fontWeight: 700, letterSpacing: 0.8,
                   textTransform: 'uppercase',
-                  color: isPrimary ? '#2a5878' : '#1a3a52',
+                  color: isPrimary ? color + 'dd' : color + '66',
                   flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
                   {region}
                 </span>
-                <span style={{ fontSize: 8, color: '#122a3d', flexShrink: 0 }}>
-                  {regionExecs.length} {regionExecs.length === 1 ? 'exec' : 'execs'}
+                <span style={{
+                  fontSize: 8, color: isPrimary ? '#4a7a9b' : '#2a4a62',
+                  background: isPrimary ? '#0c1e30' : '#080f18',
+                  borderRadius: 3, padding: '1px 6px', flexShrink: 0,
+                }}>
+                  {regionExecs.length}
                 </span>
-                <span style={{ fontSize: 7.5, color: '#1a3045', marginLeft: 6, flexShrink: 0 }}>
+                <span style={{ fontSize: 8, color: color + '55', marginLeft: 4, flexShrink: 0 }}>
                   {isRgnCollapsed ? '▸' : '▾'}
                 </span>
               </div>

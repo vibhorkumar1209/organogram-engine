@@ -1652,6 +1652,58 @@ def _is_regional_exec(title: str) -> bool:
     return False
 
 
+# Ordered from most-specific to least-specific so e.g. "Hong Kong" matches before "Asia".
+_GEO_REGION_MAP: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\bgreater\s+china\b',                  re.I), "Greater China"),
+    (re.compile(r'\bhong\s+kong\b',                      re.I), "Hong Kong"),
+    (re.compile(r'\bsouth(?:east|ern)?\s+asia\b|\basean\b', re.I), "Southeast Asia"),
+    (re.compile(r'\bnorth(?:ern)?\s+america\b',          re.I), "North America"),
+    (re.compile(r'\blatin\s+america\b|\blatam\b',        re.I), "Latin America"),
+    (re.compile(r'\bmiddle\s+east(?:\s+and\s+africa)?\b|\bmena\b', re.I), "Middle East & Africa"),
+    (re.compile(r'\bnew\s+zealand\b',                    re.I), "New Zealand"),
+    (re.compile(r'\bsouth(?:\s+)?korea\b',               re.I), "South Korea"),
+    (re.compile(r'\bgulf\b|\bgcc\b',                     re.I), "Gulf / GCC"),
+    (re.compile(r'\bnordics?\b|\bscandinavia\b',         re.I), "Nordic"),
+    (re.compile(r'\banz\b|\baustrali',                   re.I), "Australia / NZ"),
+    (re.compile(r'\bindia\b|\bindian\b',                 re.I), "India"),
+    (re.compile(r'\bchina\b|\bchinese\b',                re.I), "Greater China"),
+    (re.compile(r'\bjapan\b|\bjapanese\b',               re.I), "Japan"),
+    (re.compile(r'\bsingapore\b',                        re.I), "Singapore"),
+    (re.compile(r'\bapac\b|\basia.?pacific\b|\bapj\b',  re.I), "Asia Pacific"),
+    (re.compile(r'\bemea\b',                              re.I), "EMEA"),
+    (re.compile(r'\beurope\b|\beuropean\b',              re.I), "Europe"),
+    (re.compile(r'\bgermany\b|\bgerman\b',               re.I), "Germany"),
+    (re.compile(r'\bfrance\b|\bfrench\b',                re.I), "France"),
+    (re.compile(r'\bu\.?k\.?\b|\bunited\s+kingdom\b|\bbritish\b', re.I), "United Kingdom"),
+    (re.compile(r'\bcanada\b|\bcanadian\b',              re.I), "Canada"),
+    (re.compile(r'\bamericas\b',                         re.I), "Americas"),
+    (re.compile(r'\bbrazil\b|\bbrazilian\b',             re.I), "Brazil"),
+    (re.compile(r'\bmexic',                               re.I), "Mexico"),
+    (re.compile(r'\bafrica\b|\bafrican\b',               re.I), "Africa"),
+    (re.compile(r'\bmiddle\s+east\b',                    re.I), "Middle East"),
+    (re.compile(r'\basia\b',                             re.I), "Asia Pacific"),
+]
+
+
+def _infer_exec_region(title: str, company_region: str = "Global HQ") -> str:
+    """
+    Infer the geographic sub-card region from an executive's title.
+
+    Global/Group C-suite → company_region (stays in HQ card).
+    Regional/country heads → their specific region card.
+    Used to populate ExecPanel region sub-cards correctly.
+    """
+    t = title.lower().strip()
+    # Global / group scope → HQ
+    if re.search(r'\b(global|group)\s+(?:ceo|chief|president|managing|head)\b', t):
+        return company_region or "Global HQ"
+    # Match geographic indicators
+    for pattern, region_name in _GEO_REGION_MAP:
+        if pattern.search(t):
+            return region_name
+    return company_region or "Global HQ"
+
+
 def _inject_knowledge_leadership(
     dag: OrganogramDAG,
     company_name: str,
@@ -1830,25 +1882,28 @@ def _enrich_with_llm_leadership(
         # layer 1: Vice Chair + Committee Chairs (senior board roles)
         # layer 2: Regular NEDs / INEDs
         # ── EM: global C-Suite at layer 1 (CEO promoted by frontend);
-        #        regional/country heads at layer 2 ────────────────────────
-        injections: list[tuple[int, str, str, str, str]] = []
+        #        regional/country heads at layer 2, own region sub-card ──────
+        # injections: (layer, name, title, dept_primary, sub_role, person_region)
+        injections: list[tuple[int, str, str, str, str, str]] = []
         for person in leadership.get("board", []):
             title = person["title"]
             if _is_board_chairman(title):
-                layer = 0
+                bod_layer = 0
             elif _is_vice_chair(title) or _is_committee_chair(title):
-                layer = 1
+                bod_layer = 1
             else:
-                layer = 2   # Regular NED / INED
+                bod_layer = 2   # Regular NED / INED
             sub_role = _board_sub_role(title)
-            injections.append((layer, person["name"], title, "Board of Management", sub_role))
+            # BOD members always at HQ — board governs the whole company
+            injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region))
         for person in leadership.get("executives", []):
             title = person["title"]
-            em_layer = 2 if _is_regional_exec(title) else 1
-            injections.append((em_layer, person["name"], title, "Executive Management", ""))
+            em_layer    = 2 if _is_regional_exec(title) else 1
+            exec_region = _infer_exec_region(title, region)
+            injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region))
 
         from inference_logic import ClassifiedRecord
-        for layer, name, title, dept_primary, sub_role in injections:
+        for layer, name, title, dept_primary, sub_role, person_region in injections:
             key = _name_key(name)
 
             # Web source can upgrade an AI-only entry: update the existing node's
@@ -1880,7 +1935,7 @@ def _enrich_with_llm_leadership(
                 linkedin_url="",
                 location="",
                 sector=sector,
-                region=region,
+                region=person_region,   # geo-inferred for EM, HQ for BOD
                 layer=layer,
                 dept_primary=dept_primary,
                 dept_secondary="",
