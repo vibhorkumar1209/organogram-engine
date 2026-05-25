@@ -813,107 +813,153 @@ def _parallel_run(query: str, api_key: str) -> str:
     return ""
 
 
-def _parse_parallel_json(text: str, key: str) -> list[dict]:
+def _extract_leadership_json(text: str) -> dict | None:
     """
-    Extract a list of {name, title} dicts from Parallel.AI's JSON response.
-    *key* is "board" or "executives".  Returns [] on failure.
+    Robustly extract {"board": [...], "executives": [...]} from any text.
+
+    Uses bracket-counting instead of regex so titles containing "]" (e.g.
+    "Independent Director [NED]", "Chairman [elected 2022]") don't break
+    parsing.  Tries:
+      1. Full JSON parse of the whole text (after stripping markdown fences).
+      2. Bracket-counted extraction of the first/largest {...} object.
+      3. Key-by-key bracket extraction for "board" and "executives" arrays.
+    Returns None when no parseable leadership data is found.
     """
     if not text:
-        return []
+        return None
+
     # Strip markdown code fences
     cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
-    # Try full parse
-    try:
-        data = json.loads(cleaned)
-        return _clean_list(data.get(key, []))
-    except (json.JSONDecodeError, ValueError):
-        pass
-    # Find JSON blob inside prose
-    pattern = rf'"{key}"\s*:\s*\[[\s\S]*?\]'
-    m = re.search(pattern, cleaned)
-    if m:
+
+    def _try_parse(s: str) -> dict | None:
         try:
-            data = json.loads("{" + m.group() + "}")
-            return _clean_list(data.get(key, []))
+            data = json.loads(s)
+            if not isinstance(data, dict):
+                return None
+            board = _clean_list(data.get("board", []))
+            execs = _clean_list(data.get("executives", []))
+            if board or execs:
+                return {"board": board, "executives": execs}
         except (json.JSONDecodeError, ValueError):
             pass
-    return []
+        return None
+
+    # 1. Try the whole text as-is
+    result = _try_parse(cleaned)
+    if result:
+        return result
+
+    # 2. Find outermost {...} object via bracket counting (handles ] in strings)
+    depth = 0
+    obj_start = -1
+    candidates: list[str] = []
+    for i, ch in enumerate(cleaned):
+        if ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                candidates.append(cleaned[obj_start: i + 1])
+    for cand in candidates:
+        result = _try_parse(cand)
+        if result:
+            return result
+
+    # 3. Key-by-key bracket extraction for arrays
+    def _extract_array(src: str, key: str) -> list[dict]:
+        pattern = re.compile(rf'"{key}"\s*:\s*\[')
+        m = pattern.search(src)
+        if not m:
+            return []
+        arr_start = m.end() - 1   # position of '['
+        depth_a = 0
+        for i, ch in enumerate(src[arr_start:], arr_start):
+            if ch == "[":
+                depth_a += 1
+            elif ch == "]":
+                depth_a -= 1
+                if depth_a == 0:
+                    try:
+                        arr = json.loads(src[arr_start: i + 1])
+                        return _clean_list(arr if isinstance(arr, list) else [])
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                    break
+        return []
+
+    board = _extract_array(cleaned, "board")
+    execs = _extract_array(cleaned, "executives")
+    if board or execs:
+        return {"board": board, "executives": execs}
+
+    return None
 
 
 def _parallel_fetch_leadership(company_name: str, domain: str,
                                api_key: str) -> dict | None:
     """
-    Use Parallel.AI to research BOD and Executive Management.
+    Single comprehensive Parallel.AI query for BOD + Executive Management.
 
-    Runs two targeted queries CONCURRENTLY (same wall-clock time as one):
-      - Query A: Board of Directors only → returns JSON {"board": [...]}
-      - Query B: Executive Committee / C-suite → returns JSON {"executives": [...]}
-
-    Returns a merged dict {"board": [...], "executives": [...]} or None.
-    Parallel.AI browses JS-rendered pages and annual reports — no URL guessing.
+    One query covers both (Parallel.AI browses governance + leadership pages
+    together — more efficient than two separate tasks hitting different servers).
+    Returns parsed dict or None.
     """
-    import concurrent.futures
-
     domain_hint = f"  Their website is {domain}." if domain else ""
 
-    bod_query = (
-        f'List ALL CURRENT members of the Board of Directors (or Supervisory Board '
-        f'/ Board of Trustees) of "{company_name}".{domain_hint}\n\n'
-        f'Check: official governance/board page, annual report, proxy statement, Wikipedia.\n\n'
-        f'Return ONLY this JSON (no explanation, no markdown):\n'
-        f'{{"board": [{{"name": "Full Name", "title": "Exact board title"}}]}}\n\n'
-        f'Include EVERY board member: Chairman, Deputy/Vice-Chairman, Senior Independent '
-        f'Director, Non-Executive Directors, Independent Non-Executive Directors, '
-        f'Executive Directors on the board, and committee chairs.\n'
-        f'EXCLUDE former/retired/emeritus board members.\n'
-        f'Be EXHAUSTIVE — include all members listed, not just the most prominent.'
+    query = (
+        f'Research ALL CURRENT board members and senior executives of "{company_name}".'
+        f'{domain_hint}\n\n'
+        f'Browse the official website (governance page, board-of-directors page, '
+        f'leadership/about page), annual report, and proxy statement.\n\n'
+        f'Return ONLY this JSON — absolutely no prose, no markdown fences:\n'
+        f'{{\n'
+        f'  "board": [\n'
+        f'    {{"name": "Full Name", "title": "Exact board title"}}\n'
+        f'  ],\n'
+        f'  "executives": [\n'
+        f'    {{"name": "Full Name", "title": "Exact leadership title"}}\n'
+        f'  ]\n'
+        f'}}\n\n'
+        f'board — include EVERY current board member:\n'
+        f'Chairman, Vice/Deputy Chairman, Senior Independent Director, '
+        f'Non-Executive Directors, Independent Directors, Executive Directors '
+        f'listed on the board, committee chairs (Audit, Remuneration, Risk, '
+        f'Nominations), Supervisory Board members, Board of Trustees members.\n\n'
+        f'executives — include EVERY person on the official leadership / '
+        f'management / executive committee page:\n'
+        f'CEO, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, General Counsel, '
+        f'Chief Strategy Officer, Chief Digital Officer, Chief Commercial Officer, '
+        f'Managing Partner, and ALL members of the Operating Committee / '
+        f'Executive Committee / Management Committee / Group Management Board / '
+        f'Leadership Team. For professional services firms: ALL managing partners '
+        f'and practice leaders named on the official leadership page. Include '
+        f'regional/country CEOs if listed on the global leadership page.\n\n'
+        f'EXCLUDE former, retired, ex-, emeritus executives.\n'
+        f'Be EXHAUSTIVE — include every person listed, not only the most senior.'
     )
 
-    em_query = (
-        f'List ALL CURRENT members of the Executive/Operating/Management Committee '
-        f'and C-suite leadership of "{company_name}".{domain_hint}\n\n'
-        f'Check: official leadership/executive-committee/management-team page, '
-        f'annual report, proxy statement.\n\n'
-        f'Return ONLY this JSON (no explanation, no markdown):\n'
-        f'{{"executives": [{{"name": "Full Name", "title": "Exact title"}}]}}\n\n'
-        f'Include:\n'
-        f'- Classic C-suite: CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, '
-        f'CRO, General Counsel, Chief Strategy Officer, Chief Digital Officer, '
-        f'Chief Commercial Officer, Managing Partner\n'
-        f'- ALL members of the Operating Committee / Executive Committee / '
-        f'Management Committee / Group Management Board / Leadership Team\n'
-        f'- For professional services firms: ALL managing partners / practice leaders '
-        f'on the official leadership page\n'
-        f'- Regional/country heads if listed on the global leadership page\n'
-        f'EXCLUDE former/retired/emeritus executives.\n'
-        f'Be EXHAUSTIVE — include every person listed, not just the most senior.'
-    )
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            f_bod = pool.submit(_parallel_run, bod_query, api_key)
-            f_em  = pool.submit(_parallel_run, em_query,  api_key)
-            bod_text = f_bod.result(timeout=_PARALLEL_TASK_TIMEOUT + 5)
-            em_text  = f_em.result(timeout=_PARALLEL_TASK_TIMEOUT + 5)
-    except Exception as exc:
-        logger.warning("Parallel.AI concurrent fetch error for '%s': %s", company_name, exc)
+    text = _parallel_run(query, api_key)
+    if not text:
+        logger.info("Parallel.AI returned empty for '%s'", company_name)
         return None
 
-    board = _parse_parallel_json(bod_text, "board")
-    execs = _parse_parallel_json(em_text,  "executives")
+    result = _extract_leadership_json(text)
+    if result and (result.get("board") or result.get("executives")):
+        logger.info(
+            "Parallel.AI for '%s': %d board, %d execs (JSON parsed)",
+            company_name, len(result["board"]), len(result["executives"]),
+        )
+        return result
 
-    if not board and not execs:
-        logger.info("Parallel.AI: no parseable leadership for '%s'", company_name)
-        # Return raw text as fallback so Claude can still try
-        combined = "\n\n".join(t for t in [bod_text, em_text] if t)
-        return {"_raw_text": combined} if combined else None
-
+    # JSON parse failed — return raw text so Claude can extract
     logger.info(
-        "Parallel.AI for '%s': %d board, %d execs",
-        company_name, len(board), len(execs),
+        "Parallel.AI JSON parse failed for '%s' (%d chars raw) — passing to Claude",
+        company_name, len(text),
     )
-    return {"board": board, "executives": execs}
+    return {"_raw_text": text}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
