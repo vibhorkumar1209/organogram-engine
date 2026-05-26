@@ -54,7 +54,7 @@ const SECTOR_COLORS: Record<string, string> = {
   Startup:    '#8B5CF6',
   Public:     '#06B6D4',
   Private:    '#64748B',
-  All:        '#3491E8',
+  All:        '#0c3649',
 }
 
 function nodeColor(node: OrgNode, fallback: string): string {
@@ -256,7 +256,7 @@ const PersonRow: React.FC<{
           display: 'flex', alignItems: 'center',
           paddingLeft: 12, paddingRight: 14,
           paddingTop: 8, paddingBottom: 8,
-          borderBottom: '1px solid #080e16',
+          borderBottom: '1px solid #f0f4f7',
           position: 'relative',
           cursor: hasReports ? 'pointer' : 'default',
         }}
@@ -318,14 +318,14 @@ const PersonRow: React.FC<{
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: 11.5, fontWeight: depth === 0 ? 700 : 600,
-            color: depth === 0 ? '#e2e8f0' : '#b0bec5',
+            color: depth === 0 ? '#00204d' : '#3d6880',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {p.label}
           </div>
           {p.metadata?.designation && (
             <div style={{
-              fontSize: 9.5, color: '#3a5a78', marginTop: 1,
+              fontSize: 9.5, color: '#627184', marginTop: 1,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {String(p.metadata.designation).slice(0, 36)}
@@ -340,9 +340,9 @@ const PersonRow: React.FC<{
             return (
               <div style={{
                 display: 'inline-block', marginTop: 2,
-                fontSize: 8, color: '#f59e0b',
-                background: '#1c1500', borderRadius: 3,
-                padding: '1px 5px', border: '1px solid #3d2900',
+                fontSize: 8, color: '#b45309',
+                background: '#fef3c7', borderRadius: 3,
+                padding: '1px 5px', border: '1px solid #fde68a',
               }}>
                 {roleLabel}
               </div>
@@ -351,25 +351,25 @@ const PersonRow: React.FC<{
           {/* Footer: region + location + linkedin + pay + source */}
           <div style={{ display: 'flex', gap: 7, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {p.metadata?.region && (
-              <span style={{ fontSize: 8.5, color: '#1e4d6b', background: '#0d2b3e',
-                borderRadius: 3, padding: '1px 5px', border: '1px solid #1a3a52' }}>
+              <span style={{ fontSize: 8.5, color: '#0c3649', background: '#eef5f9',
+                borderRadius: 3, padding: '1px 5px', border: '1px solid #bad4dc' }}>
                 🌐 {String(p.metadata.region)}
               </span>
             )}
             {p.metadata?.location && (
-              <span style={{ fontSize: 8.5, color: '#263d52' }}>
+              <span style={{ fontSize: 8.5, color: '#627184' }}>
                 📍 {String(p.metadata.location).split(',')[0]}
               </span>
             )}
             {p.metadata?.linkedin_url && (
               <a href={String(p.metadata.linkedin_url)} target="_blank" rel="noreferrer"
-                style={{ fontSize: 8.5, color: '#3491E8', textDecoration: 'none' }}
+                style={{ fontSize: 8.5, color: '#0c3649', textDecoration: 'none' }}
                 onClick={e => e.stopPropagation()}>
                 in ↗
               </a>
             )}
             {p.metadata?.pay && (
-              <span style={{ fontSize: 8, color: '#2d4a63' }}>
+              <span style={{ fontSize: 8, color: '#627184' }}>
                 💰{(Number(p.metadata.pay) / 1_000_000).toFixed(1)}M
               </span>
             )}
@@ -378,16 +378,16 @@ const PersonRow: React.FC<{
               const m = String(p.metadata?.nlp_method ?? '')
               if (m.includes('web'))
                 return (
-                  <span style={{ fontSize: 8, color: '#10b981', background: '#052e16',
-                    borderRadius: 3, padding: '1px 5px', border: '1px solid #064e3b',
+                  <span style={{ fontSize: 8, color: '#059669', background: '#ecfdf5',
+                    borderRadius: 3, padding: '1px 5px', border: '1px solid #a7f3d0',
                     marginLeft: 'auto' }}>
                     🌐 Website
                   </span>
                 )
               if (m.includes('llm_leadership'))
                 return (
-                  <span style={{ fontSize: 8, color: '#60a5fa', background: '#0c1d2e',
-                    borderRadius: 3, padding: '1px 5px', border: '1px solid #1e3a5f',
+                  <span style={{ fontSize: 8, color: '#0c3649', background: '#dde8ed',
+                    borderRadius: 3, padding: '1px 5px', border: '1px solid #bad4dc',
                     marginLeft: 'auto' }}>
                     ✦ AI Knowledge
                   </span>
@@ -400,9 +400,9 @@ const PersonRow: React.FC<{
         {/* Seniority badge */}
         <div style={{
           flexShrink: 0, marginLeft: 6,
-          fontSize: 8, color: pColor + '80',
-          background: pColor + '12', borderRadius: 3, padding: '2px 5px',
-          border: `1px solid ${pColor}20`, whiteSpace: 'nowrap',
+          fontSize: 8, color: pColor,
+          background: pColor + '15', borderRadius: 3, padding: '2px 5px',
+          border: `1px solid ${pColor}30`, whiteSpace: 'nowrap',
         }}>
           L{p.layer ?? '?'}
         </div>
@@ -411,7 +411,7 @@ const PersonRow: React.FC<{
         {hasReports && (
           <div style={{
             flexShrink: 0, marginLeft: 4,
-            fontSize: 8, color: '#334155',
+            fontSize: 8, color: '#627184',
           }}>
             {node.reports.length}↓
           </div>
@@ -554,10 +554,10 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
     <div style={{
       position: 'absolute', top: 0, right: 0, bottom: 0,
       width: 360, zIndex: 200,
-      background: '#07111a',
-      borderLeft: `1px solid ${color}33`,
+      background: '#ffffff',
+      borderLeft: `1px solid ${color}55`,
       display: 'flex', flexDirection: 'column',
-      boxShadow: '-20px 0 60px rgba(0,0,0,0.8)',
+      boxShadow: '-12px 0 40px rgba(12,54,73,0.12)',
       transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
       transition: 'transform 0.22s ease-out',
       pointerEvents: isOpen ? 'auto' : 'none',
@@ -566,13 +566,13 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
       {/* ── Header ──────────────────────────────────────────────── */}
       <div style={{
         padding: '14px 16px 12px',
-        borderBottom: `1px solid ${color}18`,
-        background: '#080f16',
+        borderBottom: `1px solid ${color}22`,
+        background: '#f5f9fb',
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
-              fontSize: 9, color: '#334155', letterSpacing: 1.2,
+              fontSize: 9, color: '#627184', letterSpacing: 1.2,
               textTransform: 'uppercase', marginBottom: 4,
             }}>
               {isBoard ? 'Board of Directors' : 'Executives'}
@@ -585,13 +585,13 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
               {deptNode?.label ?? ''}
             </div>
             {executives !== null && executives.length > 0 && (
-              <div style={{ fontSize: 9, color: '#334155', marginTop: 5, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 9, color: '#627184', marginTop: 5, lineHeight: 1.5 }}>
                 {layerSummary}
               </div>
             )}
           </div>
           <button onClick={onClose} style={{
-            background: 'none', border: 'none', color: '#475569',
+            background: 'none', border: 'none', color: '#627184',
             cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1, flexShrink: 0,
           }} title="Close">×</button>
         </div>
@@ -600,9 +600,9 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
       {/* ── Legend ─────────────────────────────────────────────── */}
       {executives !== null && executives.length > 0 && (
         <div style={{
-          padding: '6px 14px', background: '#060d14',
-          borderBottom: `1px solid #0c1e2e`,
-          display: 'flex', alignItems: 'center', gap: 12, fontSize: 9, color: '#2d4a63',
+          padding: '6px 14px', background: '#f5f9fb',
+          borderBottom: `1px solid #bad4dc`,
+          display: 'flex', alignItems: 'center', gap: 12, fontSize: 9, color: '#627184',
         }}>
           <span>▼ collapse</span>
           <span>▶ expand</span>
@@ -619,7 +619,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
         {executives === null && (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            height: 120, color: '#334155', fontSize: 12,
+            height: 120, color: '#627184', fontSize: 12,
           }}>
             ⟳ Loading…
           </div>
@@ -629,7 +629,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
         {executives !== null && executives.length === 0 && (
           <div style={{
             padding: '32px 18px', textAlign: 'center',
-            color: '#334155', fontSize: 12,
+            color: '#627184', fontSize: 12,
           }}>
             No executives found for this department.
           </div>
@@ -651,9 +651,9 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
                   padding: '5px 12px 5px 10px',
-                  background: isPrimary ? '#071220' : '#060e1a',
-                  borderTop:    gi === 0 ? 'none' : `1px solid #0e1e2e`,
-                  borderBottom: isRgnCollapsed ? 'none' : '1px solid #0e1e2e',
+                  background: isPrimary ? '#eef5f9' : '#f5f9fb',
+                  borderTop:    gi === 0 ? 'none' : `1px solid #dde8ed`,
+                  borderBottom: isRgnCollapsed ? 'none' : '1px solid #dde8ed',
                   borderLeft:   `3px solid ${color}${isPrimary ? 'cc' : '55'}`,
                   cursor: 'pointer', userSelect: 'none',
                 }}
@@ -664,19 +664,20 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
                 <span style={{
                   fontSize: 9, fontWeight: 700, letterSpacing: 0.8,
                   textTransform: 'uppercase',
-                  color: isPrimary ? color + 'dd' : color + '66',
+                  color: isPrimary ? color : color + '88',
                   flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
                   {region}
                 </span>
                 <span style={{
-                  fontSize: 8, color: isPrimary ? '#4a7a9b' : '#2a4a62',
-                  background: isPrimary ? '#0c1e30' : '#080f18',
+                  fontSize: 8, color: isPrimary ? '#0c3649' : '#627184',
+                  background: isPrimary ? '#dde8ed' : '#f5f9fb',
+                  border: '1px solid #bad4dc',
                   borderRadius: 3, padding: '1px 6px', flexShrink: 0,
                 }}>
                   {regionExecs.length}
                 </span>
-                <span style={{ fontSize: 8, color: color + '55', marginLeft: 4, flexShrink: 0 }}>
+                <span style={{ fontSize: 8, color: color + '77', marginLeft: 4, flexShrink: 0 }}>
                   {isRgnCollapsed ? '▸' : '▾'}
                 </span>
               </div>

@@ -412,31 +412,32 @@ export default function App() {
 
   return (
     <div
-      style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#080f16' }}
+      style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#ffffff' }}
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
       {/* ── HEADER ────────────────────────────────────────────── */}
       <header style={{
-        height: 56, flexShrink: 0, background: '#0a1520',
-        borderBottom: '1px solid #1e3a52',
+        height: 56, flexShrink: 0,
+        background: 'linear-gradient(135deg, #0c3649, #12516e)',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
         display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12,
         overflow: 'hidden',
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 4, flexShrink: 0 }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" stroke="#3491E8" strokeWidth="1.5" fill="none"/>
-            <circle cx="12" cy="12" r="3" fill="#3491E8"/>
-            <line x1="12" y1="4" x2="12" y2="9" stroke="#3491E8" strokeWidth="1.2"/>
-            <line x1="12" y1="15" x2="12" y2="20" stroke="#3491E8" strokeWidth="1.2"/>
-            <line x1="4.7" y1="8.5" x2="9" y2="10.5" stroke="#3491E8" strokeWidth="1.2"/>
-            <line x1="15" y1="13.5" x2="19.3" y2="15.5" stroke="#3491E8" strokeWidth="1.2"/>
-            <line x1="4.7" y1="15.5" x2="9" y2="13.5" stroke="#3491E8" strokeWidth="1.2"/>
-            <line x1="15" y1="10.5" x2="19.3" y2="8.5" stroke="#3491E8" strokeWidth="1.2"/>
+            <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" stroke="#ffffff" strokeWidth="1.5" fill="none"/>
+            <circle cx="12" cy="12" r="3" fill="#ffffff"/>
+            <line x1="12" y1="4" x2="12" y2="9" stroke="#ffffff" strokeWidth="1.2"/>
+            <line x1="12" y1="15" x2="12" y2="20" stroke="#ffffff" strokeWidth="1.2"/>
+            <line x1="4.7" y1="8.5" x2="9" y2="10.5" stroke="#ffffff" strokeWidth="1.2"/>
+            <line x1="15" y1="13.5" x2="19.3" y2="15.5" stroke="#ffffff" strokeWidth="1.2"/>
+            <line x1="4.7" y1="15.5" x2="9" y2="13.5" stroke="#ffffff" strokeWidth="1.2"/>
+            <line x1="15" y1="10.5" x2="19.3" y2="8.5" stroke="#ffffff" strokeWidth="1.2"/>
           </svg>
-          <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 14, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
+          <span style={{ color: '#ffffff', fontWeight: 700, fontSize: 14, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
             Organogram Engine
           </span>
         </div>
@@ -447,9 +448,10 @@ export default function App() {
         <button
           onClick={() => fileInputRef.current?.click()}
           style={{
-            background: '#0c3649', border: '1px solid #1e3a52', borderRadius: 7,
-            padding: '5px 12px', color: '#3491E8', fontSize: 11, cursor: 'pointer',
+            background: '#E63946', border: 'none', borderRadius: 7,
+            padding: '5px 12px', color: '#ffffff', fontSize: 11, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', flexShrink: 0,
+            fontWeight: 600,
           }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -470,8 +472,8 @@ export default function App() {
         <button
           onClick={loadDemo}
           style={{
-            background: 'transparent', border: '1px solid #1e3a52', borderRadius: 7,
-            padding: '5px 10px', color: '#64748b', fontSize: 11, cursor: 'pointer',
+            background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
+            padding: '5px 10px', color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
             whiteSpace: 'nowrap', flexShrink: 0,
           }}
         >
@@ -483,7 +485,7 @@ export default function App() {
             onClick={handleReset}
             title="Clear loaded data"
             style={{
-              background: 'transparent', border: '1px solid #3b1e1e', borderRadius: 7,
+              background: 'transparent', border: '1px solid rgba(230,57,70,0.45)', borderRadius: 7,
               padding: '5px 10px', color: '#E63946', fontSize: 11, cursor: 'pointer',
               whiteSpace: 'nowrap', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
             }}
@@ -502,15 +504,15 @@ export default function App() {
 
         {/* ── SIDEBAR ──────────────────────────────────────────── */}
         <aside style={{
-          width: 180, flexShrink: 0, background: '#080f16',
-          borderRight: '1px solid #0c1e2e',
+          width: 180, flexShrink: 0, background: '#0c3649',
+          borderRight: '1px solid rgba(255,255,255,0.1)',
           padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 18,
           overflowY: 'auto',
         }}>
           {/* Stats */}
           {stats && (
             <div>
-              <div style={{ fontSize: 10, color: '#334155', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
                 Dataset
               </div>
               {([
@@ -520,20 +522,20 @@ export default function App() {
               ] as [string, number][]).map(([label, val]) => (
                 <div key={label} style={{
                   display: 'flex', justifyContent: 'space-between',
-                  padding: '3px 0', borderBottom: '1px solid #0c1e2e', fontSize: 11,
+                  padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', fontSize: 11,
                 }}>
-                  <span style={{ color: '#475569' }}>{label}</span>
-                  <span style={{ color: '#3491E8', fontWeight: 700 }}>{val}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.6)' }}>{label}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 700 }}>{val}</span>
                 </div>
               ))}
               {industry && (
                 <div style={{
                   marginTop: 8, padding: '4px 6px',
-                  background: '#0c1e2e', borderRadius: 4,
-                  fontSize: 10, color: '#94a3b8', lineHeight: 1.4,
+                  background: 'rgba(255,255,255,0.1)', borderRadius: 4,
+                  fontSize: 10, lineHeight: 1.4,
                 }}>
-                  <span style={{ color: '#475569', display: 'block', marginBottom: 2 }}>INDUSTRY</span>
-                  <span style={{ color: '#3491E8', fontWeight: 600 }}>{industry}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 2 }}>INDUSTRY</span>
+                  <span style={{ color: 'rgba(255,255,255,0.9)', fontWeight: 600 }}>{industry}</span>
                 </div>
               )}
             </div>
@@ -541,7 +543,7 @@ export default function App() {
 
           {/* How to use */}
           <div>
-            <div style={{ fontSize: 10, color: '#334155', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>
               How to use
             </div>
             {[
@@ -550,8 +552,8 @@ export default function App() {
               ['‹', 'Click department again to collapse'],
               ['⊙', 'Fit chart to screen'],
             ].map(([icon, tip]) => (
-              <div key={tip} style={{ display: 'flex', gap: 6, padding: '3px 0', fontSize: 10, color: '#374e65' }}>
-                <span style={{ color: '#3491E8', width: 10, flexShrink: 0 }}>{icon}</span>
+              <div key={tip} style={{ display: 'flex', gap: 6, padding: '3px 0', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
+                <span style={{ color: 'rgba(255,255,255,0.85)', width: 10, flexShrink: 0 }}>{icon}</span>
                 <span>{tip}</span>
               </div>
             ))}
@@ -561,7 +563,7 @@ export default function App() {
           {history.length > 0 && (
             <div>
               <div style={{
-                fontSize: 10, color: '#334155', letterSpacing: 1,
+                fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 1,
                 textTransform: 'uppercase', marginBottom: 8,
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}>
@@ -584,27 +586,27 @@ export default function App() {
                   title={`Restore ${entry.companyName}`}
                   style={{
                     display: 'flex', alignItems: 'flex-start', gap: 4,
-                    padding: '5px 4px', borderBottom: '1px solid #0c1e2e',
+                    padding: '5px 4px', borderBottom: '1px solid rgba(255,255,255,0.08)',
                     cursor: 'pointer', borderRadius: 4,
                     transition: 'background 0.15s',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#0c1e2e')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   {/* Chart icon */}
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                    stroke="#3491E8" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                    stroke="rgba(255,255,255,0.65)" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
                     <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
                     <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
                   </svg>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
-                      fontSize: 10, color: '#64748b', fontWeight: 600,
+                      fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: 600,
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     }}>
                       {entry.companyName}
                     </div>
-                    <div style={{ fontSize: 8.5, color: '#334155' }}>
+                    <div style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.38)' }}>
                       {relativeTime(entry.timestamp)}
                       {entry.industry ? ` · ${entry.industry}` : ''}
                     </div>
@@ -614,7 +616,7 @@ export default function App() {
                     title="Remove from history"
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer',
-                      color: '#334155', fontSize: 12, padding: '0 2px',
+                      color: 'rgba(255,255,255,0.3)', fontSize: 12, padding: '0 2px',
                       lineHeight: 1, flexShrink: 0,
                     }}
                   >
@@ -634,11 +636,13 @@ export default function App() {
           {(status === 'loading' || isBackendDown) && (
             <div style={{
               position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-              zIndex: 50, background: isBackendDown ? '#1a0a0a' : '#0c1e2e',
-              border: `1px solid ${isBackendDown ? '#E63946' : '#1e3a52'}`,
+              zIndex: 50,
+              background: isBackendDown ? '#fff5f5' : '#f5f9fb',
+              border: `1px solid ${isBackendDown ? '#E63946' : '#bad4dc'}`,
               borderRadius: 8, padding: '8px 16px', fontSize: 12,
-              color: isBackendDown ? '#E63946' : '#94a3b8',
+              color: isBackendDown ? '#E63946' : '#627184',
               maxWidth: 620, textAlign: 'center',
+              boxShadow: '0 4px 16px rgba(12,54,73,0.1)',
             }}>
               {status === 'loading' ? `⟳ ${statusMsg}` : `⚠ ${statusMsg}`}
             </div>
@@ -648,8 +652,8 @@ export default function App() {
           {expandingId && (
             <div style={{
               position: 'absolute', top: 12, right: 60, zIndex: 50,
-              background: '#0c1e2e', border: '1px solid #1e3a52',
-              borderRadius: 8, padding: '6px 14px', fontSize: 11, color: '#3491E8',
+              background: '#f5f9fb', border: '1px solid #bad4dc',
+              borderRadius: 8, padding: '6px 14px', fontSize: 11, color: '#0c3649',
             }}>
               ⟳ Loading…
             </div>
@@ -676,11 +680,11 @@ export default function App() {
           {dragging && (
             <div style={{
               position: 'absolute', inset: 0, zIndex: 100,
-              background: 'rgba(52,145,232,0.08)', border: '2px dashed #3491E8',
+              background: 'rgba(12,54,73,0.06)', border: '2px dashed #0c3649',
               borderRadius: 8, margin: 12,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <div style={{ fontSize: 18, color: '#3491E8' }}>Drop CSV / JSON / Excel to load</div>
+              <div style={{ fontSize: 18, color: '#0c3649' }}>Drop CSV / JSON / Excel to load</div>
             </div>
           )}
 
@@ -691,8 +695,8 @@ export default function App() {
               display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center', gap: 16,
             }}>
-              <div style={{ fontSize: 48, opacity: 0.1 }}>⬡</div>
-              <div style={{ color: '#334155', fontSize: 14 }}>Drop a file or click "Demo"</div>
+              <div style={{ fontSize: 48, opacity: 0.08, color: '#0c3649' }}>⬡</div>
+              <div style={{ color: '#627184', fontSize: 14 }}>Drop a file or click "Demo"</div>
               {/* Company website input for BOD/EM enrichment */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                 <input
@@ -702,12 +706,12 @@ export default function App() {
                   onChange={e => setCompanyWebsite(e.target.value)}
                   style={{
                     width: 340, padding: '6px 12px',
-                    background: '#0c1929', border: '1px solid #1e3a52',
-                    borderRadius: 6, color: '#94a3b8', fontSize: 12,
+                    background: '#f5f9fb', border: '1px solid #dde8ed',
+                    borderRadius: 6, color: '#00204d', fontSize: 12,
                     outline: 'none',
                   }}
                 />
-                <div style={{ fontSize: 11, color: '#1e3a52' }}>
+                <div style={{ fontSize: 11, color: '#bad4dc' }}>
                   Used to fetch Board of Directors &amp; Executive Management from the company website
                 </div>
               </div>
@@ -729,7 +733,7 @@ export default function App() {
           {(status === 'ready' || isBackendDown) && viewTree && (
             <div style={{
               position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
-              fontSize: 11, color: '#1e3a52', whiteSpace: 'nowrap', pointerEvents: 'none',
+              fontSize: 11, color: '#bad4dc', whiteSpace: 'nowrap', pointerEvents: 'none',
             }}>
               Click the org › to expand departments&nbsp;·&nbsp;
               Click a department › to view executives&nbsp;·&nbsp;

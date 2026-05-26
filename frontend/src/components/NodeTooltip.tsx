@@ -51,27 +51,27 @@ export const NodeTooltip: React.FC<Props> = ({ node, x, y }) => {
         {node.is_ghost ? '✦ ' : ''}{node.label}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px', color: '#94a3b8' }}>
-        <span style={{ color: '#475569' }}>Type</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px', color: '#3d6880' }}>
+        <span style={{ color: '#627184' }}>Type</span>
         <span>{typeLabel}</span>
 
         {node.layer >= 0 && (
           <>
-            <span style={{ color: '#475569' }}>Layer</span>
+            <span style={{ color: '#627184' }}>Layer</span>
             <span>{node.layer} — {layerLabel}</span>
           </>
         )}
 
         {node.sector && node.sector !== 'All' && (
           <>
-            <span style={{ color: '#475569' }}>Sector</span>
+            <span style={{ color: '#627184' }}>Sector</span>
             <span>{node.sector}</span>
           </>
         )}
 
         {node.metadata?.designation && (
           <>
-            <span style={{ color: '#475569' }}>Title</span>
+            <span style={{ color: '#627184' }}>Title</span>
             <span>{node.metadata.designation}</span>
           </>
         )}
@@ -80,33 +80,33 @@ export const NodeTooltip: React.FC<Props> = ({ node, x, y }) => {
             uploaded data often carries the org name as company, which is redundant */}
         {node.metadata?.company && node.metadata?.nlp_method === 'llm_leadership' && (
           <>
-            <span style={{ color: '#475569' }}>Company</span>
+            <span style={{ color: '#627184' }}>Company</span>
             <span>{node.metadata.company}</span>
           </>
         )}
 
         {node.metadata?.location && (
           <>
-            <span style={{ color: '#475569' }}>Location</span>
+            <span style={{ color: '#627184' }}>Location</span>
             <span>{node.metadata.location}</span>
           </>
         )}
 
         {node.metadata?.dept_primary && node.node_type === 'person' && (
           <>
-            <span style={{ color: '#475569' }}>Dept</span>
+            <span style={{ color: '#627184' }}>Dept</span>
             <span>{node.metadata.dept_primary} › {node.metadata.dept_secondary}</span>
           </>
         )}
 
         {node.metadata?.linkedin_url && (
           <>
-            <span style={{ color: '#475569' }}>LinkedIn</span>
+            <span style={{ color: '#627184' }}>LinkedIn</span>
             <a
               href={String(node.metadata.linkedin_url)}
               target="_blank"
               rel="noreferrer"
-              style={{ color: '#3491E8', fontSize: 11, pointerEvents: 'auto' }}
+              style={{ color: '#0c3649', fontSize: 11, pointerEvents: 'auto' }}
               onClick={e => e.stopPropagation()}
             >
               View Profile ↗
@@ -116,17 +116,17 @@ export const NodeTooltip: React.FC<Props> = ({ node, x, y }) => {
 
         {node.node_type === 'person' && node.metadata?.nlp_industry && node.metadata.nlp_industry !== 'generic' && (
           <>
-            <span style={{ color: '#475569' }}>Industry</span>
+            <span style={{ color: '#627184' }}>Industry</span>
             <span style={{ color: '#10b981' }}>{String(node.metadata.nlp_industry).replace(/_/g, ' ')}</span>
           </>
         )}
 
         {node.node_type === 'person' && node.metadata?.nlp_confidence != null && (
           <>
-            <span style={{ color: '#475569' }}>Confidence</span>
+            <span style={{ color: '#627184' }}>Confidence</span>
             <span style={{ color: (node.metadata.nlp_confidence as number) >= 0.8 ? '#10b981' : (node.metadata.nlp_confidence as number) >= 0.6 ? '#f59e0b' : '#ef4444' }}>
               {Math.round((node.metadata.nlp_confidence as number) * 100)}%
-              <span style={{ color: '#475569', fontStyle: 'italic', marginLeft: 4, fontSize: 10 }}>
+              <span style={{ color: '#627184', fontStyle: 'italic', marginLeft: 4, fontSize: 10 }}>
                 ({node.metadata.nlp_method})
               </span>
             </span>
@@ -135,8 +135,8 @@ export const NodeTooltip: React.FC<Props> = ({ node, x, y }) => {
 
         {node.is_ghost && (
           <>
-            <span style={{ color: '#475569' }}>Note</span>
-            <span style={{ color: '#6b7280', fontStyle: 'italic' }}>Data pending</span>
+            <span style={{ color: '#627184' }}>Note</span>
+            <span style={{ color: '#627184', fontStyle: 'italic' }}>Data pending</span>
           </>
         )}
       </div>

@@ -30,7 +30,7 @@ const SECTOR_COLORS: Record<string, string> = {
   Startup:    '#8B5CF6',
   Public:     '#06B6D4',
   Private:    '#64748B',
-  All:        '#3491E8',
+  All:        '#0c3649',
 }
 
 const NODE_TYPE_ICON: Record<string, string> = {
@@ -218,9 +218,9 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .attr('width', NODE_W).attr('height', NODE_H)
       .attr('rx', 8).attr('ry', 8)
       .attr('fill', d => {
-        if (d.data.node_id === highlightId) return '#0f2a3f'
-        if (d.data.node_type === 'person')  return '#091624'
-        return '#0a1520'
+        if (d.data.node_id === highlightId) return '#ddeef5'
+        if (d.data.node_type === 'person')  return '#f3f5f8'
+        return '#f5f9fb'
       })
       .attr('stroke', d => accentColor(d))
       .attr('stroke-width', d => {
@@ -228,7 +228,7 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
         if (d.data.node_type === 'person')  return 1
         return 1.5
       })
-      .attr('stroke-opacity', d => d.data.node_type === 'person' ? 0.5 : 1)
+      .attr('stroke-opacity', d => d.data.node_type === 'person' ? 0.45 : 0.85)
 
     // ── Left accent bar ────────────────────────────────────────────────
     nodeGroups.append('rect')
@@ -251,7 +251,7 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .attr('x', -NODE_W / 2 + 32).attr('y', -6)
       .attr('font-size', d => d.data.node_type === 'person' ? 11.5 : 11)
       .attr('font-weight', 700)
-      .attr('fill', d => d.data.node_type === 'person' ? '#cbd5e1' : '#e2e8f0')
+      .attr('fill', '#00204d')
       .attr('text-anchor', 'start')
       .text(d => {
         const lbl = d.data.label
@@ -262,7 +262,7 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
     nodeGroups.append('text')
       .attr('x', -NODE_W / 2 + 32).attr('y', 9)
       .attr('font-size', 9.5)
-      .attr('fill', d => d.data.node_type === 'person' ? '#4a6580' : '#374e65')
+      .attr('fill', '#627184')
       .attr('text-anchor', 'start')
       .text(d => {
         if (d.data.node_type === 'person' && d.data.metadata?.designation)
@@ -325,8 +325,8 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
     ;[needsExpand, needsCollapse].forEach((sel, i) => {
       sel.append('circle')
         .attr('cx', NODE_W / 2 + 13).attr('cy', 0).attr('r', 9)
-        .attr('fill', '#060d14')
-        .attr('stroke', d => accentColor(d) + (i === 0 ? '55' : '33'))
+        .attr('fill', '#f5f9fb')
+        .attr('stroke', d => accentColor(d) + (i === 0 ? '88' : '55'))
         .attr('stroke-width', 1.2)
       sel.append('text')
         .attr('x', NODE_W / 2 + 13).attr('y', 5)

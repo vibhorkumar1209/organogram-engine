@@ -54,10 +54,10 @@ export const SearchBar: React.FC<Props> = ({ allNodes, onFocus }) => {
     <div style={{ position: 'relative' }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        background: '#0c1e2e', border: '1px solid #1e3a52',
+        background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
         borderRadius: 8, padding: '6px 12px',
       }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
         <input
@@ -69,13 +69,13 @@ export const SearchBar: React.FC<Props> = ({ allNodes, onFocus }) => {
           placeholder="Search name, title, department…"
           style={{
             background: 'transparent', border: 'none', outline: 'none',
-            color: '#e2e8f0', fontSize: 13, width: 220,
+            color: '#ffffff', fontSize: 13, width: 220,
           }}
         />
         {query && (
           <button
             onClick={() => { setQuery(''); setResults([]); setOpen(false) }}
-            style={{ background: 'none', border: 'none', color: '#475569',
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.55)',
                      cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 16 }}
           >×</button>
         )}
@@ -84,9 +84,9 @@ export const SearchBar: React.FC<Props> = ({ allNodes, onFocus }) => {
       {open && (
         <div style={{
           position: 'absolute', top: '110%', left: 0, right: 0,
-          background: '#0a1520', border: '1px solid #1e3a52',
+          background: '#ffffff', border: '1px solid #dde8ed',
           borderRadius: 8, overflow: 'hidden', zIndex: 200,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+          boxShadow: '0 8px 32px rgba(12,54,73,0.15)',
         }}>
           {results.map(node => (
             <div
@@ -95,23 +95,23 @@ export const SearchBar: React.FC<Props> = ({ allNodes, onFocus }) => {
               style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '8px 14px', cursor: 'pointer',
-                borderBottom: '1px solid #0c1e2e',
+                borderBottom: '1px solid #f0f4f7',
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#0c3649')}
+              onMouseEnter={e => (e.currentTarget.style.background = '#f5f9fb')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <span style={{ fontSize: 16 }}>{NODE_ICONS[node.node_type] ?? '•'}</span>
               <div>
-                <div style={{ fontSize: 13, color: '#e2e8f0' }}>{node.label}</div>
+                <div style={{ fontSize: 13, color: '#00204d' }}>{node.label}</div>
                 {node.metadata?.designation && (
-                  <div style={{ fontSize: 11, color: '#475569' }}>
+                  <div style={{ fontSize: 11, color: '#627184' }}>
                     {node.metadata.designation} · {node.sector}
                   </div>
                 )}
               </div>
               <div style={{
                 marginLeft: 'auto', fontSize: 10, color: node.color,
-                background: node.color + '22', borderRadius: 4,
+                background: node.color + '18', borderRadius: 4,
                 padding: '2px 6px', whiteSpace: 'nowrap',
               }}>
                 L{node.layer}
