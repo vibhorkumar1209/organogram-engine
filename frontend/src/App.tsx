@@ -17,6 +17,7 @@ interface HistoryEntry {
   deptTree:    OrgNode
   stats:       Stats
   industry:    string
+  source:      'demo' | 'upload'   // so restore knows whether to reload backend
 }
 
 function loadHistory(): HistoryEntry[] {
@@ -137,7 +138,7 @@ export default function App() {
   // ── History state ──────────────────────────────────────────────────
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
 
-  const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string) => {
+  const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string, src: 'demo' | 'upload' = 'upload') => {
     const entry: HistoryEntry = {
       id:          `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       companyName: tree.label || 'Unknown Company',
@@ -145,6 +146,7 @@ export default function App() {
       deptTree:    tree,
       stats:       s,
       industry:    ind,
+      source:      src,
     }
     setHistory(prev => {
       // Replace existing entry for same company so history stays tidy
@@ -156,6 +158,7 @@ export default function App() {
   }, [])
 
   const restoreSnapshot = useCallback((entry: HistoryEntry) => {
+    // Restore visual state from localStorage immediately
     setDeptTree(entry.deptTree)
     setStats(entry.stats)
     setIndustry(entry.industry)
@@ -164,6 +167,12 @@ export default function App() {
     setPanelDept(null); setPanelExecs(null)
     setHighlight(null)
     bumpFit()
+    // Reload backend data so /executives calls succeed after restore.
+    // Demo entries always reload the demo dataset.
+    // Upload entries: silently attempt reload — backend may still have data in memory.
+    if (entry.source === 'demo') {
+      fetch(`${API}/load-demo`, { method: 'POST' }).catch(() => {/* cold-start wake */})
+    }
   }, [])
 
   const deleteSnapshot = useCallback((id: string) => {
@@ -218,7 +227,7 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setStats(data.stats)
-      await loadDeptStructure(data.stats, data.industry ?? '')
+      await loadDeptStructure(data.stats, data.industry ?? '', 'demo')
     } catch {
       setStatus('error')
       setStatusMsg('Backend not running — using embedded demo. Start with: cd backend && uvicorn api_server:app')
@@ -227,7 +236,7 @@ export default function App() {
   }
 
   // ── Fetch dept-only structure ──────────────────────────────────────
-  const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string) => {
+  const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string, src: 'demo' | 'upload' = 'upload') => {
     // max_depth=3: root(0) → BOD(1) → EM(2) → direct depts(3).
     // Sub-departments expand lazily on click (has_more=true triggers lazy fetch).
     const res = await fetch(`${API}/tree?root=root_global&max_depth=3`)
@@ -238,7 +247,7 @@ export default function App() {
     bumpFit()          // force fit-to-screen on next render
     setStatus('ready')
     // Auto-save to history whenever a chart successfully loads
-    if (currentStats) saveSnapshot(filtered, currentStats, currentIndustry ?? '')
+    if (currentStats) saveSnapshot(filtered, currentStats, currentIndustry ?? '', src)
   }
 
   // ── Handle node click: expand / collapse / open panel ─────────────
@@ -335,7 +344,7 @@ export default function App() {
           `Detected columns: ${data.detected_columns?.join(', ') ?? '(unknown)'}.`
         )
       }
-      await loadDeptStructure(data.stats, data.industry ?? '')
+      await loadDeptStructure(data.stats, data.industry ?? '', 'upload')
     } catch (e: any) {
       clearInterval(tick)
       setStatus('error')

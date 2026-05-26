@@ -71,9 +71,10 @@ function nodeColor(node: OrgNode, fallback: string): string {
 // it hangs under the most-senior still-open group.
 
 interface ExecTreeNode {
-  person:    OrgNode
-  reports:   ExecTreeNode[]
-  isLast:    boolean
+  person:           OrgNode
+  reports:          ExecTreeNode[]
+  isLast:           boolean
+  isSkippedLevel?:  boolean   // true when connected across >1 seniority gap (no intermediate manager in data)
 }
 
 // Detect the GLOBAL CEO / Group President as the apex of EM.
@@ -124,6 +125,10 @@ function buildLayerTree(sorted: OrgNode[]): ExecTreeNode[] {
   }
 
   const assignReports = (parentGroup: LayerGroup, childGroup: LayerGroup) => {
+    // Detect layer gap: if child layer is more than 1 step below parent layer,
+    // the child is not a direct report but the closest available senior is used.
+    const isSkipped = childGroup.layer > parentGroup.layer + 1
+
     if (parentGroup.nodes.length === 1) {
       parentGroup.nodes[0].reports = childGroup.nodes
     } else {
@@ -135,7 +140,10 @@ function buildLayerTree(sorted: OrgNode[]): ExecTreeNode[] {
       }
     }
     for (const parent of parentGroup.nodes) {
-      parent.reports.forEach((r, i) => { r.isLast = i === parent.reports.length - 1 })
+      parent.reports.forEach((r, i) => {
+        r.isLast = i === parent.reports.length - 1
+        if (isSkipped) r.isSkippedLevel = true
+      })
     }
   }
 
@@ -232,6 +240,10 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
 }
 
 // ── Person row ────────────────────────────────────────────────────────
+const INFERRED_REPORT_NOTE =
+  'Reporting line inferred — no intermediate manager found in the data at the expected seniority level. ' +
+  'This person has been connected to the nearest available senior executive.'
+
 const PersonRow: React.FC<{
   node:       ExecTreeNode
   depth:      number
@@ -245,8 +257,13 @@ const PersonRow: React.FC<{
   const pColor = nodeColor(p, color)
   const hasReports = node.reports.length > 0
   const isCollapsed = collapsed.has(p.node_id)
+  const isSkipped   = node.isSkippedLevel === true
 
   const indent = depth * 20
+
+  // Dashed gradient for inferred reporting lines
+  const dashedV = `repeating-linear-gradient(to bottom, ${color}45, ${color}45 4px, transparent 4px, transparent 8px)`
+  const dashedH = `repeating-linear-gradient(to right, ${color}45, ${color}45 3px, transparent 3px, transparent 6px)`
 
   return (
     <>
@@ -259,6 +276,7 @@ const PersonRow: React.FC<{
           borderBottom: '1px solid #f0f4f7',
           position: 'relative',
           cursor: hasReports ? 'pointer' : 'default',
+          background: isSkipped ? 'rgba(245,159,11,0.03)' : undefined,
         }}
         onClick={() => hasReports && onToggle(p.node_id)}
       >
@@ -267,7 +285,8 @@ const PersonRow: React.FC<{
           <div style={{
             position: 'absolute', left: 12 + (depth - 1) * 20 + 8,
             top: 0, bottom: isLast ? '50%' : 0,
-            width: 1, background: color + '25',
+            width: 1,
+            background: isSkipped ? dashedV : color + '25',
             pointerEvents: 'none',
           }} />
         )}
@@ -287,7 +306,7 @@ const PersonRow: React.FC<{
             position: 'absolute',
             left: 12 + (depth - 1) * 20 + 8,
             top: '50%', width: 12, height: 1,
-            background: color + '30',
+            background: isSkipped ? dashedH : color + '30',
             pointerEvents: 'none',
           }} />
         )}
@@ -329,6 +348,21 @@ const PersonRow: React.FC<{
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {String(p.metadata.designation).slice(0, 36)}
+            </div>
+          )}
+          {/* Inferred reporting line badge */}
+          {isSkipped && (
+            <div
+              title={INFERRED_REPORT_NOTE}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                marginTop: 2, fontSize: 7.5, color: '#92400e',
+                background: '#fffbeb', border: '1px solid #fde68a',
+                borderRadius: 3, padding: '1px 5px', cursor: 'help',
+                fontStyle: 'italic',
+              }}
+            >
+              ⋯ reporting line inferred — connected to next available senior
             </div>
           )}
           {/* Committee / sub-role badge — shown for board members with a specific role */}
@@ -628,10 +662,14 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
         {/* Empty */}
         {executives !== null && executives.length === 0 && (
           <div style={{
-            padding: '32px 18px', textAlign: 'center',
-            color: '#627184', fontSize: 12,
+            padding: '28px 18px', textAlign: 'center',
+            color: '#627184', fontSize: 12, lineHeight: 1.6,
           }}>
-            No executives found for this department.
+            <div style={{ fontSize: 20, marginBottom: 8, opacity: 0.3 }}>⊘</div>
+            <div>No people found for this department.</div>
+            <div style={{ fontSize: 10, color: '#bad4dc', marginTop: 6 }}>
+              If you restored from history, re-upload your CSV<br/>to reload executives from the server.
+            </div>
           </div>
         )}
 

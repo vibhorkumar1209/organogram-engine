@@ -194,10 +194,8 @@ _CANONICAL_PRIMARY: frozenset[str] = frozenset({
     # ── R&D ─────────────────────────────────────────────────────────────
     "Research & Development",
     # ── Financial-services industry-specific ────────────────────────────
-    "Actuarial",
-    "Underwriting",
-    "Claims",
     "Investment Management",
+    # Note: Actuarial, Underwriting, Claims are now Operations sub-depts
     # ── Investment bank / markets business divisions ─────────────────────
     "Investment Banking",
     "Sales & Trading",
@@ -319,12 +317,15 @@ _DEPT_REMAP: dict[str, str] = {
     "performance marketing":            "Marketing",
     "product marketing":                "Marketing",
     "marketing & brand":                "Marketing",
+    # ── Corporate Communications → sub-dept of Marketing ─────────────────
+    # Plain comms/internal comms sit under Marketing.
+    # External-facing public affairs/government relations remain standalone.
+    "corporate communications":         "Marketing",
+    "internal communications":          "Marketing",
+    "communications":                   "Marketing",
     # ── Corporate Communications & Public Affairs (standalone) ────────────
-    "communications":                   "Corporate Communications & Public Affairs",
     "public relations":                 "Corporate Communications & Public Affairs",
     "pr":                               "Corporate Communications & Public Affairs",
-    "corporate communications":         "Corporate Communications & Public Affairs",
-    "internal communications":          "Corporate Communications & Public Affairs",
     "external affairs":                 "Corporate Communications & Public Affairs",
     "public affairs":                   "Corporate Communications & Public Affairs",
     "government relations":             "Corporate Communications & Public Affairs",
@@ -340,6 +341,13 @@ _DEPT_REMAP: dict[str, str] = {
     "post sales":                       "Customer Success & Service",
     "customer experience":              "Customer Success & Service",
     "customer success":                 "Customer Success & Service",
+    # ── Insurance / financial-services ops (sub-depts of Operations) ─────
+    "actuarial":                        "Operations",
+    "underwriting":                     "Operations",
+    "claims":                           "Operations",
+    "claims management":                "Operations",
+    "claims & operations":              "Operations",
+    "reinsurance":                      "Operations",
     # ── Operations / industry-specific ───────────────────────────────────
     "upstream":                         "Operations",
     "downstream":                       "Operations",
@@ -557,15 +565,16 @@ _DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "creative":                         ("Marketing", "Brand & Creative"),
     "events":                           ("Marketing", "Field & Event Marketing"),
     "trade marketing":                  ("Marketing", "Field & Event Marketing"),
+    # ── Corporate Communications → Marketing sub-dept ───────────────────
+    "corporate communications":         ("Marketing", "Corporate Communications"),
+    "communications":                   ("Marketing", "Corporate Communications"),
+    "internal communications":          ("Marketing", "Corporate Communications"),
     # ── Corporate Communications & Public Affairs sub-depts ──────────────
-    "corporate communications":         ("Corporate Communications & Public Affairs", "Corporate Communications"),
     "public relations":                 ("Corporate Communications & Public Affairs", "Corporate Communications"),
     "pr":                               ("Corporate Communications & Public Affairs", "Corporate Communications"),
     "external affairs":                 ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
     "public affairs":                   ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
     "government relations":             ("Corporate Communications & Public Affairs", "Public Affairs & Government Relations"),
-    "communications":                   ("Corporate Communications & Public Affairs", "Corporate Communications"),
-    "internal communications":          ("Corporate Communications & Public Affairs", "Corporate Communications"),
     "media relations":                  ("Corporate Communications & Public Affairs", "Corporate Communications"),
     # ── Customer Success & Service sub-depts ─────────────────────────────
     "customer experience":              ("Customer Success & Service", "Customer Experience"),
@@ -641,6 +650,13 @@ _DEPT_ELEVATE: dict[str, tuple[str, str]] = {
     "r&d":                              ("Research & Development", "Research"),
     "product development":              ("Research & Development", "Product Development"),
     # ── Operations sub-depts ────────────────────────────────────────────
+    # Insurance / financial-services operations
+    "actuarial":                        ("Operations", "Actuarial"),
+    "underwriting":                     ("Operations", "Underwriting"),
+    "claims":                           ("Operations", "Claims Management"),
+    "claims management":                ("Operations", "Claims Management"),
+    "claims & operations":              ("Operations", "Claims Management"),
+    "reinsurance":                      ("Operations", "Reinsurance"),
     "health, safety & environment":     ("Operations", "Quality Assurance & EHS"),
     "hse":                              ("Operations", "Quality Assurance & EHS"),
     "ehs":                              ("Operations", "Quality Assurance & EHS"),
