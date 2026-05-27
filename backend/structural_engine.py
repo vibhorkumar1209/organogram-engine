@@ -2013,27 +2013,31 @@ def _enrich_with_llm_leadership(
             existing_keys.add(key)
 
             person_uid = f"llm_{uuid.uuid4().hex[:12]}"
-            rec = ClassifiedRecord(
-                id=person_uid,
-                full_name=name,
-                designation=title,
-                company=co,
-                linkedin_url="",
-                location="",
-                sector=sector,
-                region=person_region,   # geo-inferred for EM, HQ for BOD
-                layer=layer,
-                dept_primary=dept_primary,
-                dept_secondary="",
-                dept_tertiary="",
-                nlp_confidence=0.9,
-                nlp_industry="llm",
-                nlp_method=nlp_meth,
-            )
-            dag.insert_person(rec)
-            # Attach board sub-role for ExecPanel committee badge display
-            if sub_role and person_uid in dag.G:
-                dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
+            try:
+                rec = ClassifiedRecord(
+                    id=person_uid,
+                    full_name=name,
+                    designation=title,
+                    company=co,
+                    linkedin_url="",
+                    location="",
+                    country="",
+                    sector=sector,
+                    region=person_region,   # geo-inferred for EM, HQ for BOD
+                    layer=layer,
+                    dept_primary=dept_primary,
+                    dept_secondary="",
+                    dept_tertiary="",
+                    nlp_confidence=0.9,
+                    nlp_industry="llm",
+                    nlp_method=nlp_meth,
+                )
+                dag.insert_person(rec)
+                # Attach board sub-role for ExecPanel committee badge display
+                if sub_role and person_uid in dag.G:
+                    dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
+            except Exception as _exc:
+                logger.warning("Failed to inject leadership person %s: %s", name, _exc)
 
     # ── Guarantee BOD node always exists ─────────────────────────────────
     # BOD is only created when board members are found.  If web + LLM returned
