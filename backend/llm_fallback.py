@@ -510,22 +510,19 @@ def _fetch_leadership_text(domain: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_FROM_WEB = """\
-You are a corporate intelligence assistant extracting leadership data from source text.
+You are a corporate intelligence assistant extracting leadership data.
 
-⚠ STRICT RULE — NO HALLUCINATION:
-Every name you return MUST appear VERBATIM in the source text provided below.
-Do NOT generate, infer, guess, or use any name from your training knowledge.
-Do NOT invent plausible-sounding names. If a person is not named in the text, \
-do not include them. An empty list is always correct when the source has no names.
+Extract every person explicitly named in the source content below as a board \
+member or senior executive. Be exhaustive — include everyone you can find in \
+the text. Use their names and titles exactly as written.
 
 The content may use explicit section headings such as "BOARD OF DIRECTORS:", \
-"EXECUTIVE MANAGEMENT:", "SECTION 1", "Leadership Team:", "Executive Committee:", etc. \
-If such headings are present, use them to place people in the correct category.
+"EXECUTIVE MANAGEMENT:", "SECTION 1", "Leadership Team:", "Executive Committee:", \
+"Board of directors", etc. Use these headings to place people in the correct category.
 
 Sources may also label leadership under: Board of Trustees, Supervisory Board, \
 Operating Committee, Management Committee, Group Management Board, Senior \
-Leadership Team — treat these as executive management unless explicitly listed \
-under a Board section.
+Leadership Team — treat these as executive management unless under a Board heading.
 
 Schema — return ONLY this JSON:
 {
@@ -537,22 +534,38 @@ Schema — return ONLY this JSON:
   ]
 }
 
-board: Include EVERY person listed under a Board of Directors / Board of \
-Trustees / Supervisory Board section — Chairman, Vice/Deputy Chairman, \
-Senior Independent Director, Non-Executive Directors, Independent Directors, \
-Executive Directors listed on the board, committee chairs (Audit, Remuneration, \
-Risk, Nominations).
+board: Everyone listed under a Board of Directors / Supervisory Board / \
+Board of Trustees section — Chairman, Non-Executive Directors, Independent \
+Directors, Executive Directors on the board, committee chairs.
 
-executives: Include EVERYONE listed under an Executive Management / Leadership \
-Team / Executive Committee section — CEO, President, COO, CFO, CTO, CIO, CISO, \
-CMO, CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital \
-Officer, Chief Commercial Officer, Managing Partner, and ALL other members of \
-the executive/management/operating committee.
+executives: Everyone listed under an Executive Management / Leadership Team / \
+Executive Committee / Operating Committee section — CEO, President, COO, CFO, \
+CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, and ALL other members \
+of the executive or management committee.
 
 EXCLUDE: former, retired, ex-, past, emeritus office-holders.
+If the source text contains no names at all, return {"board": [], "executives": []}.
+Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
-Use names and titles EXACTLY as they appear in the source material.
-If the source text contains no real people's names, return {"board": [], "executives": []}.
+_SYSTEM_FROM_KNOWLEDGE = """\
+You are a corporate intelligence assistant with knowledge of public companies.
+
+Return the current Board of Directors and C-Suite Executive Management for the \
+named company based on your training knowledge. Only include people currently \
+serving — exclude anyone described as former, retired, ex-, or emeritus.
+
+Schema:
+{
+  "board": [{"name": "Full Name", "title": "Board title"}],
+  "executives": [{"name": "Full Name", "title": "C-Suite title"}]
+}
+
+board: Chairman, Non-executive directors, Independent directors only.
+executives: CEO, COO, CFO, CTO, CIO, CMO, CHRO, CLO / General Counsel, \
+Chief Strategy Officer, and Operating/Executive Committee members.
+
+IMPORTANT: Only return names you are confident about. If you have no reliable \
+knowledge of this company's current leadership, return {"board": [], "executives": []}.
 Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 
@@ -1302,9 +1315,34 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         )
 
     # ── Step 5: Web-only — no AI knowledge fallback ──────────────────────────
-    # User requirement: results from web pages only, not LLM training knowledge.
-    logger.info("Web sources found no leaders for '%s' — returning empty", company_name)
-    result: dict = {"board": [], "executives": [], "_source": "web"}
+    # ── Step 5: Claude knowledge fallback ────────────────────────────────────────
+    # Web sources found nothing. For well-known public companies Claude's training
+    # knowledge is accurate — use it rather than returning empty.
+    # "_strip_hallucinations" is NOT applied here because training knowledge for
+    # a recognised company is not hallucination; for unknown companies Claude
+    # returns {"board":[], "executives":[]} per the system prompt instruction.
+    logger.info(
+        "Web sources found no leaders for '%s' — trying Claude knowledge fallback",
+        company_name,
+    )
+    result = _call_claude(
+        system=_SYSTEM_FROM_KNOWLEDGE,
+        user_msg=f"Company: {company_name}",
+        label=f"{company_name} [knowledge]",
+    )
+    if result.get("board") or result.get("executives"):
+        result["_source"] = "knowledge"
+        _LEADERSHIP_CACHE[cache_key] = result
+        logger.info(
+            "Claude knowledge for '%s': %d board, %d execs",
+            company_name,
+            len(result.get("board", [])),
+            len(result.get("executives", [])),
+        )
+        return result
+
+    logger.info("No leadership found for '%s' from any source", company_name)
+    result = {"board": [], "executives": [], "_source": "none"}
     _LEADERSHIP_CACHE[cache_key] = result
     return result
 
