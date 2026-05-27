@@ -1558,6 +1558,27 @@ async def ping_llm():
     }
 
 
+@app.get("/test-knowledge")
+async def test_knowledge(company: str = "Wells Fargo"):
+    """Fast (<5s): test Claude knowledge fallback ONLY — no web scraping."""
+    import os
+    from llm_fallback import _call_claude, _SYSTEM_FROM_KNOWLEDGE
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key:
+        return {"error": "ANTHROPIC_API_KEY not set", "result": {}}
+    result = _call_claude(
+        system=_SYSTEM_FROM_KNOWLEDGE,
+        user_msg=f"Company: {company}",
+        label=f"{company} [knowledge-test]",
+    )
+    return {
+        "company": company,
+        "board_count": len(result.get("board", [])),
+        "exec_count": len(result.get("executives", [])),
+        "result": result,
+    }
+
+
 @app.get("/debug-leadership")
 async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
     """
