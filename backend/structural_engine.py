@@ -1859,11 +1859,20 @@ def _inject_knowledge_leadership(
         em_layer = 2 if _is_regional_exec(title) else 1
         injections.append((em_layer, p["name"], title, "Executive Management", ""))
 
+    board_keys     = {_name_key(p["name"]) for p in leadership.get("board", [])}
+    exec_keys      = {_name_key(p["name"]) for p in leadership.get("executives", [])}
+    dual_role_keys = board_keys & exec_keys
+
+    injected_dept_keys: set[tuple[str, str]] = set()
+
     for layer, name, title, dept_primary, sub_role in injections:
         key = _name_key(name)
-        if key in existing_keys:
+        dept_key = (key, dept_primary)
+        if dept_key in injected_dept_keys:
             continue
-        existing_keys.add(key)
+        if key in existing_keys and key not in dual_role_keys:
+            continue
+        injected_dept_keys.add(dept_key)
         person_uid = f"llm_{uuid.uuid4().hex[:12]}"
         dag.insert_person(ClassifiedRecord(
             id=person_uid,
@@ -1988,9 +1997,26 @@ def _enrich_with_llm_leadership(
             exec_region = _infer_exec_region(title, region)
             injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region))
 
+        # Build set of name-keys that appear in BOTH board and executives lists.
+        # These "dual-role" individuals (e.g. Executive Chairman who is also CEO)
+        # must be injected into both panels, so deduplication is done per
+        # (name, dept) pair rather than just per name.
+        board_keys = {_name_key(p["name"]) for p in leadership.get("board", [])}
+        exec_keys  = {_name_key(p["name"]) for p in leadership.get("executives", [])}
+        dual_role_keys = board_keys & exec_keys
+
         from inference_logic import ClassifiedRecord
+        # injected_dept_keys tracks (name_key, dept) to prevent true duplicates
+        # while allowing the same person to appear in both BOD and EM.
+        injected_dept_keys: set[tuple[str, str]] = set()
+
         for layer, name, title, dept_primary, sub_role, person_region in injections:
             key = _name_key(name)
+            dept_key = (key, dept_primary)
+
+            # Skip exact duplicate (same person, same dept) — handles repeated entries
+            if dept_key in injected_dept_keys:
+                continue
 
             # Web source can upgrade an AI-only entry: update the existing node's
             # nlp_method in-place instead of creating a duplicate.
@@ -2006,11 +2032,16 @@ def _enrich_with_llm_leadership(
                         dag.G.nodes[nid]["metadata"] = meta
                         ai_only_keys.discard(key)
                         break
+                injected_dept_keys.add(dept_key)
                 continue
 
-            if key in existing_keys:
+            # Skip persons already present in the uploaded employee DAG,
+            # UNLESS they are dual-role (board + exec) — in that case allow
+            # injection into both depts so they appear in both panels.
+            if key in existing_keys and key not in dual_role_keys:
                 continue
-            existing_keys.add(key)
+
+            injected_dept_keys.add(dept_key)
 
             person_uid = f"llm_{uuid.uuid4().hex[:12]}"
             try:

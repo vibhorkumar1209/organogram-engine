@@ -552,6 +552,8 @@ RULES:
 - "committees" = [] if not mentioned. "function" = "Other" if unclear.
 - "scope" = null if not stated. "director_type" = "unknown" if unclear.
 - EXCLUDE former, retired, ex-, past, emeritus office-holders.
+- DUAL ROLES: if one person holds both a board title AND an executive title \
+(e.g. "Executive Chairman & CEO"), list them in BOTH board and executives.
 - If a section has no people, return an empty array.
 Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
@@ -571,6 +573,11 @@ Schema:
 board: Chairman, Non-executive directors, Independent directors only.
 executives: CEO, COO, CFO, CTO, CIO, CMO, CHRO, CLO / General Counsel, \
 Chief Strategy Officer, and Operating/Executive Committee members.
+
+DUAL ROLES: If one person holds both a board title AND an executive title \
+(e.g. "Executive Chairman & CEO", "Chairman and CEO"), include them in BOTH \
+the board array (with their board title) AND the executives array (with their \
+executive title). Do not omit them from either.
 
 IMPORTANT: Only return names you are confident about. If you have no reliable \
 knowledge of this company's current leadership, return {"board": [], "executives": []}.
