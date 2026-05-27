@@ -352,21 +352,6 @@ const PersonRow: React.FC<{
               {String(p.metadata.designation).slice(0, 36)}
             </div>
           )}
-          {/* Inferred reporting line badge */}
-          {isSkipped && (
-            <div
-              title={INFERRED_REPORT_NOTE}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                marginTop: 2, fontSize: 7.5, color: '#92400e',
-                background: '#fffbeb', border: '1px solid #fde68a',
-                borderRadius: 3, padding: '1px 5px', cursor: 'help',
-                fontStyle: 'italic',
-              }}
-            >
-              ⋯ reporting line inferred — connected to next available senior
-            </div>
-          )}
           {/* Committee / sub-role badge — shown for board members with a specific role */}
           {(() => {
             const subRole = p.metadata?.board_sub_role as string | undefined
@@ -661,6 +646,20 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
     .map(([l, n]) => `${n} ${labels[Number(l)] ?? LAYER_LABELS[Number(l)] ?? `L${l}`}`)
     .join(' · ')
 
+  // Detect if any inferred reporting line exists across the full tree
+  // (used to show a single note in the legend, not per-row badges)
+  const hasInferredLines = useMemo(() => {
+    if (!executives || executives.length === 0) return false
+    const allTrees = regionGroups.flatMap(([, execs], gi) =>
+      buildExecTree(execs, isEM && gi === 0, isBoard)
+    )
+    const checkNode = (node: ExecTreeNode): boolean => {
+      if (node.isSkippedLevel) return true
+      return node.reports.some(checkNode)
+    }
+    return allTrees.some(checkNode)
+  }, [executives, regionGroups, isEM, isBoard])
+
   return (
     <div style={{
       position: 'absolute', top: 0, right: 0, bottom: 0,
@@ -714,9 +713,24 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
           padding: '6px 14px', background: '#f5f9fb',
           borderBottom: `1px solid #bad4dc`,
           display: 'flex', alignItems: 'center', gap: 10, fontSize: 9, color: '#627184',
+          flexWrap: 'wrap',
         }}>
           <span>▼ collapse</span>
           <span>▶ expand</span>
+          {hasInferredLines && (
+            <span
+              title={INFERRED_REPORT_NOTE}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontSize: 8, color: '#92400e',
+                background: '#fffbeb', border: '1px solid #fde68a',
+                borderRadius: 3, padding: '1px 6px', cursor: 'help',
+                fontStyle: 'italic', whiteSpace: 'nowrap',
+              }}
+            >
+              ⋯ some reporting lines inferred
+            </span>
+          )}
           {/* Group-by toggle */}
           <div style={{
             marginLeft: 'auto', display: 'flex', gap: 0,

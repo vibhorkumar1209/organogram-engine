@@ -1149,10 +1149,23 @@ class OrganogramDAG:
         self._insert_with_ghosts(leaf_dept_id, person_id, rec)
         rec.layer   = _orig_layer
 
+    # Titles that should NEVER be used as pass-through parents in ghost chains.
+    # A Chief of Staff, for example, is a coordinator role — other C-Suite execs
+    # do not report through the CoS even if they share the same layer.
+    _EXCLUDED_CHAIN_TITLES = re.compile(
+        r"\b(chief\s+of\s+staff|cos\b|executive\s+assistant\s+to|"
+        r"pa\s+to\s+|personal\s+assistant\s+to|office\s+of\s+the\s+ceo|"
+        r"deputy\s+chief\s+of\s+staff)\b",
+        re.IGNORECASE,
+    )
+
     def _real_person_at_layer(self, parent_id: str, target_layer: int) -> Optional[str]:
         """
-        Return the node_id of the first real (non-ghost) person node that is a
-        direct child of *parent_id* at *target_layer*, or None if not found.
+        Return the node_id of a real (non-ghost) person node that is a direct
+        child of *parent_id* at *target_layer*, or None if not found.
+
+        Excludes coordinator/staff roles (Chief of Staff, EA to CEO, etc.) that
+        should not appear as reporting managers for peers in the hierarchy.
 
         Used so ghost chains route through actual senior people rather than
         creating parallel phantom chains alongside them.
@@ -1162,6 +1175,10 @@ class OrganogramDAG:
             if (attrs.get("node_type") == NODE_PERSON
                     and attrs.get("layer") == target_layer
                     and not attrs.get("is_ghost", False)):
+                # Skip coordinator/staff roles — they're not line managers
+                designation = str(attrs.get("metadata", {}).get("designation", ""))
+                if designation and self._EXCLUDED_CHAIN_TITLES.search(designation):
+                    continue
                 return child
         return None
 

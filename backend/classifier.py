@@ -237,12 +237,17 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"group\s+coo\b",                       # Group COO below Group CEO
     ]),
 
-    # G4 — VP / Head of Function / General Manager
+    # G4 — VP / Head of Function / General Manager / Senior AVP
     (4, [
         r"\bvice\s+president\b",
         r"\bvp\b",
         r"\bhead\s+of\b",
         r"^head,?\s",
+        # ── Senior AVP — one grade above AVP (G5), so must appear before G5 ──
+        # "Senior AVP", "Sr. AVP", "Senior Associate VP", "Senior Associate Vice President"
+        r"senior\s+associate\s+vice\s+president",
+        r"\bsr\.?\s+avp\b",
+        r"senior\s+avp\b",
         # ── General Manager — universal (G4 = function head equivalent) ────
         r"\bgeneral\s+manager\b",
         r"^gm$",                                # GM standalone acronym

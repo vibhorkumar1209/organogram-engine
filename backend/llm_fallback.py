@@ -909,8 +909,12 @@ def _parallel_run_bod(company_name: str, domain: str,
     current director, returning (board_list, raw_text).
     raw_text is non-empty only when JSON parsing failed (→ passed to Claude).
     """
-    # Build candidate governance URLs so Parallel.AI has explicit targets
-    base = domain.rstrip("/") if domain else ""
+    # Build candidate governance URLs so Parallel.AI has explicit targets.
+    # Always ensure protocol prefix so Parallel.AI can navigate directly.
+    raw = (domain or "").rstrip("/")
+    if raw and not raw.startswith("http"):
+        raw = f"https://{raw}"
+    base = raw
     url_candidates = ""
     if base:
         urls = [
@@ -922,6 +926,7 @@ def _parallel_run_bod(company_name: str, domain: str,
             f"{base}/investors/corporate-governance",
             f"{base}/investor-relations/corporate-governance",
             f"{base}/ir/governance",
+            f"https://www.{domain.replace('https://','').replace('http://','').replace('www.','')}/board-of-directors",
         ]
         url_candidates = (
             f"Navigate to these URLs (try each until content is found):\n"
@@ -986,7 +991,7 @@ def _parallel_run_bod(company_name: str, domain: str,
                 p for p in rescued
                 if _BOARD_TITLE_RE.search(p.get("title", ""))
             ]
-            if len(board_like) >= len(rescued) * 0.6:
+            if len(board_like) >= len(rescued) * 0.4:
                 logger.info(
                     "Parallel.AI BOD: rescued %d directors from 'executives' key for '%s'",
                     len(board_like), company_name,
@@ -1038,7 +1043,10 @@ def _parallel_run_em(company_name: str, domain: str,
         f'Include regional/country CEOs and heads of major business divisions if '
         f'listed on the global leadership page.\n'
         f'Use exact titles as listed.\n'
+        f'CRITICAL: Place people in "executives" ONLY. Do NOT use a "board" key.\n'
         f'EXCLUDE: former, retired, ex-, or emeritus executives.\n'
+        f'EXCLUDE: Non-Executive Directors, Independent Directors, board members — '
+        f'those belong to a separate Board query.\n'
         f'Be EXHAUSTIVE — include every person listed, not only C-suite.'
     )
 
