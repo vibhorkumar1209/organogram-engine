@@ -32,4 +32,7 @@ Thumbs.db
 # Data / uploads
 backend/uploads/
 backend/*.xlsx
+# Rule Excel files in backend/rules/ are the source of truth — commit them
+!backend/rules/*.xlsx
 # backend/test_data.json  ← now committed so /load-demo works on Render
+.vercel

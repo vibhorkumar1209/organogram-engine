@@ -23,6 +23,23 @@ from dataclasses import dataclass
 from typing import Optional
 
 # ─────────────────────────────────────────────────────────────────────────────
+# EXCEL RULE TABLES  (loaded from backend/rules/ at import time)
+# ─────────────────────────────────────────────────────────────────────────────
+# TITLE_TO_GRADE: 1 400+ exact title→grade entries from Global_Designation_Hierarchy.xlsx
+# CANONICAL_L0_DEPTS: 16 canonical department names from Global_Org_Hierarchy.xlsx
+# Falls back to empty dict/list if files are missing (rules still work via regex).
+try:
+    from rules.loader import TITLE_TO_GRADE as _EXCEL_TITLE_GRADES
+    from rules.loader import CANONICAL_L0_DEPTS, L0_DEPT_SUBS
+except ImportError:
+    _EXCEL_TITLE_GRADES: dict[str, int] = {}
+    CANONICAL_L0_DEPTS: list[str] = []
+    L0_DEPT_SUBS: dict[str, list[str]] = {}
+
+# Strip parenthetical notes for exact-title lookup ("CEO" → same as "Chief Executive Officer (CEO)")
+_STRIP_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CANONICAL DEPARTMENT NAMES  (Global_Org_Hierarchy.xlsx)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -598,16 +615,29 @@ def _classify_layer(title: str, job_level: str = "", industry: str = "") -> int:
     """Return layer 0–10 for a job title (G0–G10 per reference).
 
     Pipeline:
+      0. Exact-title lookup against Global_Designation_Hierarchy.xlsx (1 400+ entries)
       1. Pure-acronym lookup (GM → G4, DGM → G5, MD → G2, etc.)
       2. Ordered regex rules (first match wins, G0 → G9)
       3. LinkedIn job_level string as last-resort fallback
       4. Default G10 (IC / specialist)
 
     Financial-markets industry uses different rules (VP=G6, MD=G3, etc.).
+    Note: Step 0 (Excel lookup) intentionally skips financial-industry override so
+    that the regex financial rules can correctly re-rank MD/VP/ED for banking.
     """
     t = title.strip().lower()
     if not t:
         return 10
+
+    # ── Step 0: exact Excel title lookup ─────────────────────────────────
+    # Strip parenthetical acronym notes so "Chief Executive Officer (CEO)" matches
+    # the same key as "Chief Executive Officer".
+    # Only apply for non-financial industries; financial ladder has different ranks.
+    if industry not in _FINANCIAL_INDUSTRIES and _EXCEL_TITLE_GRADES:
+        t_clean = _STRIP_PAREN_RE.sub("", t).strip()
+        grade = _EXCEL_TITLE_GRADES.get(t_clean)
+        if grade is not None:
+            return grade
 
     # ── Step 1: acronym lookup ────────────────────────────────────────────
     acr = _acronym_layer(t, industry)

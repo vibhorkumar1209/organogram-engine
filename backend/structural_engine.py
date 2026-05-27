@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 
 from inference_logic import ClassifiedRecord, InferenceEngine
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCEL RULE TABLES  (loaded from backend/rules/ at import time)
+# ─────────────────────────────────────────────────────────────────────────────
+# CANONICAL_L0_DEPTS — 16 authoritative top-level department names from
+#                      Global_Org_Hierarchy.xlsx (Master Hierarchy sheet).
+# L0_DEPT_SUBS       — {l0_dept: [l1_sub_dept, ...]} sub-department index.
+# Used to enrich _CANONICAL_PRIMARY so any new L0 dept added to the Excel
+# file is automatically recognised without touching code.
+try:
+    from rules.loader import CANONICAL_L0_DEPTS as _EXCEL_L0_DEPTS
+    from rules.loader import L0_DEPT_SUBS as _EXCEL_L0_SUBS
+    from rules.loader import TITLE_TO_GRADE as _EXCEL_TITLE_GRADES
+except ImportError:
+    _EXCEL_L0_DEPTS: list[str] = []
+    _EXCEL_L0_SUBS: dict[str, list[str]] = {}
+    _EXCEL_TITLE_GRADES: dict[str, int] = {}
+
 
 # ─────────────────────────────────────────────
 # NODE TYPES
@@ -201,6 +218,40 @@ _CANONICAL_PRIMARY: frozenset[str] = frozenset({
     "Sales & Trading",
     "Wealth Management",
 })
+
+# Map Excel L0 UPPERCASE dept names → canonical Python strings.
+# Used to auto-extend _CANONICAL_PRIMARY when new L0 depts are added to the Excel file.
+# Entries already in _CANONICAL_PRIMARY are skipped (no-op for known depts).
+_EXCEL_L0_CANONICAL_MAP: dict[str, str] = {
+    "BOARD OF DIRECTORS":                     "Board of Management",
+    "EXECUTIVE MANAGEMENT (C-SUITE)":          "Executive Management",
+    "FINANCE & ACCOUNTING":                    "Finance & Accounting",
+    "HUMAN RESOURCES (PEOPLE & CULTURE)":      "Human Resources",
+    "LEGAL, RISK & COMPLIANCE":               "Legal, Risk & Compliance",
+    "INFORMATION TECHNOLOGY (IT)":             "Information Technology",
+    "ENGINEERING":                             "Engineering",
+    "RESEARCH & DEVELOPMENT (R&D)":            "Research & Development",
+    "PRODUCT MANAGEMENT":                      "Product Management",
+    "MARKETING":                               "Marketing",
+    "SALES & BUSINESS DEVELOPMENT":            "Sales & Business Development",
+    "CUSTOMER SUCCESS & SERVICE":              "Customer Success & Service",
+    "OPERATIONS":                              "Operations",
+    "STRATEGY & CORPORATE DEVELOPMENT":        "Strategy & Corporate Development",
+    "FACILITIES, REAL ESTATE & WORKPLACE":     "Facilities, Real Estate & Workplace",
+    "CORPORATE COMMUNICATIONS & PUBLIC AFFAIRS": "Corporate Communications & Public Affairs",
+}
+if _EXCEL_L0_DEPTS:
+    extra = frozenset(
+        _EXCEL_L0_CANONICAL_MAP.get(name, name)
+        for name in _EXCEL_L0_DEPTS
+        if name
+    ) - _CANONICAL_PRIMARY
+    if extra:
+        _CANONICAL_PRIMARY = _CANONICAL_PRIMARY | extra
+        logger.debug(
+            "Added %d new L0 depts from Excel to _CANONICAL_PRIMARY: %s",
+            len(extra), extra,
+        )
 
 # Map non-canonical / industry-specific / generic dept names → canonical.
 # Keys are lowercase stripped strings.
