@@ -1499,6 +1499,44 @@ async def v2_corrections_summary():
 
 
 # ─────────────────────────────────────────────
+# DEBUG ENDPOINT — remove after diagnosis
+# ─────────────────────────────────────────────
+@app.get("/debug-leadership")
+async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
+    """
+    Directly test llm_fetch_leadership and return raw result + diagnostics.
+    Use: /debug-leadership?company=Wells+Fargo&domain=wellsfargo.com
+    """
+    import os, time
+    from llm_fallback import llm_fetch_leadership, _scrape_wikipedia, _ddg_leadership_snippets
+    t0 = time.monotonic()
+    wiki = _scrape_wikipedia(company)
+    ddg  = _ddg_leadership_snippets(company)
+    t1 = time.monotonic()
+    result = llm_fetch_leadership(company, domain=domain)
+    t2 = time.monotonic()
+    return {
+        "company": company,
+        "domain": domain,
+        "env": {
+            "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "PARALLEL_API_KEY":  bool(os.environ.get("PARALLEL_API_KEY")),
+            "JINA_API_KEY":      bool(os.environ.get("JINA_API_KEY")),
+        },
+        "source_chars": {
+            "wikipedia": len(wiki),
+            "ddg":       len(ddg),
+        },
+        "wiki_preview": wiki[:300] if wiki else "",
+        "timing_seconds": {
+            "sources": round(t1 - t0, 1),
+            "total":   round(t2 - t0, 1),
+        },
+        "result": result,
+    }
+
+
+# ─────────────────────────────────────────────
 # FRONTEND STATIC FILES
 # Mount the built React app so the backend serves everything from one port.
 # API routes defined above take priority; this catches everything else.
