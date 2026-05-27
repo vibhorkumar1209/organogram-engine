@@ -509,43 +509,83 @@ def _fetch_leadership_text(domain: str) -> str:
 # CLAUDE PROMPTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-_SYSTEM_FROM_WEB = """\
-You are a corporate intelligence assistant extracting leadership data.
+_SYSTEM_RICH_EXTRACTION = """\
+You are a corporate intelligence assistant. Extract structured leadership data \
+from the source text exactly as it appears.
 
-Extract every person explicitly named in the source content below as a board \
-member or senior executive. Be exhaustive — include everyone you can find in \
-the text. Use their names and titles exactly as written.
+Return ONE valid JSON object using this EXACT schema — no other keys, no prose:
 
-The content may use explicit section headings such as "BOARD OF DIRECTORS:", \
-"EXECUTIVE MANAGEMENT:", "SECTION 1", "Leadership Team:", "Executive Committee:", \
-"Board of directors", etc. Use these headings to place people in the correct category.
-
-Sources may also label leadership under: Board of Trustees, Supervisory Board, \
-Operating Committee, Management Committee, Group Management Board, Senior \
-Leadership Team — treat these as executive management unless under a Board heading.
-
-Schema — return ONLY this JSON:
 {
-  "board": [
-    {"name": "Full Name", "title": "Exact title from source"}
+  "board_of_directors": [
+    {
+      "name": "string",
+      "designation": "string",
+      "director_type": "Executive | Non-Executive | Independent | Nominee",
+      "committees": [{"name": "string", "role": "Chair | Member"}],
+      "appointed": "string or null",
+      "confidence": "High | Medium | Low"
+    }
   ],
-  "executives": [
-    {"name": "Full Name", "title": "Exact title from source"}
-  ]
+  "executive_management": [
+    {
+      "name": "string",
+      "title": "string",
+      "function": "string",
+      "reports_to": "string or null",
+      "scope": "string or null",
+      "confidence": "High | Medium | Low"
+    }
+  ],
+  "senior_leadership": [
+    {
+      "name": "string",
+      "title": "string",
+      "function_or_bu": "string",
+      "reports_to": "string or null",
+      "confidence": "High | Medium | Low"
+    }
+  ],
+  "dual_role_individuals": [
+    {"name": "string", "board_role": "string", "exec_role": "string"}
+  ],
+  "data_gaps": ["list any roles or hierarchy info NOT found in the source"]
 }
 
-board: Everyone listed under a Board of Directors / Supervisory Board / \
-Board of Trustees section — Chairman, Non-Executive Directors, Independent \
-Directors, Executive Directors on the board, committee chairs.
+PLACEMENT RULES:
+board_of_directors — everyone listed under Board of Directors / Board of \
+Trustees / Supervisory Board / Governance section: Chairman, Vice-Chairman, \
+Managing Director, Executive Director, Non-Executive Director, Independent \
+Director, Nominee Director, Lead Director. Capture committee memberships \
+(Audit, Nomination & Remuneration, CSR, Risk, Stakeholder Relationship) and \
+role (Chair / Member) if mentioned.
 
-executives: Everyone listed under an Executive Management / Leadership Team / \
-Executive Committee / Operating Committee section — CEO, President, COO, CFO, \
-CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, and ALL other members \
-of the executive or management committee.
+executive_management — everyone listed under Executive Management / C-Suite / \
+Executive Committee / Operating Committee / Management Committee / Leadership \
+Team: CEO, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO/General Counsel, \
+Chief Strategy Officer, Chief Digital Officer, Group President, President. \
+Capture functional area and geographic/BU scope if mentioned.
+
+senior_leadership — SVPs, EVPs, VPs, Business Heads, Country Heads, Plant \
+Heads, Division Heads, Group Heads named in the source. Capture function/BU.
+
+dual_role_individuals — anyone appearing in BOTH board and executive sections.
+
+ANTI-HALLUCINATION RULES (NON-NEGOTIABLE):
+1. Include ONLY individuals explicitly named in the source text. \
+   Do not infer, guess, or fill from general knowledge.
+2. "confidence": "Low" if title is ambiguous or partial; "Medium" if inferred \
+   from context; "High" if explicitly stated.
+3. "reports_to": null unless explicitly stated in the source.
+4. Empty array [] for any section absent from the source — never fabricate.
+5. "appointed": null unless a date or year is explicitly mentioned.
+6. Preserve exact spelling of all names and titles as they appear in the source.
 
 EXCLUDE: former, retired, ex-, past, emeritus office-holders.
-If the source text contains no names at all, return {"board": [], "executives": []}.
-Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
+If the source contains no named individuals, return all arrays as empty.
+Return ONLY valid JSON. No explanation, no markdown fences, no code blocks."""
+
+# Backward-compat flat prompt (knowledge fallback only)
+_SYSTEM_FROM_WEB = _SYSTEM_RICH_EXTRACTION  # alias — flat callers get the rich prompt
 
 _SYSTEM_FROM_KNOWLEDGE = """\
 You are a corporate intelligence assistant with knowledge of public companies.
@@ -901,21 +941,30 @@ def _parallel_fetch_leadership(company_name: str, domain: str,
     site_hint = f"\n\nCompany website: {raw_domain}" if raw_domain else ""
 
     query = (
-        f'Research the current leadership of "{company_name}".{site_hint}\n\n'
+        f'Research the complete current leadership of "{company_name}".{site_hint}\n\n'
         f'Find and list ALL of the following. For each person write their full name '
-        f'and exact title exactly as listed on the source.\n\n'
+        f'and exact title exactly as shown on the source. Label each section clearly.\n\n'
         f'SECTION 1 — BOARD OF DIRECTORS:\n'
-        f'Look at the corporate governance / investor relations section of the website '
-        f'and the most recent annual report. List every current board member: '
-        f'Chairman, Non-Executive Directors, Independent Directors, Executive Directors '
-        f'on the board, committee chairs (Audit, Remuneration, Nomination, Risk).\n\n'
+        f'Check the corporate governance / investor relations section and most recent '
+        f'annual report. List every current board member with their exact board title: '
+        f'Chairman, Vice-Chairman, Managing Director, Executive Director, '
+        f'Non-Executive Director, Independent Director, Nominee Director. '
+        f'Also note any board committee memberships (Audit, Nomination & Remuneration, '
+        f'CSR, Risk, Stakeholder Relations) and whether each person chairs or is a '
+        f'member of that committee.\n\n'
         f'SECTION 2 — EXECUTIVE MANAGEMENT:\n'
-        f'Look at the leadership / about / executive team page and the Executive / '
-        f'Operating / Management Committee listing. List every current senior executive: '
-        f'CEO, COO, CFO, CTO, CIO, CMO, CHRO, General Counsel, Chief Strategy Officer, '
-        f'and ALL other members of the executive or management committee.\n\n'
-        f'Label each section clearly as "BOARD OF DIRECTORS:" and "EXECUTIVE MANAGEMENT:".\n'
-        f'Exclude anyone described as former, retired, or ex-.\n'
+        f'Check the leadership / about / executive team page and the Executive / '
+        f'Operating / Management Committee listing. List every current C-suite executive: '
+        f'CEO, COO, CFO, CTO, CIO, CMO, CHRO, General Counsel / CLO, '
+        f'Chief Strategy Officer, Chief Digital Officer, Chief Commercial Officer, '
+        f'and ALL other members of the executive or management committee. '
+        f'Note their functional area and geographic / BU scope if stated.\n\n'
+        f'SECTION 3 — SENIOR LEADERSHIP / FUNCTIONAL HEADS:\n'
+        f'Check the full leadership / team page, annual report leadership chapter, '
+        f'and any division/business-unit pages. List every SVP, EVP, VP, '
+        f'Business Head, Country Head, Plant Head, Division Head, Group Head '
+        f'named on the site. Note their function or business unit.\n\n'
+        f'Exclude anyone described as former, retired, or ex-. '
         f'Be exhaustive — do not skip people.'
     )
 
@@ -1396,32 +1445,106 @@ def _strip_hallucinations(result: dict, source_text: str) -> dict:
             )
         return result
     src = source_text.lower()
-    before_b = len(result.get("board", []))
-    before_e = len(result.get("executives", []))
-    result["board"] = [
-        p for p in result.get("board", [])
-        if _name_in_source(p.get("name", ""), src)
-    ]
-    result["executives"] = [
-        p for p in result.get("executives", [])
-        if _name_in_source(p.get("name", ""), src)
-    ]
-    removed = (before_b - len(result["board"])) + (before_e - len(result["executives"]))
+    counts_before = sum(
+        len(result.get(k, [])) for k in ("board", "executives", "senior_leadership")
+    )
+    for key in ("board", "executives", "senior_leadership"):
+        result[key] = [
+            p for p in result.get(key, [])
+            if _name_in_source(p.get("name", ""), src)
+        ]
+    counts_after = sum(
+        len(result.get(k, [])) for k in ("board", "executives", "senior_leadership")
+    )
+    removed = counts_before - counts_after
     if removed:
         logger.info("Stripped %d hallucinated names not found in source text", removed)
     return result
 
 
+def _rich_to_flat(data: dict, source_text: str = "") -> dict:
+    """
+    Convert the rich 3-layer extraction schema to the flat {board, executives}
+    format used by the rest of the pipeline.
+
+    Mapping:
+      board_of_directors → board  (with name + designation as title)
+      executive_management → executives  (name + title)
+      senior_leadership → also appended to executives so they appear in EM panel
+      dual_role_individuals → logged only (already captured in both layers)
+    """
+    def _board_entry(b: dict) -> dict | None:
+        name = str(b.get("name") or "").strip()
+        title = str(b.get("designation") or b.get("title") or "").strip()
+        if not name or not title or len(name.split()) < 2:
+            return None
+        if _is_retired(name, title):
+            return None
+        entry: dict = {"name": name, "title": title}
+        # Carry through rich fields for the frontend to use optionally
+        if b.get("director_type"):
+            entry["director_type"] = b["director_type"]
+        if b.get("committees"):
+            entry["committees"] = b["committees"]
+        if b.get("appointed"):
+            entry["appointed"] = b["appointed"]
+        if b.get("confidence"):
+            entry["confidence"] = b["confidence"]
+        return entry
+
+    def _exec_entry(e: dict, title_key: str = "title") -> dict | None:
+        name = str(e.get("name") or "").strip()
+        title = str(e.get(title_key) or "").strip()
+        if not name or not title or len(name.split()) < 2:
+            return None
+        if _is_retired(name, title):
+            return None
+        entry: dict = {"name": name, "title": title}
+        for k in ("function", "function_or_bu", "reports_to", "scope", "confidence"):
+            if e.get(k):
+                entry[k] = e[k]
+        return entry
+
+    board = [e for b in data.get("board_of_directors", [])
+             if (e := _board_entry(b)) is not None]
+    execs = [e for ex in data.get("executive_management", [])
+             if (e := _exec_entry(ex)) is not None]
+    # Senior leadership goes into the executives panel (they're in-company leaders)
+    senior = [e for sl in data.get("senior_leadership", [])
+              if (e := _exec_entry(sl, "title")) is not None]
+    execs = execs + senior
+
+    result = {
+        "board":            board,
+        "executives":       execs,
+        "senior_leadership": senior,          # kept separate too for frontend use
+        "dual_roles":       data.get("dual_role_individuals", []),
+        "data_gaps":        data.get("data_gaps", []),
+    }
+
+    # Post-extraction hallucination filter
+    if source_text:
+        result = _strip_hallucinations(result, source_text)
+
+    return result
+
+
 def _call_claude(system: str, user_msg: str, label: str,
                  source_text: str = "") -> dict:
-    """Call Claude and parse the JSON leadership response."""
+    """
+    Call Claude with the given system prompt and parse the response.
+
+    Handles both the rich 3-layer schema (board_of_directors / executive_management
+    / senior_leadership) and the legacy flat schema (board / executives).
+    Always returns {"board": [...], "executives": [...], ...}.
+    """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,   # 2048 was truncating large boards (20+ members)
+            model="claude-sonnet-4-5-20251101",   # Sonnet for richer extraction accuracy
+            max_tokens=6000,
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
@@ -1432,23 +1555,36 @@ def _call_claude(system: str, user_msg: str, label: str,
         raw = re.sub(r"\s*```$",          "", raw, flags=re.MULTILINE)
 
         data = json.loads(raw)
-        result: dict = {
+
+        # ── Rich schema (new) ────────────────────────────────────────────────
+        if "board_of_directors" in data or "executive_management" in data:
+            result = _rich_to_flat(data, source_text)
+            logger.info(
+                "Claude rich extraction (%s): %d board, %d execs, %d senior",
+                label,
+                len(result["board"]),
+                len(result["executives"]),
+                len(result.get("senior_leadership", [])),
+            )
+            return result
+
+        # ── Legacy flat schema (knowledge fallback) ──────────────────────────
+        result = {
             "board":      _clean_list(data.get("board",      [])),
             "executives": _clean_list(data.get("executives", [])),
         }
-        # Strip any names Claude invented that don't appear in the source text
         if source_text:
             result = _strip_hallucinations(result, source_text)
         logger.info(
-            f"Claude leadership ({label}): "
-            f"{len(result['board'])} board, {len(result['executives'])} execs"
+            "Claude legacy extraction (%s): %d board, %d execs",
+            label, len(result["board"]), len(result["executives"]),
         )
         return result
 
     except json.JSONDecodeError as exc:
-        logger.warning(f"Claude leadership JSON parse error ({label}): {exc}")
+        logger.warning("Claude leadership JSON parse error (%s): %s", label, exc)
     except Exception as exc:
-        logger.warning(f"Claude leadership failed ({label}): {exc}")
+        logger.warning("Claude leadership failed (%s): %s", label, exc)
 
     return {"board": [], "executives": []}
 
