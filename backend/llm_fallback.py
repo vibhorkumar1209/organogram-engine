@@ -1313,19 +1313,32 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
 # INTERNAL HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+_HALLUCINATION_CHECK_MIN_CHARS = 800  # skip verification if source is too thin to be useful
+
 def _name_in_source(name: str, source_lower: str) -> bool:
-    """Return True if the person's full name (or at least surname) appears in source."""
+    """
+    Return True if the person's name is evidenced in the source text.
+
+    Matching strategy (first match wins):
+    1. Full name exact match: "charles scharf" in source → True
+    2. All significant name parts appear individually: "charles" in source
+       AND "scharf" in source → True (handles middle initials, order differences)
+    3. Surname alone appears AND is ≥4 chars to reduce false positives
+    """
     if not name or not source_lower:
         return False
-    # Full name match (case-insensitive)
-    if name.lower() in source_lower:
+    name_lower = name.lower()
+    # 1. Exact full-name match
+    if name_lower in source_lower:
         return True
-    # Surname match — must be ≥5 chars to avoid false positives on "Lee", "Kim", etc.
-    parts = name.strip().split()
-    if len(parts) >= 2:
-        surname = parts[-1].lower()
-        if len(surname) >= 5 and surname in source_lower:
-            return True
+    # 2. All significant parts (≥2 chars) present anywhere in source
+    parts = [p for p in name_lower.split() if len(p) >= 2]
+    if len(parts) >= 2 and all(p in source_lower for p in parts):
+        return True
+    # 3. Surname alone (≥4 chars) — fallback for initials like "C. Scharf"
+    surname = name_lower.split()[-1] if name_lower.split() else ""
+    if len(surname) >= 4 and surname in source_lower:
+        return True
     return False
 
 
@@ -1333,9 +1346,16 @@ def _strip_hallucinations(result: dict, source_text: str) -> dict:
     """
     Remove any person whose name does not appear in the source text.
     Prevents Claude from fabricating plausible-sounding names when the source
-    contains little or no leadership data.
+    contains little or no real leadership data.
+
+    Skipped entirely when source_text is shorter than _HALLUCINATION_CHECK_MIN_CHARS —
+    thin sources can't reliably distinguish real extractions from hallucinations.
     """
-    if not source_text:
+    if not source_text or len(source_text) < _HALLUCINATION_CHECK_MIN_CHARS:
+        if source_text:
+            logger.debug(
+                "Skipping hallucination check — source too thin (%d chars)", len(source_text)
+            )
         return result
     src = source_text.lower()
     before_b = len(result.get("board", []))
