@@ -211,11 +211,10 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"^director\s+general",
     ]),
 
-    # G2 — EVP / Executive Director
+    # G2 — EVP
     (2, [
         r"executive\s+vice\s+president",
         r"\bevp\b",
-        r"\bexecutive\s+director\b",
         r"\bgroup\s+(?:president|executive)\b",
         r"\bdivisional\s+managing\s+director\b",
         r"\bmanaging\s+director\b",   # ANY form of Managing Director → G2
@@ -224,10 +223,14 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"regional\s+president",
     ]),
 
-    # G3 — SVP / Senior VP / Chief General Manager
+    # G3 — SVP / Executive Director / Senior VP / Chief General Manager
+    # Note: "Executive Director" sits at SVP-equivalent in most corporate contexts;
+    # only in financial markets (handled by _FINANCIAL_LAYER_RULES) and on
+    # board pages (G0) does it carry a different seniority.
     (3, [
         r"senior\s+vice\s+president",
         r"\bsvp\b",
+        r"\bexecutive\s+director\b",   # corporate ED ≈ SVP-equivalent
         r"\bgroup\s+vice\s+president\b",
         # ── Chief General Manager (senior banking/public-sector India) ──────
         r"chief\s+general\s+manager",
@@ -295,7 +298,7 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bteam\s+lead(?:er)?\b",
         r"\bchapter\s+lead\b",
         r"\bgroup\s+manager\b",
-        r"\bprincipal\s+(?:consultant|advisor)\b",
+        r"\bprincipal\s+(?:\w+\s+)?(?:consultant|advisor|analyst)\b",  # "Principal Analytics Consultant", "Principal Data Analyst"
         # ── Assistant General Manager (Indian corporate) ──────────────────
         r"assistant\s+general\s+manager",
         r"^agm$",                               # AGM standalone acronym

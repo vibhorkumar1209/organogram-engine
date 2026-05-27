@@ -512,13 +512,18 @@ def _fetch_leadership_text(domain: str) -> str:
 _SYSTEM_FROM_WEB = """\
 You are a corporate intelligence assistant extracting leadership data.
 
-You are given content scraped from the company website, search snippets, \
-and/or Wikipedia. Extract EVERY person listed as a current board member \
-or senior executive — be exhaustive, not selective.
+You are given content from one or more sources: company website pages, research \
+reports, search snippets, and/or Wikipedia. Extract EVERY person listed as a \
+current board member or senior executive — be exhaustive, not selective.
 
-Sources may label leadership under: Board of Directors, Board of Trustees, \
-Supervisory Board, Executive Committee, Operating Committee, Leadership Team, \
-Management Committee, Group Management Board, Senior Leadership Team.
+The content may use explicit section headings such as "BOARD OF DIRECTORS:", \
+"EXECUTIVE MANAGEMENT:", "Leadership Team:", "Executive Committee:", etc. \
+If such headings are present, use them to place people in the correct category.
+
+Sources may also label leadership under: Board of Trustees, Supervisory Board, \
+Operating Committee, Management Committee, Group Management Board, Senior \
+Leadership Team — treat these as executive management unless explicitly listed \
+under a Board section.
 
 Schema — return ONLY this JSON:
 {
@@ -530,23 +535,19 @@ Schema — return ONLY this JSON:
   ]
 }
 
-board: Include EVERY person on the board page — Chairman, Vice/Deputy Chairman, \
+board: Include EVERY person listed under a Board of Directors / Board of \
+Trustees / Supervisory Board section — Chairman, Vice/Deputy Chairman, \
 Senior Independent Director, Non-Executive Directors, Independent Directors, \
 Executive Directors listed on the board, committee chairs (Audit, Remuneration, \
-Risk, Nominations), Supervisory Board members, Board of Trustees members. \
-Include executive directors even if they also hold a C-Suite role.
+Risk, Nominations). Include executive directors even if they also hold a C-Suite role.
 
-executives: Include EVERYONE on the official leadership/management/executive \
-committee page, regardless of title format — CEO, President, COO, CFO, CTO, \
-CIO, CISO, CMO, CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, \
-Chief Digital Officer, Chief Commercial Officer, Managing Partner, and ALL \
-members of the Operating Committee / Executive Committee / Management Committee \
-/ Group Management Board / Leadership Team. \
-For professional services firms: include all managing partners and practice \
-leaders named on the official leadership page. \
-Include regional/country heads if listed on the global leadership page. \
-Title format does not matter — if the company lists them on their official \
-leadership page, include them.
+executives: Include EVERYONE listed under an Executive Management / Leadership \
+Team / Executive Committee section — CEO, President, COO, CFO, CTO, CIO, CISO, \
+CMO, CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital \
+Officer, Chief Commercial Officer, Managing Partner, and ALL other members of \
+the executive/management/operating committee. For professional services firms: \
+include all managing partners and practice leaders named on the global leadership \
+page. Include regional/country heads if listed on the global leadership page.
 
 EXCLUDE: former, retired, ex-, past, emeritus office-holders. Anyone described \
 as "Former CEO", "Ex-Chairman", "Retired Director", "Emeritus", etc.
@@ -920,20 +921,24 @@ def _parallel_fetch_leadership(company_name: str, domain: str,
 
     query = (
         f'Research the current leadership of "{company_name}".{site_hint}\n\n'
-        f'Find and list:\n'
-        f'1. Every current Board of Directors member — Chairman, all Non-Executive '
-        f'Directors, Independent Directors, Executive Directors on the board, '
-        f'committee chairs (Audit, Remuneration, Nomination, Risk). '
-        f'Check the corporate governance / investor relations section.\n\n'
-        f'2. Every current Executive Management team member — CEO, COO, CFO, CTO, '
-        f'CIO, CMO, CHRO, General Counsel, and all members of the Executive Committee '
-        f'/ Operating Committee / Management Committee / Leadership Team. '
-        f'Check the leadership / about / executive team page.\n\n'
-        f'For each person give their full name and exact title as listed.\n'
-        f'Exclude anyone described as former, retired, or ex-.'
+        f'Find and list ALL of the following. For each person write their full name '
+        f'and exact title exactly as listed on the source.\n\n'
+        f'SECTION 1 — BOARD OF DIRECTORS:\n'
+        f'Look at the corporate governance / investor relations section of the website '
+        f'and the most recent annual report. List every current board member: '
+        f'Chairman, Non-Executive Directors, Independent Directors, Executive Directors '
+        f'on the board, committee chairs (Audit, Remuneration, Nomination, Risk).\n\n'
+        f'SECTION 2 — EXECUTIVE MANAGEMENT:\n'
+        f'Look at the leadership / about / executive team page and the Executive / '
+        f'Operating / Management Committee listing. List every current senior executive: '
+        f'CEO, COO, CFO, CTO, CIO, CMO, CHRO, General Counsel, Chief Strategy Officer, '
+        f'and ALL other members of the executive or management committee.\n\n'
+        f'Label each section clearly as "BOARD OF DIRECTORS:" and "EXECUTIVE MANAGEMENT:".\n'
+        f'Exclude anyone described as former, retired, or ex-.\n'
+        f'Be exhaustive — do not skip people.'
     )
 
-    text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT)
+    text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT_BOD)  # use longer BOD timeout
     if not text:
         logger.info("Parallel.AI returned empty for '%s'", company_name)
         return None
