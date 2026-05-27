@@ -509,83 +509,51 @@ def _fetch_leadership_text(domain: str) -> str:
 # CLAUDE PROMPTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-_SYSTEM_RICH_EXTRACTION = """\
-You are a corporate intelligence assistant. Extract structured leadership data \
-from the source text exactly as it appears.
+_SYSTEM_FROM_WEB = """\
+You are a corporate intelligence assistant. Extract every person explicitly \
+named in the source text as a board member, executive, or senior leader.
 
-Return ONE valid JSON object using this EXACT schema — no other keys, no prose:
+Return ONE valid JSON object — no prose, no markdown:
 
 {
-  "board_of_directors": [
-    {
-      "name": "string",
-      "designation": "string",
-      "director_type": "Executive | Non-Executive | Independent | Nominee",
-      "committees": [{"name": "string", "role": "Chair | Member"}],
-      "appointed": "string or null",
-      "confidence": "High | Medium | Low"
-    }
+  "board": [
+    {"name": "Full Name", "title": "Exact title from source",
+     "director_type": "Executive|Non-Executive|Independent|Nominee|unknown",
+     "committees": [{"name": "Committee name", "role": "Chair|Member"}]}
   ],
-  "executive_management": [
-    {
-      "name": "string",
-      "title": "string",
-      "function": "string",
-      "reports_to": "string or null",
-      "scope": "string or null",
-      "confidence": "High | Medium | Low"
-    }
+  "executives": [
+    {"name": "Full Name", "title": "Exact title",
+     "function": "Finance|Technology|HR|Operations|Legal|Strategy|Sales|Marketing|Other",
+     "scope": "Global|Regional|Country name|BU name or null"}
   ],
   "senior_leadership": [
-    {
-      "name": "string",
-      "title": "string",
-      "function_or_bu": "string",
-      "reports_to": "string or null",
-      "confidence": "High | Medium | Low"
-    }
-  ],
-  "dual_role_individuals": [
-    {"name": "string", "board_role": "string", "exec_role": "string"}
-  ],
-  "data_gaps": ["list any roles or hierarchy info NOT found in the source"]
+    {"name": "Full Name", "title": "Exact title", "function_or_bu": "string"}
+  ]
 }
 
-PLACEMENT RULES:
-board_of_directors — everyone listed under Board of Directors / Board of \
-Trustees / Supervisory Board / Governance section: Chairman, Vice-Chairman, \
-Managing Director, Executive Director, Non-Executive Director, Independent \
-Director, Nominee Director, Lead Director. Capture committee memberships \
-(Audit, Nomination & Remuneration, CSR, Risk, Stakeholder Relationship) and \
-role (Chair / Member) if mentioned.
+PLACEMENT:
+board — everyone under Board of Directors / Supervisory Board / Board of \
+Trustees: Chairman, Vice-Chairman, Managing Director (when on board), \
+Executive Director, Non-Executive Director, Independent Director, Nominee \
+Director, Lead Director. Include committee memberships if mentioned.
 
-executive_management — everyone listed under Executive Management / C-Suite / \
-Executive Committee / Operating Committee / Management Committee / Leadership \
-Team: CEO, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO/General Counsel, \
-Chief Strategy Officer, Chief Digital Officer, Group President, President. \
-Capture functional area and geographic/BU scope if mentioned.
+executives — everyone under Executive Management / C-Suite / Executive \
+Committee / Operating Committee / Management Committee / Leadership Team: \
+CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General \
+Counsel, Chief Strategy Officer, Chief Digital Officer, Chief Commercial \
+Officer, Group President.
 
 senior_leadership — SVPs, EVPs, VPs, Business Heads, Country Heads, Plant \
-Heads, Division Heads, Group Heads named in the source. Capture function/BU.
+Heads, Division Heads, Group Heads, Regional Heads named in the source.
 
-dual_role_individuals — anyone appearing in BOTH board and executive sections.
-
-ANTI-HALLUCINATION RULES (NON-NEGOTIABLE):
-1. Include ONLY individuals explicitly named in the source text. \
-   Do not infer, guess, or fill from general knowledge.
-2. "confidence": "Low" if title is ambiguous or partial; "Medium" if inferred \
-   from context; "High" if explicitly stated.
-3. "reports_to": null unless explicitly stated in the source.
-4. Empty array [] for any section absent from the source — never fabricate.
-5. "appointed": null unless a date or year is explicitly mentioned.
-6. Preserve exact spelling of all names and titles as they appear in the source.
-
-EXCLUDE: former, retired, ex-, past, emeritus office-holders.
-If the source contains no named individuals, return all arrays as empty.
-Return ONLY valid JSON. No explanation, no markdown fences, no code blocks."""
-
-# Backward-compat flat prompt (knowledge fallback only)
-_SYSTEM_FROM_WEB = _SYSTEM_RICH_EXTRACTION  # alias — flat callers get the rich prompt
+RULES:
+- Include ONLY people explicitly named in the text — do not infer or invent.
+- Use exact spelling of names and titles as they appear.
+- "committees" = [] if not mentioned. "function" = "Other" if unclear.
+- "scope" = null if not stated. "director_type" = "unknown" if unclear.
+- EXCLUDE former, retired, ex-, past, emeritus office-holders.
+- If a section has no people, return an empty array.
+Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 _SYSTEM_FROM_KNOWLEDGE = """\
 You are a corporate intelligence assistant with knowledge of public companies.
@@ -1532,19 +1500,20 @@ def _rich_to_flat(data: dict, source_text: str = "") -> dict:
 def _call_claude(system: str, user_msg: str, label: str,
                  source_text: str = "") -> dict:
     """
-    Call Claude with the given system prompt and parse the response.
+    Call Claude and parse the JSON leadership response.
 
-    Handles both the rich 3-layer schema (board_of_directors / executive_management
-    / senior_leadership) and the legacy flat schema (board / executives).
-    Always returns {"board": [...], "executives": [...], ...}.
+    Handles:
+    - New 3-array schema: {board, executives, senior_leadership}
+    - Legacy 2-array schema: {board, executives}  (knowledge fallback)
+    Always returns {"board": [...], "executives": [...], "senior_leadership": [...]}.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-sonnet-4-5-20251101",   # Sonnet for richer extraction accuracy
-            max_tokens=6000,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
@@ -1556,37 +1525,57 @@ def _call_claude(system: str, user_msg: str, label: str,
 
         data = json.loads(raw)
 
-        # ── Rich schema (new) ────────────────────────────────────────────────
+        # ── New 3-array schema (web extraction) ──────────────────────────────
         if "board_of_directors" in data or "executive_management" in data:
+            # Handle old rich-schema keys if model accidentally used them
             result = _rich_to_flat(data, source_text)
-            logger.info(
-                "Claude rich extraction (%s): %d board, %d execs, %d senior",
-                label,
-                len(result["board"]),
-                len(result["executives"]),
-                len(result.get("senior_leadership", [])),
-            )
-            return result
+        else:
+            # Standard schema: board / executives / senior_leadership
+            def _enrich_board(items: list) -> list:
+                out = []
+                for b in items:
+                    if not isinstance(b, dict):
+                        continue
+                    name  = str(b.get("name", "") or "").strip()
+                    title = str(b.get("title", "") or b.get("designation", "") or "").strip()
+                    if not name or not title or len(name.split()) < 2:
+                        continue
+                    if _is_retired(name, title):
+                        continue
+                    entry: dict = {"name": name, "title": title}
+                    for k in ("director_type", "committees", "function",
+                              "scope", "function_or_bu"):
+                        if b.get(k):
+                            entry[k] = b[k]
+                    out.append(entry)
+                return out
 
-        # ── Legacy flat schema (knowledge fallback) ──────────────────────────
-        result = {
-            "board":      _clean_list(data.get("board",      [])),
-            "executives": _clean_list(data.get("executives", [])),
-        }
-        if source_text:
-            result = _strip_hallucinations(result, source_text)
+            board   = _enrich_board(data.get("board",            []))
+            execs   = _enrich_board(data.get("executives",        []))
+            senior  = _enrich_board(data.get("senior_leadership", []))
+            result  = {
+                "board":            board,
+                "executives":       execs + senior,   # senior goes into EM panel
+                "senior_leadership": senior,
+            }
+            if source_text:
+                result = _strip_hallucinations(result, source_text)
+
         logger.info(
-            "Claude legacy extraction (%s): %d board, %d execs",
-            label, len(result["board"]), len(result["executives"]),
+            "Claude extraction (%s): %d board, %d execs (%d senior)",
+            label,
+            len(result.get("board", [])),
+            len(result.get("executives", [])),
+            len(result.get("senior_leadership", [])),
         )
         return result
 
     except json.JSONDecodeError as exc:
-        logger.warning("Claude leadership JSON parse error (%s): %s", label, exc)
+        logger.warning("Claude JSON parse error (%s): %s", label, exc)
     except Exception as exc:
         logger.warning("Claude leadership failed (%s): %s", label, exc)
 
-    return {"board": [], "executives": []}
+    return {"board": [], "executives": [], "senior_leadership": []}
 
 
 _RETIRED_RE = re.compile(
