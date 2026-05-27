@@ -1501,11 +1501,69 @@ async def v2_corrections_summary():
 # ─────────────────────────────────────────────
 # DEBUG ENDPOINT — remove after diagnosis
 # ─────────────────────────────────────────────
+@app.get("/ping-llm")
+async def ping_llm():
+    """Fast diagnostic: env vars + minimal Claude API call. Returns in <10s."""
+    import os, time
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    parallel_key  = os.environ.get("PARALLEL_API_KEY", "")
+    jina_key      = os.environ.get("JINA_API_KEY", "")
+
+    claude_result = {"ok": False, "error": "", "model": "", "response": ""}
+    if anthropic_key:
+        try:
+            import anthropic as _ant
+            t0 = time.monotonic()
+            _client = _ant.Anthropic(api_key=anthropic_key)
+            # Try the primary model first, fallback to known-good
+            for model_id in ["claude-haiku-4-5-20251001", "claude-3-5-haiku-20241022"]:
+                try:
+                    _resp = _client.messages.create(
+                        model=model_id,
+                        max_tokens=20,
+                        messages=[{"role": "user", "content": "Say: pong"}],
+                    )
+                    claude_result = {
+                        "ok": True,
+                        "error": "",
+                        "model": model_id,
+                        "response": _resp.content[0].text.strip(),
+                        "elapsed_s": round(time.monotonic() - t0, 2),
+                    }
+                    break
+                except Exception as _me:
+                    claude_result["error"] += f"[{model_id}]: {_me} | "
+        except Exception as exc:
+            claude_result["error"] = str(exc)
+    else:
+        claude_result["error"] = "ANTHROPIC_API_KEY not set"
+
+    # Quick Wikipedia check (no Parallel.AI — fast)
+    wiki_chars = 0
+    try:
+        from llm_fallback import _scrape_wikipedia
+        wiki_text  = _scrape_wikipedia("Wells Fargo")
+        wiki_chars = len(wiki_text)
+    except Exception as _we:
+        wiki_chars = -1
+
+    return {
+        "env": {
+            "ANTHROPIC_API_KEY": bool(anthropic_key),
+            "PARALLEL_API_KEY":  bool(parallel_key),
+            "JINA_API_KEY":      bool(jina_key),
+        },
+        "claude": claude_result,
+        "wikipedia_chars_wells_fargo": wiki_chars,
+    }
+
+
 @app.get("/debug-leadership")
 async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
     """
     Directly test llm_fetch_leadership and return raw result + diagnostics.
     Use: /debug-leadership?company=Wells+Fargo&domain=wellsfargo.com
+    NOTE: takes 90-120 s due to Parallel.AI — use /ping-llm for fast env check.
     """
     import os, time
     from llm_fallback import llm_fetch_leadership, _scrape_wikipedia, _ddg_leadership_snippets

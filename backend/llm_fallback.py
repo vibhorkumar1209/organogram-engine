@@ -1508,15 +1508,31 @@ def _call_claude(system: str, user_msg: str, label: str,
     Always returns {"board": [...], "executives": [...], "senior_leadership": [...]}.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    _MODEL_CANDIDATES = [
+        "claude-haiku-4-5-20251001",       # Claude Haiku 4.5 dated
+        "claude-haiku-4-5",                # Claude Haiku 4.5 latest alias
+        "claude-3-5-haiku-20241022",       # Claude 3.5 Haiku (always works)
+    ]
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
-        )
+        response = None
+        last_exc: Exception | None = None
+        for model_id in _MODEL_CANDIDATES:
+            try:
+                response = client.messages.create(
+                    model=model_id,
+                    max_tokens=4096,
+                    system=system,
+                    messages=[{"role": "user", "content": user_msg}],
+                )
+                logger.debug("Claude call succeeded with model: %s", model_id)
+                break
+            except Exception as _me:
+                last_exc = _me
+                logger.debug("Model %s failed: %s — trying next", model_id, _me)
+        if response is None:
+            raise last_exc or RuntimeError("All Claude models failed")
         raw = response.content[0].text.strip()
 
         # Strip markdown code fences if the model added them
