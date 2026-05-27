@@ -510,14 +510,16 @@ def _fetch_leadership_text(domain: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_FROM_WEB = """\
-You are a corporate intelligence assistant extracting leadership data.
+You are a corporate intelligence assistant extracting leadership data from source text.
 
-You are given content from one or more sources: company website pages, research \
-reports, search snippets, and/or Wikipedia. Extract EVERY person listed as a \
-current board member or senior executive — be exhaustive, not selective.
+⚠ STRICT RULE — NO HALLUCINATION:
+Every name you return MUST appear VERBATIM in the source text provided below.
+Do NOT generate, infer, guess, or use any name from your training knowledge.
+Do NOT invent plausible-sounding names. If a person is not named in the text, \
+do not include them. An empty list is always correct when the source has no names.
 
 The content may use explicit section headings such as "BOARD OF DIRECTORS:", \
-"EXECUTIVE MANAGEMENT:", "Leadership Team:", "Executive Committee:", etc. \
+"EXECUTIVE MANAGEMENT:", "SECTION 1", "Leadership Team:", "Executive Committee:", etc. \
 If such headings are present, use them to place people in the correct category.
 
 Sources may also label leadership under: Board of Trustees, Supervisory Board, \
@@ -539,53 +541,19 @@ board: Include EVERY person listed under a Board of Directors / Board of \
 Trustees / Supervisory Board section — Chairman, Vice/Deputy Chairman, \
 Senior Independent Director, Non-Executive Directors, Independent Directors, \
 Executive Directors listed on the board, committee chairs (Audit, Remuneration, \
-Risk, Nominations). Include executive directors even if they also hold a C-Suite role.
+Risk, Nominations).
 
 executives: Include EVERYONE listed under an Executive Management / Leadership \
 Team / Executive Committee section — CEO, President, COO, CFO, CTO, CIO, CISO, \
 CMO, CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital \
 Officer, Chief Commercial Officer, Managing Partner, and ALL other members of \
-the executive/management/operating committee. For professional services firms: \
-include all managing partners and practice leaders named on the global leadership \
-page. Include regional/country heads if listed on the global leadership page.
+the executive/management/operating committee.
 
-EXCLUDE: former, retired, ex-, past, emeritus office-holders. Anyone described \
-as "Former CEO", "Ex-Chairman", "Retired Director", "Emeritus", etc.
+EXCLUDE: former, retired, ex-, past, emeritus office-holders.
 
 Use names and titles EXACTLY as they appear in the source material.
-If the context contains no leadership information, return {"board": [], "executives": []}.
+If the source text contains no real people's names, return {"board": [], "executives": []}.
 Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
-
-_SYSTEM_FROM_KNOWLEDGE = """\
-You are a corporate intelligence assistant with knowledge of public companies.
-
-Return the Board of Directors and C-Suite Executive Management for the named company \
-based on your training knowledge. For well-known public companies return what you know \
-even if it may be slightly dated — best-effort is strongly preferred over an empty result.
-
-Schema:
-{
-  "board": [
-    {"name": "Full Name", "title": "Board title (e.g. Independent Director, Chairman)"}
-  ],
-  "executives": [
-    {"name": "Full Name", "title": "C-Suite title (e.g. CEO, CFO, COO)"}
-  ]
-}
-
-Rules:
-- board: Chairman, Non-executive directors, independent directors only.
-  Do NOT include C-Suite executives in the board list.
-- executives: Classic C-Suite — CEO, President, COO, CFO, CTO, CIO, CISO, CMO, \
-  CHRO, CRO, CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, \
-  Chief Commercial Officer, and Operating/Executive Committee members.
-  Do NOT include VPs, SVPs, MDs, or Directors unless they sit on the committee.
-- CRITICAL: EXCLUDE all former, retired, ex-, past, or emeritus office-holders. \
-  Only include people currently serving in the role. Do NOT include anyone described \
-  as "Former CEO", "Ex-Chairman", "Retired Director", "Emeritus", etc.
-- Return your best knowledge of CURRENT leadership. Do NOT return empty just because data may be slightly dated.
-- Only return {"board": [], "executives": []} if you have absolutely no knowledge of this company.
-- Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1323,6 +1291,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             system=_SYSTEM_FROM_WEB,
             user_msg=user_msg,
             label=f"{company_name} [{'jina' if jina_key else 'web'}+search+wiki]",
+            source_text=user_msg,   # used to strip hallucinated names
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
@@ -1344,7 +1313,49 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
 # INTERNAL HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _call_claude(system: str, user_msg: str, label: str) -> dict:
+def _name_in_source(name: str, source_lower: str) -> bool:
+    """Return True if the person's full name (or at least surname) appears in source."""
+    if not name or not source_lower:
+        return False
+    # Full name match (case-insensitive)
+    if name.lower() in source_lower:
+        return True
+    # Surname match — must be ≥5 chars to avoid false positives on "Lee", "Kim", etc.
+    parts = name.strip().split()
+    if len(parts) >= 2:
+        surname = parts[-1].lower()
+        if len(surname) >= 5 and surname in source_lower:
+            return True
+    return False
+
+
+def _strip_hallucinations(result: dict, source_text: str) -> dict:
+    """
+    Remove any person whose name does not appear in the source text.
+    Prevents Claude from fabricating plausible-sounding names when the source
+    contains little or no leadership data.
+    """
+    if not source_text:
+        return result
+    src = source_text.lower()
+    before_b = len(result.get("board", []))
+    before_e = len(result.get("executives", []))
+    result["board"] = [
+        p for p in result.get("board", [])
+        if _name_in_source(p.get("name", ""), src)
+    ]
+    result["executives"] = [
+        p for p in result.get("executives", [])
+        if _name_in_source(p.get("name", ""), src)
+    ]
+    removed = (before_b - len(result["board"])) + (before_e - len(result["executives"]))
+    if removed:
+        logger.info("Stripped %d hallucinated names not found in source text", removed)
+    return result
+
+
+def _call_claude(system: str, user_msg: str, label: str,
+                 source_text: str = "") -> dict:
     """Call Claude and parse the JSON leadership response."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     try:
@@ -1367,6 +1378,9 @@ def _call_claude(system: str, user_msg: str, label: str) -> dict:
             "board":      _clean_list(data.get("board",      [])),
             "executives": _clean_list(data.get("executives", [])),
         }
+        # Strip any names Claude invented that don't appear in the source text
+        if source_text:
+            result = _strip_hallucinations(result, source_text)
         logger.info(
             f"Claude leadership ({label}): "
             f"{len(result['board'])} board, {len(result['executives'])} execs"
