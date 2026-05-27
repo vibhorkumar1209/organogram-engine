@@ -365,6 +365,7 @@ class ClassifiedRecord:
     company: str
     linkedin_url: str
     location: str
+    country: str          # ISO / plain country name (e.g. "United Kingdom", "India")
     sector: str
     region: str
     layer: int
@@ -476,6 +477,7 @@ class InferenceEngine:
             company=company,
             linkedin_url=linkedin_url,
             location=location,
+            country=country_name,     # plain country name from source record
             sector=sector,
             region=region,
             layer=layer,

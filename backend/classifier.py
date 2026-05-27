@@ -94,6 +94,10 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         # ── Trustee / Governor (Non-Profit / NGO / Public Sector) ──────────
         r"\btrustee\b",
         r"\bgovernor\b",
+        # ── Vice / Deputy Chairman (board-level, not operating VP) ─────────
+        r"vice[\s-]chair(?:man|woman|person)?",
+        r"deputy\s+chair(?:man|woman|person)?",
+        r"^vc$",                                    # VC = Vice Chairman (standalone)
         # ── Chairman / Chair variants (all forms, exec + non-exec) ─────────
         # Broad match — in professional leadership data "chairman" = board chair
         r"\bchairman\b",
@@ -181,6 +185,13 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"^owner$",
         r"^managing\s+partner$",
         r"^group\s+managing\s+director$",
+        # ── CMD / Chairman & Managing Director (common South Asian + some European)
+        r"\bchairman\s+(?:and|&)\s+managing\s+director\b",
+        r"\bcmd\b",                             # CMD standalone acronym
+        # ── Director General / DG (Government / NGO apex) ─────────────────
+        r"^director[\s-]general$",
+        r"^dg$",
+        r"^director\s+general",
     ]),
 
     # G2 — EVP / Executive Director
@@ -190,33 +201,63 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bexecutive\s+director\b",
         r"\bgroup\s+(?:president|executive)\b",
         r"\bdivisional\s+managing\s+director\b",
-        r"^managing\s+director$",   # standalone MD → EVP-equivalent (G2)
-        r"^md$",
+        r"\bmanaging\s+director\b",   # ANY form of Managing Director → G2
+        r"^md\b",                     # MD at start — "MD, APAC" / standalone MD
+        r"\bmd$",                     # MD at end — "Country MD"
         r"regional\s+president",
     ]),
 
-    # G3 — SVP / Senior VP
+    # G3 — SVP / Senior VP / Chief General Manager
     (3, [
         r"senior\s+vice\s+president",
         r"\bsvp\b",
         r"\bgroup\s+vice\s+president\b",
+        # ── Chief General Manager (senior banking/public-sector India) ──────
+        r"chief\s+general\s+manager",
+        r"^cgm$",                               # CGM standalone acronym
+        # ── Group President at divisional level ──────────────────────────────
+        r"divisional\s+president",
+        r"group\s+coo\b",                       # Group COO below Group CEO
     ]),
 
-    # G4 — VP / Head of Function
+    # G4 — VP / Head of Function / General Manager
     (4, [
         r"\bvice\s+president\b",
         r"\bvp\b",
         r"\bhead\s+of\b",
         r"^head,?\s",
+        # ── General Manager — universal (G4 = function head equivalent) ────
+        r"\bgeneral\s+manager\b",
+        r"^gm$",                                # GM standalone acronym
+        # ── Country/Business/Regional Head patterns ─────────────────────────
+        r"\bcountry\s+(?:head|manager|director|ceo|president)\b",
+        r"\bbusiness\s+head\b",
+        r"\bregional\s+(?:head|president|ceo)\b",   # regional leadership
+        r"\bcluster\s+head\b",
+        r"\bmarket(?:s)?\s+head\b",
+        r"\bterritorial?\s+(?:head|manager|director)\b",
+        # ── Head X (reversed — "Head, APAC" / "Head Europe") ────────────────
+        r"^head[\s,]+\w",
     ]),
 
-    # G5 — Senior Director / Associate VP
+    # G5 — Senior Director / Associate VP / Deputy General Manager
     (5, [
         r"senior\s+director",
         r"\bsr\.?\s+director\b",
         r"associate\s+vice\s+president",
         r"\bavp\b",
         r"associate\s+vp\b",
+        # ── Deputy / Joint General Manager (Indian corporate / banking) ──────
+        r"deputy\s+general\s+manager",
+        r"^dgm$",                               # DGM standalone
+        r"joint\s+general\s+manager",
+        r"^jgm$",                               # JGM standalone
+        # ── Zonal / Area heads (1 level below GM) ────────────────────────────
+        r"\bzonal\s+(?:head|manager|director)\b",
+        r"\barea\s+(?:head|director)\b",
+        r"\bregional\s+director\b",             # regional director = senior director
+        r"\bglobal\s+director\b",               # global director = senior director
+        r"\bprincipal\s+director\b",            # principal director (govt) = senior
     ]),
 
     # G6 — Director
@@ -224,7 +265,7 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bdirector\b",
     ]),
 
-    # G7 — Senior Manager / Associate Director / Team Lead
+    # G7 — Senior Manager / Associate Director / Team Lead / AGM
     (7, [
         r"senior\s+manager",
         r"\bsr\.?\s+manager\b",
@@ -233,12 +274,18 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bchapter\s+lead\b",
         r"\bgroup\s+manager\b",
         r"\bprincipal\s+(?:consultant|advisor)\b",
+        # ── Assistant General Manager (Indian corporate) ──────────────────
+        r"assistant\s+general\s+manager",
+        r"^agm$",                               # AGM standalone acronym
+        r"deputy\s+manager",                    # Deputy Manager = 1 below Manager
+        r"deputy\s+director",                   # Deputy Director (govt/NGO)
     ]),
 
     # G8 — Manager / Supervisor
     (8, [
         r"\bmanager\b",
         r"\bsupervisor\b",
+        r"\bsuperintendent\b",
     ]),
 
     # G9 — Senior IC / Lead / Staff / Principal
@@ -469,26 +516,116 @@ _INDUSTRY_DEPT_BOOSTS: dict[str, list[tuple[int, str]]] = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ACRONYM → LAYER LOOKUP  (NLP acronym disambiguation)
+# ─────────────────────────────────────────────────────────────────────────────
+# Applied when the ENTIRE stripped title is exactly one of these tokens —
+# or when the title starts with the token followed by punctuation / geography.
+# E.g. "GM", "GM - India", "DGM, North", "SVP | APAC" all resolve correctly.
+#
+# Corporate hierarchy (default):
+_ACRONYM_LAYER_CORPORATE: dict[str, int] = {
+    # G0 — Board
+    "vc":   0,   # Vice Chairman
+    "ined": 0,   # Independent Non-Executive Director
+    "ned":  0,   # Non-Executive Director
+    # G1 — C-Suite / Apex
+    "ceo":  1, "cfo":  1, "coo":  1, "cto":  1, "cmo":  1, "chro": 1,
+    "cio":  1, "cro":  1, "cpo":  1, "cdo":  1, "cso":  1, "clo":  1,
+    "ciso": 1, "cao":  1, "caio": 1, "cxo":  1, "ccio": 1,
+    "cmd":  1,   # Chairman & Managing Director
+    "dg":   1,   # Director General
+    # G2 — EVP / MD
+    "evp":  2, "md":   2,
+    # G3 — SVP / CGM
+    "svp":  3, "cgm":  3,
+    # G4 — VP / GM / Head
+    "vp":   4, "gm":   4,
+    # G5 — AVP / DGM / JGM
+    "avp":  5, "dgm":  5, "jgm":  5,
+    # G6 — Director
+    "dir":  6,
+    # G7 — AGM
+    "agm":  7,
+    # G8 — Manager
+    "mgr":  8,
+}
+
+# Financial-markets overrides (VP, MD, ED are at different levels in IB)
+_ACRONYM_LAYER_FINANCIAL: dict[str, int] = {
+    "ceo":  1, "cfo":  1, "coo":  1, "cto":  1, "chro": 1,
+    "cio":  1, "cro":  1, "cso":  1, "clo":  1, "cao":  1,
+    "md":   3,   # Managing Director in banking = G3 (operating senior)
+    "ed":   4,   # Executive Director in banking = G4
+    "svp":  5,   # SVP in banking = Director-equivalent (G5)
+    "dir":  5,   # Director in banking = G5
+    "vp":   6,   # VP in banking = mid-level (G6)
+    "avp":  7,   # AVP in banking = G7
+    "mgr":  8,
+}
+
+# Strip trailing geo/scope suffixes so "GM, India" → token = "gm"
+_ACRONYM_SUFFIX_RE = re.compile(
+    r"[\s,|–\-]+(?:india|china|apac|emea|mena|latam|americas|europe|"
+    r"north\s+america|south\s+asia|uk|us|uae|gcc|anz|global|group|"
+    r"regional|divisional|international|\w{2,3})$",
+    re.IGNORECASE,
+)
+
+
+def _acronym_layer(title: str, industry: str = "") -> Optional[int]:
+    """
+    If *title* is (or starts with) a known seniority acronym, return its layer.
+    Returns None when no acronym match is found (caller falls through to regex rules).
+    """
+    t = title.strip().lower()
+    # Strip trailing geographic / scope suffixes iteratively
+    for _ in range(3):
+        t2 = _ACRONYM_SUFFIX_RE.sub("", t).strip(" ,|–-")
+        if t2 == t:
+            break
+        t = t2
+
+    lookup = (
+        _ACRONYM_LAYER_FINANCIAL
+        if industry in _FINANCIAL_INDUSTRIES
+        else _ACRONYM_LAYER_CORPORATE
+    )
+    return lookup.get(t)
+
+
 def _classify_layer(title: str, job_level: str = "", industry: str = "") -> int:
     """Return layer 0–10 for a job title (G0–G10 per reference).
 
-    When *industry* is a financial-markets type, uses the banking-specific
-    layer rules where VP = G6 (mid-level), MD = G3 (senior).
+    Pipeline:
+      1. Pure-acronym lookup (GM → G4, DGM → G5, MD → G2, etc.)
+      2. Ordered regex rules (first match wins, G0 → G9)
+      3. LinkedIn job_level string as last-resort fallback
+      4. Default G10 (IC / specialist)
+
+    Financial-markets industry uses different rules (VP=G6, MD=G3, etc.).
     """
     t = title.strip().lower()
+    if not t:
+        return 10
 
+    # ── Step 1: acronym lookup ────────────────────────────────────────────
+    acr = _acronym_layer(t, industry)
+    if acr is not None:
+        return acr
+
+    # ── Step 2: ordered regex rules ───────────────────────────────────────
     rules = (
         _FINANCIAL_LAYER_RULES
         if industry in _FINANCIAL_INDUSTRIES
         else _LAYER_RULES
     )
-
     for layer, patterns in rules:
         for pat in patterns:
             if re.search(pat, t):
                 return layer
 
-    # LinkedIn job_level as fallback when title is ambiguous
+    # ── Step 3: LinkedIn job_level string fallback ────────────────────────
     _JL: dict[str, int] = {
         "entry level": 10, "entry-level": 10, "internship": 10,
         "associate":   9,

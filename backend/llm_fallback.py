@@ -905,44 +905,65 @@ def _parallel_run_bod(company_name: str, domain: str,
     """
     BOD-focused Parallel.AI query.
 
-    Directs the agent to governance pages, proxy statements (DEF 14A), and
-    annual report governance sections — the canonical sources for board data.
-
-    Returns (board_list, raw_text).  raw_text is non-empty only when JSON
-    parsing failed and the text should be passed to Claude for extraction.
+    Navigates specifically to board/governance pages and extracts every
+    current director, returning (board_list, raw_text).
+    raw_text is non-empty only when JSON parsing failed (→ passed to Claude).
     """
-    domain_hint = f"  Their website is {domain}." if domain else ""
+    # Build candidate governance URLs so Parallel.AI has explicit targets
+    base = domain.rstrip("/") if domain else ""
+    url_candidates = ""
+    if base:
+        urls = [
+            f"{base}/governance",
+            f"{base}/corporate-governance",
+            f"{base}/board-of-directors",
+            f"{base}/about/governance",
+            f"{base}/about/board-of-directors",
+            f"{base}/investors/corporate-governance",
+            f"{base}/investor-relations/corporate-governance",
+            f"{base}/ir/governance",
+        ]
+        url_candidates = (
+            f"Navigate to these URLs (try each until content is found):\n"
+            + "\n".join(f"  {u}" for u in urls)
+            + "\n\n"
+        )
 
     query = (
-        f'Research the COMPLETE, CURRENT Board of Directors of "{company_name}".'
-        f'{domain_hint}\n\n'
-        f'Focus exclusively on these authoritative sources (in priority order):\n'
-        f'  1. Official governance page (e.g. {domain}/governance, '
-        f'/board-of-directors, /corporate-governance)\n'
-        f'  2. Investor Relations → Corporate Governance section on the website\n'
-        f'  3. Proxy Statement (SEC DEF 14A filing) — director proposal section\n'
-        f'  4. Annual Report — Board of Directors / Governance chapter\n\n'
-        f'Return ONLY this JSON — absolutely no prose, no markdown:\n'
+        f'Find every current member of the Board of Directors of "{company_name}".\n\n'
+        f'{url_candidates}'
+        f'If those pages are empty or redirect, also check:\n'
+        f'  - Investor Relations section → "Corporate Governance" or "Board of Directors"\n'
+        f'  - The company\'s most recent annual report (PDF/HTML)\n'
+        f'  - SEC/regulatory filing proxy statement (DEF 14A)\n'
+        f'  - Wikipedia article for the company\n\n'
+        f'Output ONLY valid JSON — no markdown fences, no prose before or after:\n'
         f'{{\n'
         f'  "board": [\n'
-        f'    {{"name": "Full Name", "title": "Exact board title"}}\n'
+        f'    {{"name": "Full Name", "title": "Exact title as listed"}},\n'
+        f'    {{"name": "Full Name", "title": "Exact title as listed"}}\n'
         f'  ]\n'
         f'}}\n\n'
-        f'Include EVERY current board member:\n'
-        f'Chairman / Chair, Vice/Deputy Chairman, Senior Independent Director, '
-        f'Lead Independent Director, Non-Executive Directors (NEDs), '
-        f'Independent Directors, Executive Directors listed on the board, '
-        f'committee chairs (Audit, Remuneration/Compensation, Risk, Nominations/'
-        f'Governance), Supervisory Board members, Board of Trustees members.\n'
-        f'Use exact titles as listed (e.g. "Independent Non-Executive Director", '
-        f'"Chair of the Audit Committee").\n'
-        f'EXCLUDE: former, retired, ex-, or emeritus directors.\n'
-        f'Be EXHAUSTIVE — include every director listed, not only the most senior.'
+        f'Title examples:\n'
+        f'  "Chairman of the Board", "Non-Executive Director",\n'
+        f'  "Independent Director", "Chair of the Audit Committee",\n'
+        f'  "Lead Independent Director", "Senior Independent Director",\n'
+        f'  "Executive Director", "Vice Chairman"\n\n'
+        f'Include ALL of: Chairman, Vice/Deputy Chairman, Lead Independent Director,\n'
+        f'Senior Independent Director, every Non-Executive Director (NED/INED),\n'
+        f'every Independent Director, every Executive Director listed on the board,\n'
+        f'Supervisory Board members, Board of Trustees members, committee chairs.\n'
+        f'Use their EXACT listed title.\n'
+        f'EXCLUDE: former, retired, ex-, emeritus, or advisory board members.\n'
+        f'Return every person. Do not abbreviate or skip anyone.'
     )
 
     text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT_BOD)
     if not text:
+        logger.info("Parallel.AI BOD returned empty for '%s'", company_name)
         return [], ""
+
+    # Primary: look for {"board": [...]}
     result = _extract_leadership_json(text)
     if result:
         board = result.get("board", [])
@@ -950,7 +971,29 @@ def _parallel_run_bod(company_name: str, domain: str,
             logger.info("Parallel.AI BOD query for '%s': %d directors parsed",
                         company_name, len(board))
             return board, ""
-    logger.info("Parallel.AI BOD JSON parse failed for '%s' (%d chars)",
+        # Parallel.AI sometimes labels board members under "executives" key
+        # when it can't distinguish the two groups — rescue those here.
+        rescued = result.get("executives", [])
+        if rescued:
+            # Heuristic: if ALL titles contain director/chairman/trustee/governor
+            # keywords, treat them as board members.
+            _BOARD_TITLE_RE = re.compile(
+                r"\b(director|chairman|chair|trustee|governor|supervisory"
+                r"|non[- ]?executive|ined|ned|independent)\b",
+                re.IGNORECASE,
+            )
+            board_like = [
+                p for p in rescued
+                if _BOARD_TITLE_RE.search(p.get("title", ""))
+            ]
+            if len(board_like) >= len(rescued) * 0.6:
+                logger.info(
+                    "Parallel.AI BOD: rescued %d directors from 'executives' key for '%s'",
+                    len(board_like), company_name,
+                )
+                return board_like, ""
+
+    logger.info("Parallel.AI BOD JSON parse failed for '%s' (%d chars) — passing to Claude",
                 company_name, len(text))
     return [], text
 

@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import type { OrgNode } from '../types'
+
+type GroupMode = 'region' | 'country'
 
 interface Props {
   deptNode:   OrgNode | null
@@ -495,6 +497,9 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
   const isEM    = deptNode?.node_id === 'dept__executive_management'
   const labels  = isBoard ? BOD_LAYER_LABELS : LAYER_LABELS
 
+  // ── Group-by toggle: region (broad) or country (specific) ────────────
+  const [groupMode, setGroupMode] = useState<GroupMode>('region')
+
   // ── Title-based region inference ────────────────────────────────────
   // Matches geographic keywords in designation/label so regional executives
   // land in correct sub-cards even when backend region = 'Global HQ'.
@@ -547,21 +552,93 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
     return backendRegion || 'Global HQ'
   }
 
+  // ── Country inference ────────────────────────────────────────────────
+  // More granular than region — maps to individual country names.
+  // Falls back to region-based grouping when no country data is available.
+  const COUNTRY_PATTERNS: [RegExp, string][] = [
+    [/\bunited\s+states\b|\busa\b|\bus\s+(?:ceo|head|president)\b/i, 'United States'],
+    [/\bunited\s+kingdom\b|\bu\.?k\.?\b|\bbritish\b|\bengland\b/i,   'United Kingdom'],
+    [/\bgermany\b|\bgerman\b/i,          'Germany'],
+    [/\bfrance\b|\bfrench\b/i,           'France'],
+    [/\bnetherlans?\b|\bdutch\b/i,       'Netherlands'],
+    [/\bswitzerland\b|\bswiss\b/i,       'Switzerland'],
+    [/\bsweden\b|\bswedish\b/i,          'Sweden'],
+    [/\bnorway\b|\bnorwegian\b/i,        'Norway'],
+    [/\bdenmark\b|\bdanish\b/i,          'Denmark'],
+    [/\bbelgium\b|\bbelgian\b/i,         'Belgium'],
+    [/\bspain\b|\bspanish\b/i,           'Spain'],
+    [/\bitaly\b|\bitalian\b/i,           'Italy'],
+    [/\bpoland\b|\bpolish\b/i,           'Poland'],
+    [/\bireland\b|\birish\b/i,           'Ireland'],
+    [/\baustria\b/i,                     'Austria'],
+    [/\bportugal\b|\bportuguese\b/i,     'Portugal'],
+    [/\bcanada\b|\bcanadian\b/i,         'Canada'],
+    [/\baustrali/i,                      'Australia'],
+    [/\bnew\s+zealand\b/i,               'New Zealand'],
+    [/\bsingapore\b/i,                   'Singapore'],
+    [/\bhong\s+kong\b/i,                 'Hong Kong'],
+    [/\bjapan\b|\bjapanese\b/i,          'Japan'],
+    [/\bsouth\s+korea\b|\bkorean\b/i,    'South Korea'],
+    [/\bchina\b|\bchinese\b/i,           'China'],
+    [/\bindia\b|\bindian\b/i,            'India'],
+    [/\bsouth\s+africa\b/i,              'South Africa'],
+    [/\bnigeria\b|\bnigerian\b/i,        'Nigeria'],
+    [/\bkeny\b/i,                        'Kenya'],
+    [/\begypt\b|\begyptian\b/i,          'Egypt'],
+    [/\buae\b|\bunited\s+arab\s+emirates\b/i, 'UAE'],
+    [/\bsaudi\b|\bksa\b/i,              'Saudi Arabia'],
+    [/\bqatar\b/i,                       'Qatar'],
+    [/\bkuwait\b/i,                      'Kuwait'],
+    [/\bbrazil\b|\bbrazilian\b/i,        'Brazil'],
+    [/\bmexic/i,                         'Mexico'],
+    [/\bchile\b|\bchilean\b/i,           'Chile'],
+    [/\bcolombi/i,                       'Colombia'],
+    [/\bmalaysia\b|\bmalaysian\b/i,      'Malaysia'],
+    [/\bindonesia\b|\bindonesian\b/i,    'Indonesia'],
+    [/\bthailand\b|\bthai\b/i,           'Thailand'],
+    [/\bphilippines?\b|\bfilipino\b/i,  'Philippines'],
+    [/\bvietnam\b|\bvietnamese\b/i,      'Vietnam'],
+  ]
+
+  function inferCountry(person: OrgNode, forBoard: boolean): string {
+    // 1. Use stored country field from backend
+    const stored = ((person.metadata?.country as string) || '').trim()
+    if (stored && stored.length > 1) return stored
+    // 2. BOD → always Global HQ
+    if (forBoard) return 'Global HQ'
+    // 3. Try to extract from location string (e.g. "London, United Kingdom")
+    const loc = ((person.metadata?.location as string) || '').trim()
+    if (loc) {
+      const parts = loc.split(',').map(s => s.trim())
+      const countryPart = parts[parts.length - 1]
+      if (countryPart && countryPart.length > 2) return countryPart
+    }
+    // 4. Infer from title keywords (country-specific patterns)
+    const title = ((person.metadata?.designation as string) || person.label)
+    for (const [pat, country] of COUNTRY_PATTERNS) {
+      if (pat.test(title)) return country
+    }
+    // 5. Fall back to region
+    return inferRegion(person, forBoard)
+  }
+
   // ── Geographic grouping ──────────────────────────────────────────────
-  // Group executives by inferred region.
-  // Primary (HQ) region = region of the apex (lowest layer) person.
-  // Gets the full CEO/Chairman hierarchy. Other regions get local trees.
+  // Grouped by region (default) or country (when toggled).
+  // Primary group = group of the apex (lowest layer) person.
   const regionGroups = useMemo<[string, OrgNode[]][]>(() => {
     if (!executives || executives.length === 0) return []
+    const keyFn = groupMode === 'country'
+      ? (p: OrgNode) => inferCountry(p, isBoard)
+      : (p: OrgNode) => inferRegion(p, isBoard)
     const map = new Map<string, OrgNode[]>()
     for (const p of executives) {
-      const r = inferRegion(p, isBoard)
+      const r = keyFn(p)
       if (!map.has(r)) map.set(r, [])
       map.get(r)!.push(p)
     }
-    // Primary = region of the most-senior person
+    // Primary = group of the most-senior person
     const apex    = [...executives].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
-    const primary = inferRegion(apex, isBoard)
+    const primary = keyFn(apex)
     // Sort: primary first, then by headcount descending
     return [...map.entries()].sort(([ra, a], [rb, b]) => {
       if (ra === primary) return -1
@@ -569,7 +646,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
       return b.length - a.length
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executives, isBoard])
+  }, [executives, isBoard, groupMode])
 
   // Layer distribution summary (header)
   const byLayer: Record<number, number> = {}
@@ -631,17 +708,39 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
         </div>
       </div>
 
-      {/* ── Legend ─────────────────────────────────────────────── */}
+      {/* ── Legend + Group-by toggle ─────────────────────────── */}
       {executives !== null && executives.length > 0 && (
         <div style={{
           padding: '6px 14px', background: '#f5f9fb',
           borderBottom: `1px solid #bad4dc`,
-          display: 'flex', alignItems: 'center', gap: 12, fontSize: 9, color: '#627184',
+          display: 'flex', alignItems: 'center', gap: 10, fontSize: 9, color: '#627184',
         }}>
           <span>▼ collapse</span>
           <span>▶ expand</span>
-          <span style={{ marginLeft: 'auto' }}>
-            {regionGroups.length} region{regionGroups.length !== 1 ? 's' : ''} · {executives?.length ?? 0} total
+          {/* Group-by toggle */}
+          <div style={{
+            marginLeft: 'auto', display: 'flex', gap: 0,
+            border: '1px solid #bad4dc', borderRadius: 4, overflow: 'hidden',
+          }}>
+            {(['region', 'country'] as GroupMode[]).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setGroupMode(mode)}
+                style={{
+                  padding: '2px 8px', fontSize: 8, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: groupMode === mode ? color : '#f5f9fb',
+                  color:      groupMode === mode ? '#ffffff' : '#627184',
+                  textTransform: 'capitalize', letterSpacing: 0.5,
+                  transition: 'background 0.15s',
+                }}
+              >
+                {mode === 'region' ? '🌐 Region' : '📍 Country'}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 8, color: '#bad4dc' }}>
+            {regionGroups.length} · {executives?.length ?? 0}
           </span>
         </div>
       )}
@@ -697,7 +796,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
                 }}
               >
                 <span style={{ fontSize: 9, color: isPrimary ? color + 'cc' : color + '55', flexShrink: 0 }}>
-                  🌐
+                  {groupMode === 'country' ? '📍' : '🌐'}
                 </span>
                 <span style={{
                   fontSize: 9, fontWeight: 700, letterSpacing: 0.8,
