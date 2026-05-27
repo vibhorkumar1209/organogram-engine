@@ -900,221 +900,47 @@ def _extract_leadership_json(text: str) -> dict | None:
     return None
 
 
-def _parallel_run_bod(company_name: str, domain: str,
-                      api_key: str) -> tuple[list[dict], str]:
-    """
-    BOD-focused Parallel.AI query.
-
-    Navigates specifically to board/governance pages and extracts every
-    current director, returning (board_list, raw_text).
-    raw_text is non-empty only when JSON parsing failed (→ passed to Claude).
-    """
-    # Build candidate governance URLs so Parallel.AI has explicit targets.
-    # Always ensure protocol prefix so Parallel.AI can navigate directly.
-    raw = (domain or "").rstrip("/")
-    if raw and not raw.startswith("http"):
-        raw = f"https://{raw}"
-    base = raw
-    url_candidates = ""
-    if base:
-        urls = [
-            f"{base}/governance",
-            f"{base}/corporate-governance",
-            f"{base}/board-of-directors",
-            f"{base}/about/governance",
-            f"{base}/about/board-of-directors",
-            f"{base}/investors/corporate-governance",
-            f"{base}/investor-relations/corporate-governance",
-            f"{base}/ir/governance",
-            f"https://www.{domain.replace('https://','').replace('http://','').replace('www.','')}/board-of-directors",
-        ]
-        url_candidates = (
-            f"Navigate to these URLs (try each until content is found):\n"
-            + "\n".join(f"  {u}" for u in urls)
-            + "\n\n"
-        )
-
-    query = (
-        f'Find every current member of the Board of Directors of "{company_name}".\n\n'
-        f'{url_candidates}'
-        f'If those pages are empty or redirect, also check:\n'
-        f'  - Investor Relations section → "Corporate Governance" or "Board of Directors"\n'
-        f'  - The company\'s most recent annual report (PDF/HTML)\n'
-        f'  - SEC/regulatory filing proxy statement (DEF 14A)\n'
-        f'  - Wikipedia article for the company\n\n'
-        f'Output ONLY valid JSON — no markdown fences, no prose before or after:\n'
-        f'{{\n'
-        f'  "board": [\n'
-        f'    {{"name": "Full Name", "title": "Exact title as listed"}},\n'
-        f'    {{"name": "Full Name", "title": "Exact title as listed"}}\n'
-        f'  ]\n'
-        f'}}\n\n'
-        f'Title examples:\n'
-        f'  "Chairman of the Board", "Non-Executive Director",\n'
-        f'  "Independent Director", "Chair of the Audit Committee",\n'
-        f'  "Lead Independent Director", "Senior Independent Director",\n'
-        f'  "Executive Director", "Vice Chairman"\n\n'
-        f'Include ALL of: Chairman, Vice/Deputy Chairman, Lead Independent Director,\n'
-        f'Senior Independent Director, every Non-Executive Director (NED/INED),\n'
-        f'every Independent Director, every Executive Director listed on the board,\n'
-        f'Supervisory Board members, Board of Trustees members, committee chairs.\n'
-        f'Use their EXACT listed title.\n'
-        f'EXCLUDE: former, retired, ex-, emeritus, or advisory board members.\n'
-        f'Return every person. Do not abbreviate or skip anyone.'
-    )
-
-    text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT_BOD)
-    if not text:
-        logger.info("Parallel.AI BOD returned empty for '%s'", company_name)
-        return [], ""
-
-    # Primary: look for {"board": [...]}
-    result = _extract_leadership_json(text)
-    if result:
-        board = result.get("board", [])
-        if board:
-            logger.info("Parallel.AI BOD query for '%s': %d directors parsed",
-                        company_name, len(board))
-            return board, ""
-        # Parallel.AI sometimes labels board members under "executives" key
-        # when it can't distinguish the two groups — rescue those here.
-        rescued = result.get("executives", [])
-        if rescued:
-            # Heuristic: if ALL titles contain director/chairman/trustee/governor
-            # keywords, treat them as board members.
-            _BOARD_TITLE_RE = re.compile(
-                r"\b(director|chairman|chair|trustee|governor|supervisory"
-                r"|non[- ]?executive|ined|ned|independent)\b",
-                re.IGNORECASE,
-            )
-            board_like = [
-                p for p in rescued
-                if _BOARD_TITLE_RE.search(p.get("title", ""))
-            ]
-            if len(board_like) >= len(rescued) * 0.4:
-                logger.info(
-                    "Parallel.AI BOD: rescued %d directors from 'executives' key for '%s'",
-                    len(board_like), company_name,
-                )
-                return board_like, ""
-
-    logger.info("Parallel.AI BOD JSON parse failed for '%s' (%d chars) — passing to Claude",
-                company_name, len(text))
-    return [], text
-
-
-def _parallel_run_em(company_name: str, domain: str,
-                     api_key: str) -> tuple[list[dict], str]:
-    """
-    Executive Management-focused Parallel.AI query.
-
-    Directs the agent to leadership/executive-team pages, operating committee
-    pages, and executive bio sections — the canonical sources for EM data.
-
-    Returns (executives_list, raw_text).  raw_text is non-empty only when JSON
-    parsing failed and the text should be passed to Claude for extraction.
-    """
-    domain_hint = f"  Their website is {domain}." if domain else ""
-
-    query = (
-        f'Research the COMPLETE, CURRENT Executive Leadership Team of "{company_name}".'
-        f'{domain_hint}\n\n'
-        f'Focus exclusively on these authoritative sources (in priority order):\n'
-        f'  1. Official leadership / executive team page (e.g. {domain}/leadership, '
-        f'/about/team, /about/executive-committee)\n'
-        f'  2. Executive Committee / Management Committee / Operating Committee page\n'
-        f'  3. Executive biographies and management team section on the website\n'
-        f'  4. Annual Report — Executive Management / Senior Leadership chapter\n\n'
-        f'Return ONLY this JSON — absolutely no prose, no markdown:\n'
-        f'{{\n'
-        f'  "executives": [\n'
-        f'    {{"name": "Full Name", "title": "Exact leadership title"}}\n'
-        f'  ]\n'
-        f'}}\n\n'
-        f'Include EVERY current executive and senior leader:\n'
-        f'CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, '
-        f'General Counsel / Chief Legal Officer, Chief Strategy Officer, '
-        f'Chief Digital Officer, Chief Commercial Officer, Chief Risk Officer, '
-        f'Chief Compliance Officer, Managing Partner, and ALL members of the '
-        f'Executive Committee / Operating Committee / Management Committee / '
-        f'Group Management Board / Leadership Team / Senior Leadership Team.\n'
-        f'For professional services firms: ALL managing partners and practice '
-        f'leaders named on the official global leadership page.\n'
-        f'Include regional/country CEOs and heads of major business divisions if '
-        f'listed on the global leadership page.\n'
-        f'Use exact titles as listed.\n'
-        f'CRITICAL: Place people in "executives" ONLY. Do NOT use a "board" key.\n'
-        f'EXCLUDE: former, retired, ex-, or emeritus executives.\n'
-        f'EXCLUDE: Non-Executive Directors, Independent Directors, board members — '
-        f'those belong to a separate Board query.\n'
-        f'Be EXHAUSTIVE — include every person listed, not only C-suite.'
-    )
-
-    text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT_EM)
-    if not text:
-        return [], ""
-    result = _extract_leadership_json(text)
-    if result:
-        execs = result.get("executives", [])
-        if execs:
-            logger.info("Parallel.AI EM query for '%s': %d executives parsed",
-                        company_name, len(execs))
-            return execs, ""
-    logger.info("Parallel.AI EM JSON parse failed for '%s' (%d chars)",
-                company_name, len(text))
-    return [], text
-
-
 def _parallel_fetch_leadership(company_name: str, domain: str,
                                api_key: str) -> dict | None:
     """
-    Two concurrent focused Parallel.AI queries — one dedicated to BOD (governance
-    pages, proxy statements, annual reports) and one dedicated to Executive
-    Management (leadership/team pages, operating committee pages).
+    Single Parallel.AI research query that finds both Board of Directors and
+    Executive Management in one pass.
 
-    Running them concurrently halves wall-clock time and lets each query focus
-    on the authoritative sources for its data, dramatically improving BOD recall.
+    Parallel.AI browses the live website, annual reports, and governance pages.
+    The result is plain research text — Claude extracts the structured JSON.
 
-    Returns {"board": [...], "executives": [...]} on success, {"_raw_text": ...}
-    when JSON parsing fails (so Claude can extract), or None on total failure.
+    Returns {"board": [...], "executives": [...]} or None on total failure.
     """
-    import concurrent.futures
+    # Ensure domain has protocol so Parallel.AI can navigate directly
+    raw_domain = (domain or "").rstrip("/")
+    if raw_domain and not raw_domain.startswith("http"):
+        raw_domain = f"https://{raw_domain}"
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        bod_fut = executor.submit(_parallel_run_bod, company_name, domain, api_key)
-        em_fut  = executor.submit(_parallel_run_em,  company_name, domain, api_key)
+    site_hint = f"\n\nCompany website: {raw_domain}" if raw_domain else ""
 
-        board, bod_raw = [], ""
-        execs, em_raw  = [], ""
+    query = (
+        f'Research the current leadership of "{company_name}".{site_hint}\n\n'
+        f'Find and list:\n'
+        f'1. Every current Board of Directors member — Chairman, all Non-Executive '
+        f'Directors, Independent Directors, Executive Directors on the board, '
+        f'committee chairs (Audit, Remuneration, Nomination, Risk). '
+        f'Check the corporate governance / investor relations section.\n\n'
+        f'2. Every current Executive Management team member — CEO, COO, CFO, CTO, '
+        f'CIO, CMO, CHRO, General Counsel, and all members of the Executive Committee '
+        f'/ Operating Committee / Management Committee / Leadership Team. '
+        f'Check the leadership / about / executive team page.\n\n'
+        f'For each person give their full name and exact title as listed.\n'
+        f'Exclude anyone described as former, retired, or ex-.'
+    )
 
-        try:
-            board, bod_raw = bod_fut.result(timeout=_PARALLEL_TASK_TIMEOUT_BOD + 15)
-        except Exception as exc:
-            logger.warning("Parallel.AI BOD query failed: %s", exc)
+    text = _parallel_run(query, api_key, timeout=_PARALLEL_TASK_TIMEOUT)
+    if not text:
+        logger.info("Parallel.AI returned empty for '%s'", company_name)
+        return None
 
-        try:
-            execs, em_raw = em_fut.result(timeout=_PARALLEL_TASK_TIMEOUT_EM + 15)
-        except Exception as exc:
-            logger.warning("Parallel.AI EM query failed: %s", exc)
-
-    if board or execs:
-        logger.info(
-            "Parallel.AI split queries for '%s': %d board, %d execs",
-            company_name, len(board), len(execs),
-        )
-        return {"board": board, "executives": execs}
-
-    # Both JSON parses failed — combine raw texts for Claude extraction
-    raw_text = "\n\n".join(t for t in [bod_raw, em_raw] if t)
-    if raw_text:
-        logger.info(
-            "Parallel.AI JSON parse failed for '%s' (%d chars raw) — passing to Claude",
-            company_name, len(raw_text),
-        )
-        return {"_raw_text": raw_text}
-
-    logger.info("Parallel.AI returned empty for '%s'", company_name)
-    return None
+    logger.info("Parallel.AI research for '%s': %d chars — passing to Claude",
+                company_name, len(text))
+    return {"_raw_text": text}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
