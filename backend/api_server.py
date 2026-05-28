@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -312,7 +312,8 @@ def _dag_loaded() -> bool:
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...),
                       company_name: str = Query("Organization"),
-                      company_website: str = Query("")):
+                      company_website: str = Query(""),
+                      background_tasks: BackgroundTasks = None):
     """Accept CSV, JSON, or Excel. Build the DAG and return stats.
 
     Optional: company_website=https://morganstanley.com
@@ -386,16 +387,24 @@ async def upload_file(file: UploadFile = File(...),
         _m = _re.search(r"(?:https?://)?(?:www\.)?([^/]+)", company_website)
         _domain = _m.group(1) if _m else _domain
 
-    # ── Full BOD/EM enrichment — runs synchronously so response contains
-    # complete leadership data (web-sourced where available).
-    # This takes up to ~60 s (web scrape budget + LLM calls) but the frontend
-    # waits and receives everything at once — no partial / two-phase display.
-    try:
-        _enrich_with_llm_leadership(_dag, _classified, company_name, domain=_domain)
-        _db.upsert_dag(_dag)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(f"Leadership enrichment failed: {exc}")
+    # ── BOD/EM enrichment in background ─────────────────────────────────────
+    # Parallel.AI research takes 60-90 s.  Running it synchronously would block
+    # the upload response and time out on Render's free tier.  Instead we return
+    # the org chart immediately and let the enrichment run in a background thread.
+    # The frontend can re-fetch /chart after a few seconds to pick up BOD/EM data.
+    def _run_enrichment(dag, classified, co_name, domain):
+        try:
+            _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
+            _db.upsert_dag(dag)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(f"Leadership enrichment failed: {exc}")
+
+    if background_tasks is not None:
+        background_tasks.add_task(_run_enrichment, _dag, _classified, company_name, _domain)
+    else:
+        # Fallback: run synchronously if no background task context available
+        _run_enrichment(_dag, _classified, company_name, _domain)
 
     # ── Field coverage check (group-aware) ──────────────────────────────────
     # Vendors use many equivalent column names.  We check coverage by semantic
