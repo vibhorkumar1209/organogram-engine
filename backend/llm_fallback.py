@@ -738,9 +738,9 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 _PARALLEL_BASE            = "https://api.parallel.ai"
 _PARALLEL_POLL_INTERVAL   = 4    # seconds between status polls
 _PARALLEL_TASK_TIMEOUT    = 80   # default timeout (seconds)
-_PARALLEL_TASK_TIMEOUT_BOD = 90  # proxy statements / annual reports need more time
+_PARALLEL_TASK_TIMEOUT_BOD = 120 # proxy statements / annual reports need more time
 _PARALLEL_TASK_TIMEOUT_EM  = 80  # leadership pages render faster
-_PARALLEL_MAX_CHARS       = 20_000
+_PARALLEL_MAX_CHARS       = 50_000  # raised from 20K — large boards (14+ members) need more
 
 
 def _parallel_run(query: str, api_key: str,
@@ -1505,7 +1505,7 @@ def _call_claude(system: str, user_msg: str, label: str,
             try:
                 response = client.messages.create(
                     model=model_id,
-                    max_tokens=4096,
+                    max_tokens=6144,  # raised from 4096 — large boards need more output
                     system=system,
                     messages=[{"role": "user", "content": user_msg}],
                 )
