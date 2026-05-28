@@ -9,6 +9,19 @@ import re
 import tempfile
 from pathlib import Path
 
+# ── Load .env file for local development ─────────────────────────────────────
+# On Render/production, env vars are injected by the platform.
+# Locally, create backend/.env with ANTHROPIC_API_KEY, PARALLEL_API_KEY, etc.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _env_path = Path(__file__).parent / ".env"
+    if _env_path.exists():
+        _load_dotenv(_env_path, override=True)  # override=True so .env wins over empty shell vars
+        import logging as _log
+        _log.getLogger(__name__).info("Loaded env vars from %s", _env_path)
+except ImportError:
+    pass  # python-dotenv not installed — rely on shell env
+
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
