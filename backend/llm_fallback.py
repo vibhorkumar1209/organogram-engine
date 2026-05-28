@@ -1338,34 +1338,10 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             "Web+search+wiki context returned no leaders for '%s'", company_name
         )
 
-    # ── Step 5: Web-only — no AI knowledge fallback ──────────────────────────
-    # ── Step 5: Claude knowledge fallback ────────────────────────────────────────
-    # Web sources found nothing. For well-known public companies Claude's training
-    # knowledge is accurate — use it rather than returning empty.
-    # "_strip_hallucinations" is NOT applied here because training knowledge for
-    # a recognised company is not hallucination; for unknown companies Claude
-    # returns {"board":[], "executives":[]} per the system prompt instruction.
-    logger.info(
-        "Web sources found no leaders for '%s' — trying Claude knowledge fallback",
-        company_name,
-    )
-    result = _call_claude(
-        system=_SYSTEM_FROM_KNOWLEDGE,
-        user_msg=f"Company: {company_name}",
-        label=f"{company_name} [knowledge]",
-    )
-    if result.get("board") or result.get("executives"):
-        result["_source"] = "knowledge"
-        _LEADERSHIP_CACHE[cache_key] = result
-        logger.info(
-            "Claude knowledge for '%s': %d board, %d execs",
-            company_name,
-            len(result.get("board", [])),
-            len(result.get("executives", [])),
-        )
-        return result
-
-    logger.info("No leadership found for '%s' from any source", company_name)
+    # ── Step 5: No knowledge fallback — web-sourced data only ───────────────
+    # Knowledge fallback is disabled to prevent showing unverified executives.
+    # Only people explicitly named in real web sources are shown.
+    logger.info("No web-sourced leaders found for '%s' — returning empty", company_name)
     result = {"board": [], "executives": [], "_source": "none"}
     _LEADERSHIP_CACHE[cache_key] = result
     return result
@@ -1375,7 +1351,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
 # INTERNAL HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-_HALLUCINATION_CHECK_MIN_CHARS = 800  # skip verification if source is too thin to be useful
+_HALLUCINATION_CHECK_MIN_CHARS = 200  # apply name verification even for short sources
 
 def _name_in_source(name: str, source_lower: str) -> bool:
     """
