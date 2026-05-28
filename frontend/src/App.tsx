@@ -345,6 +345,28 @@ export default function App() {
         )
       }
       await loadDeptStructure(data.stats, data.industry ?? '', 'upload')
+
+      // ── Poll for BOD/EM data (background enrichment takes ~90s) ──────
+      // Parallel.AI research runs in the background. Poll every 10s up to
+      // 3 minutes; when data arrives, silently reload the dept tree so
+      // Board of Directors and Executive Management panels populate.
+      let pollCount = 0
+      const MAX_POLLS = 18  // 18 × 10s = 3 minutes
+      const pollTimer = setInterval(async () => {
+        pollCount++
+        if (pollCount > MAX_POLLS) { clearInterval(pollTimer); return }
+        try {
+          const pr = await fetch(`${API}/leadership-ready`)
+          if (!pr.ok) { clearInterval(pollTimer); return }
+          const pd = await pr.json()
+          if (pd.ready) {
+            clearInterval(pollTimer)
+            // Quietly reload the tree — BOD/EM nodes now exist in the DAG
+            await loadDeptStructure(data.stats, data.industry ?? '', 'upload')
+          }
+        } catch { clearInterval(pollTimer) }
+      }, 10_000)
+
     } catch (e: any) {
       clearInterval(tick)
       setStatus('error')

@@ -443,6 +443,32 @@ async def upload_file(file: UploadFile = File(...),
     }
 
 
+@app.get("/leadership-ready")
+async def leadership_ready():
+    """
+    Poll this after upload to detect when background BOD/EM enrichment is done.
+    Returns board_count and exec_count from the current DAG.
+    Frontend polls every 10s; re-fetches /chart when counts > 0.
+    """
+    if _dag is None:
+        return {"ready": False, "board_count": 0, "exec_count": 0}
+    board_count = 0
+    exec_count  = 0
+    for nid in _dag.G.nodes:
+        attrs = _dag.G.nodes[nid]
+        if attrs.get("node_type") != "person":
+            continue
+        meta = attrs.get("metadata", {})
+        if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai"):
+            dept = attrs.get("dept_primary", "")
+            if "Board" in dept:
+                board_count += 1
+            else:
+                exec_count += 1
+    ready = board_count > 0 or exec_count > 0
+    return {"ready": ready, "board_count": board_count, "exec_count": exec_count}
+
+
 @app.post("/load-demo")
 async def load_demo():
     """Load the bundled test_data.json."""
