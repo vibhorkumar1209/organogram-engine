@@ -351,7 +351,7 @@ export default function App() {
       // 3 minutes; when data arrives, silently reload the dept tree so
       // Board of Directors and Executive Management panels populate.
       let pollCount = 0
-      const MAX_POLLS = 18  // 18 × 10s = 3 minutes
+      const MAX_POLLS = 30  // 30 × 10s = 5 minutes (Parallel.AI needs up to 160s)
       const pollTimer = setInterval(async () => {
         pollCount++
         if (pollCount > MAX_POLLS) { clearInterval(pollTimer); return }

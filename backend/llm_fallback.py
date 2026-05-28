@@ -744,7 +744,7 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 _PARALLEL_BASE            = "https://api.parallel.ai"
 _PARALLEL_POLL_INTERVAL   = 4    # seconds between status polls
 _PARALLEL_TASK_TIMEOUT    = 80   # default timeout (seconds)
-_PARALLEL_TASK_TIMEOUT_BOD = 120 # proxy statements / annual reports need more time
+_PARALLEL_TASK_TIMEOUT_BOD = 160 # debug shows ~160s needed for full governance research
 _PARALLEL_TASK_TIMEOUT_EM  = 80  # leadership pages render faster
 _PARALLEL_MAX_CHARS       = 50_000  # raised from 20K — large boards (14+ members) need more
 
@@ -1291,7 +1291,10 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             logger.info("Step 1b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
 
     # ── Step 1c: Raw HTTP fallback (when Jina unavailable or still empty) ────
-    if not web_text and domain:
+    # Skip when Parallel.AI is configured — it already browsed the site (even if
+    # it timed out). Raw HTTP on a JS-rendered SPA (Next.js/React) returns a
+    # shell with no leadership content and wastes 35s of budget for nothing.
+    if not web_text and domain and not parallel_key:
         logger.info("Falling back to raw HTTP for %s", domain)
         web_text = _fetch_leadership_text(domain)
 
