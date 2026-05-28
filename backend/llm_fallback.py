@@ -847,7 +847,7 @@ def _extract_leadership_json(text: str) -> dict | None:
             data = json.loads(s)
             if not isinstance(data, dict):
                 return None
-            board = _clean_list(data.get("board", []))
+            board = _clean_list(data.get("board", []), is_board=True)
             execs = _clean_list(data.get("executives", []))
             if board or execs:
                 return {"board": board, "executives": execs}
@@ -1452,8 +1452,9 @@ def _rich_to_flat(data: dict, source_text: str = "") -> dict:
         title = str(b.get("designation") or b.get("title") or "").strip()
         if not name or not title or len(name.split()) < 2:
             return None
-        if _is_retired(name, title):
-            return None
+        # Do NOT apply _is_retired to board members — their title describes their
+        # external career (e.g. "Retired CEO, SunTrust Banks"). They are active
+        # directors at the company being researched.
         entry: dict = {"name": name, "title": title}
         # Carry through rich fields for the frontend to use optionally
         if b.get("director_type"):
@@ -1553,7 +1554,7 @@ def _call_claude(system: str, user_msg: str, label: str,
             result = _rich_to_flat(data, source_text)
         else:
             # Standard schema: board / executives / senior_leadership
-            def _enrich_board(items: list) -> list:
+            def _enrich_items(items: list, check_retired: bool = True) -> list:
                 out = []
                 for b in items:
                     if not isinstance(b, dict):
@@ -1562,7 +1563,11 @@ def _call_claude(system: str, user_msg: str, label: str,
                     title = str(b.get("title", "") or b.get("designation", "") or "").strip()
                     if not name or not title or len(name.split()) < 2:
                         continue
-                    if _is_retired(name, title):
+                    # Board members' titles describe their OTHER career
+                    # (e.g. "Retired CEO, SunTrust Banks") — they are ACTIVE
+                    # WF directors. Only apply _is_retired to executives where
+                    # "Former CEO" means they left the company being researched.
+                    if check_retired and _is_retired(name, title):
                         continue
                     entry: dict = {"name": name, "title": title}
                     for k in ("director_type", "committees", "function",
@@ -1572,9 +1577,9 @@ def _call_claude(system: str, user_msg: str, label: str,
                     out.append(entry)
                 return out
 
-            board   = _enrich_board(data.get("board",            []))
-            execs   = _enrich_board(data.get("executives",        []))
-            senior  = _enrich_board(data.get("senior_leadership", []))
+            board   = _enrich_items(data.get("board",            []), check_retired=False)
+            execs   = _enrich_items(data.get("executives",        []), check_retired=True)
+            senior  = _enrich_items(data.get("senior_leadership", []), check_retired=True)
             result  = {
                 "board":            board,
                 "executives":       execs + senior,   # senior goes into EM panel
@@ -1624,10 +1629,14 @@ def _is_retired(name: str, title: str) -> bool:
     return False
 
 
-def _clean_list(raw: list) -> list[dict]:
+def _clean_list(raw: list, is_board: bool = False) -> list[dict]:
     """Validate, normalise, and de-retire a list of {name, title} dicts.
     Drops former / retired / emeritus / ex- executives — only current
     office-holders should appear in the org structure.
+
+    is_board=True skips the _is_retired check: board members' titles describe
+    their external career (e.g. "Retired CEO, SunTrust Banks") — they are
+    active directors at the company being researched.
     """
     out = []
     for item in raw:
@@ -1637,7 +1646,7 @@ def _clean_list(raw: list) -> list[dict]:
         title = str(item.get("title", "") or "").strip()
         if not name or not title or len(name.split()) < 2:
             continue
-        if _is_retired(name, title):
+        if not is_board and _is_retired(name, title):
             logger.debug("Skipping retired/former executive: %s — %s", name, title)
             continue
         out.append({"name": name, "title": title})
