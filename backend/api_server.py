@@ -25,7 +25,7 @@ except ImportError:
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from structural_engine import (
@@ -234,6 +234,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+import csv
 import os
 from fastapi.staticfiles import StaticFiles
 
@@ -535,6 +536,121 @@ def debug_classified():
         })
     rows.sort(key=lambda x: (x["dept_primary"], x["layer"], x["name"]))
     return {"count": len(rows), "records": rows}
+
+
+# ─────────────────────────────────────────────
+# EXPORT  (full org chart + executives as CSV)
+# ─────────────────────────────────────────────
+
+_SENIORITY_LABELS: dict[int, str] = {
+    0:  "Board of Management (G0)",
+    1:  "C-Suite (G1)",
+    2:  "Executive VP (G2)",
+    3:  "SVP / Managing Director (G3)",
+    4:  "VP / Head of (G4)",
+    5:  "Senior Director / AVP (G5)",
+    6:  "Director (G6)",
+    7:  "Senior Manager (G7)",
+    8:  "Manager (G8)",
+    9:  "Senior / Lead / Staff (G9)",
+    10: "Analyst / Specialist (G10)",
+}
+
+
+@app.get("/export")
+def export_org_chart(fmt: str = Query("csv", description="csv or json")):
+    """
+    Export the full org chart — all person nodes with their details — as CSV or JSON.
+
+    CSV columns:
+      Name, Title, Category, Seniority Level, Region, Location, LinkedIn URL, Source
+    """
+    if not _dag_loaded():
+        raise HTTPException(status_code=404, detail="No data loaded. POST /upload first.")
+    dag, _ = _require_dag()
+
+    # Collect company name from root node
+    root_attrs  = dag.G.nodes.get("root_global", {})
+    company     = root_attrs.get("label", "Organization")
+    root_meta   = root_attrs.get("metadata", {})
+    industry    = root_meta.get("industry", "")
+
+    rows: list[dict] = []
+
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") != "person":
+            continue
+
+        meta  = attrs.get("metadata", {})
+        layer = attrs.get("layer", 9)
+        dept  = meta.get("dept_primary", "")
+        meth  = str(meta.get("nlp_method", ""))
+
+        # Human-readable category
+        if "Board" in dept:
+            category = "Board of Directors"
+        elif "Executive" in dept:
+            category = "Executive Management"
+        else:
+            category = dept or "Other"
+
+        # Human-readable source
+        if "web" in meth:
+            source = "Company Website"
+        elif "llm_leadership" in meth:
+            source = "AI Knowledge"
+        else:
+            source = "Uploaded Data"
+
+        rows.append({
+            "Name":             attrs.get("label", ""),
+            "Title":            str(meta.get("designation", "") or ""),
+            "Category":         category,
+            "Department":       dept,
+            "Seniority Level":  _SENIORITY_LABELS.get(layer, f"G{layer}"),
+            "Region":           str(meta.get("region", "") or ""),
+            "Location":         str(meta.get("location", "") or ""),
+            "LinkedIn URL":     str(meta.get("linkedin_url", "") or ""),
+            "Source":           source,
+        })
+
+    # Sort: category order (BOD → EM → everything else), then seniority, then name
+    _cat_order = {"Board of Directors": 0, "Executive Management": 1}
+    rows.sort(key=lambda r: (
+        _cat_order.get(r["Category"], 2),
+        r["Department"],
+        int("".join(filter(str.isdigit, r["Seniority Level"][:3])) or 9),
+        r["Name"],
+    ))
+
+    if fmt == "json":
+        return {
+            "company": company,
+            "industry": industry,
+            "total_people": len(rows),
+            "people": rows,
+        }
+
+    # ── CSV output ────────────────────────────────────────────────────────
+    from datetime import datetime
+    filename = f"{company.replace(' ', '_')}_org_chart_{datetime.now().strftime('%Y%m%d')}.csv"
+
+    def _generate_csv():
+        buf = io.StringIO()
+        # Write BOM so Excel opens UTF-8 correctly
+        buf.write("﻿")
+        if rows:
+            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        yield buf.getvalue()
+
+    return StreamingResponse(
+        _generate_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ─────────────────────────────────────────────

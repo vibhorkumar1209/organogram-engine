@@ -378,6 +378,24 @@ export default function App() {
     }
   }
 
+  // ── Export org chart as CSV ───────────────────────────────────────
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await fetch(`${API}/export?fmt=csv`)
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const cd   = res.headers.get('content-disposition') ?? ''
+      const name = cd.match(/filename="([^"]+)"/)?.[1] ?? 'org_chart.csv'
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = name; a.click()
+      URL.revokeObjectURL(url)
+    } catch { /* silent — no data loaded */ }
+    finally { setExporting(false) }
+  }
+
   const handleSearchFocus = (nodeId: string) => {
     setHighlight(nodeId)
     setTimeout(() => setHighlight(null), 2500)
@@ -510,6 +528,27 @@ export default function App() {
         >
           Demo
         </button>
+
+        {status === 'ready' && (
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            title="Download org chart + executives as CSV"
+            style={{
+              background: 'transparent', border: '1px solid rgba(52,145,232,0.45)', borderRadius: 7,
+              padding: '5px 10px', color: '#3491E8', fontSize: 11, cursor: exporting ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
+              opacity: exporting ? 0.6 : 1,
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {exporting ? 'Saving…' : 'Save CSV'}
+          </button>
+        )}
 
         {status !== 'idle' && (
           <button

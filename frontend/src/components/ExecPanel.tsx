@@ -456,6 +456,43 @@ const PersonRow: React.FC<{
   )
 }
 
+// ── CSV download helper (client-side, no server needed) ──────────────
+function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
+  const LAYER_LABELS: Record<number, string> = {
+    0: 'Board of Management (G0)', 1: 'C-Suite (G1)', 2: 'Executive VP (G2)',
+    3: 'SVP / Managing Director (G3)', 4: 'VP / Head of (G4)',
+    5: 'Senior Director / AVP (G5)', 6: 'Director (G6)',
+    7: 'Senior Manager (G7)', 8: 'Manager (G8)',
+    9: 'Senior / Lead / Staff (G9)', 10: 'Analyst / Specialist (G10)',
+  }
+  const rows = execs.map(p => ({
+    Name:              p.label,
+    Title:             String(p.metadata?.designation ?? ''),
+    Department:        deptLabel,
+    'Seniority Level': LAYER_LABELS[p.layer ?? 9] ?? `G${p.layer ?? 9}`,
+    Region:            String(p.metadata?.region   ?? ''),
+    Location:          String(p.metadata?.location ?? ''),
+    'LinkedIn URL':    String(p.metadata?.linkedin_url ?? ''),
+    Source:            String(p.metadata?.nlp_method ?? '').includes('web')
+                         ? 'Company Website'
+                         : String(p.metadata?.nlp_method ?? '').includes('llm_leadership')
+                           ? 'AI Knowledge'
+                           : 'Uploaded Data',
+  }))
+  const headers = Object.keys(rows[0] ?? {})
+  const csvRows = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => `"${String((r as any)[h]).replace(/"/g, '""')}"`).join(',')),
+  ]
+  const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url
+  a.download = `${deptLabel.replace(/\s+/g, '_')}_executives.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Main panel ────────────────────────────────────────────────────────
 export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) => {
   const isOpen = deptNode !== null
@@ -700,10 +737,32 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
               </div>
             )}
           </div>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', color: '#627184',
-            cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1, flexShrink: 0,
-          }} title="Close">×</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {executives && executives.length > 0 && (
+              <button
+                onClick={() => downloadExecsCSV(deptNode?.label ?? 'executives', executives)}
+                title="Download these executives as CSV"
+                style={{
+                  background: 'none', border: `1px solid ${color}40`,
+                  borderRadius: 5, padding: '3px 8px',
+                  color, fontSize: 9, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontWeight: 600, letterSpacing: 0.3,
+                }}
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Save
+              </button>
+            )}
+            <button onClick={onClose} style={{
+              background: 'none', border: 'none', color: '#627184',
+              cursor: 'pointer', fontSize: 18, padding: 0, lineHeight: 1,
+            }} title="Close">×</button>
+          </div>
         </div>
       </div>
 
