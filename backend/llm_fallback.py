@@ -275,6 +275,10 @@ _LEADERSHIP_PATHS = [
     "/about-us/our-leadership",
     "/about-us/governance/board-of-directors",  # Morgan Stanley
     "/about-us/governance",
+    "/about/corporate/governance",              # Wells Fargo
+    "/about/corporate/governance/",
+    "/about/corporate-governance",
+    "/about/corporate-governance/board-of-directors",
     "/management",
     "/about/management",
     "/executive-team",
@@ -284,6 +288,7 @@ _LEADERSHIP_PATHS = [
     "/about-us/board-of-directors",
     "/governance/board-of-directors",
     "/governance/board",
+    "/governance",
     "/investors/governance/board-of-directors",
     "/investor-relations/governance/board-of-directors",
     "/investor-relations/corporate-governance",
@@ -344,7 +349,7 @@ _LEADERSHIP_LINK_RE = re.compile(
     r'|executive[-_]committee|management[-_]committee'
     r'|senior[-_]leadership|our[-_]leaders?'
     r'|supervisory[-_]board|advisory[-_]board'
-    r'|governance[-_/]board|corporate[-_]governance'
+    r'|governance[-_/]board|corporate[-_/]governance'
     r'|audit[-_]committee|nominations[-_]committee'
     r'|compensation[-_]committee|risk[-_]committee'
     r'|board[-_]members?|director[-_]profiles?'
@@ -1250,12 +1255,23 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 0: Parallel.AI research agent (primary — best quality) ──────────
-    # Two concurrent queries (BOD + EM) — browses JS-rendered pages, annual
-    # reports, and governance sections.  Returns JSON parsed directly (no Claude
-    # extraction needed).  Falls back to raw text for the Claude path.
+    # ── Step 0: Raw HTTP scrape — FAST PATH (runs first, always) ────────────
+    # Audit showed wellsfargo.com/about/corporate/governance/ returns full
+    # name+title data in static HTML in ~2s.  Run this BEFORE Parallel.AI
+    # (which needs 120-160s) so known-path companies populate immediately.
+    # Also runs as fallback when Parallel.AI is unavailable or times out.
     web_text = ""
-    if parallel_key:
+    if domain:
+        web_text = _fetch_leadership_text(domain)
+        if web_text:
+            logger.info("Step 0 raw HTTP for '%s': %d chars", domain, len(web_text))
+
+    # ── Step 1: Parallel.AI research agent (deep research — JS SPAs, PDFs) ──
+    # Runs when PARALLEL_API_KEY is set and raw HTTP produced nothing useful
+    # (JS-only SPAs return empty shells via raw HTTP).
+    # Also runs as augmentation when raw HTTP succeeded but got thin content.
+    if parallel_key and (not web_text or len(web_text) < 2000):
+        logger.info("Step 1 Parallel.AI for '%s' (raw HTTP gave %d chars)", company_name, len(web_text))
         parallel_result = _parallel_fetch_leadership(company_name, domain, parallel_key)
         if parallel_result:
             # JSON parsed successfully → return immediately, skip Claude
@@ -1269,44 +1285,35 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
                     len(parallel_result.get("executives", [])),
                 )
                 return parallel_result
-            # Raw text fallback (JSON parse failed) — pass to Claude below
-            web_text = parallel_result.get("_raw_text", "")
-            if web_text:
-                logger.info(
-                    "Parallel.AI raw-text fallback for '%s': %d chars",
-                    company_name, len(web_text),
-                )
+            # Raw text fallback — pass to Claude below
+            parallel_text = parallel_result.get("_raw_text", "")
+            if parallel_text:
+                logger.info("Parallel.AI raw-text for '%s': %d chars", company_name, len(parallel_text))
+                # Prefer longer source; combine if both have content
+                if web_text:
+                    web_text = web_text + "\n\n" + parallel_text
+                else:
+                    web_text = parallel_text
 
-    # ── Step 1a: Jina Reader — path-based (known URL patterns) ──────────────
+    # ── Step 2a: Jina Reader — path-based (known URL patterns) ──────────────
     if not web_text and jina_key and domain:
         web_text = _jina_fetch_leadership(domain, jina_key)
-        logger.info("Step 1a Jina path-based for '%s': %d chars", domain, len(web_text))
+        logger.info("Step 2a Jina path-based for '%s': %d chars", domain, len(web_text))
 
-    # ── Step 1b: Jina Search-and-Fetch — discover actual leadership URLs ─────
-    # Handles companies whose URL structure doesn't match _LEADERSHIP_PATHS
-    # (e.g. Deloitte /global/en/about/governance.html, PwC /gx/en/about/leadership)
+    # ── Step 2b: Jina Search-and-Fetch — discover actual leadership URLs ─────
     if jina_key and not web_text:
         web_text = _jina_search_and_fetch(company_name, domain, jina_key)
         if web_text:
-            logger.info("Step 1b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
+            logger.info("Step 2b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
 
-    # ── Step 1c: Raw HTTP fallback (when Jina unavailable or still empty) ────
-    # Skip when Parallel.AI is configured — it already browsed the site (even if
-    # it timed out). Raw HTTP on a JS-rendered SPA (Next.js/React) returns a
-    # shell with no leadership content and wastes 35s of budget for nothing.
-    if not web_text and domain and not parallel_key:
-        logger.info("Falling back to raw HTTP for %s", domain)
-        web_text = _fetch_leadership_text(domain)
-
-    # ── Step 2: Search snippets ───────────────────────────────────────────────
-    # Skip when Parallel.AI already returned authoritative research text.
+    # ── Step 3: Search snippets ───────────────────────────────────────────────
+    # Skip when we already have authoritative web content (raw HTTP or Parallel.AI).
     # Search snippets (DDG/Jina) mention employees in news context and add
     # noise — Claude picks up names that pass _strip_hallucinations but aren't
     # on the actual Operating Committee / Board.
-    parallel_gave_web_text = bool(parallel_key and web_text)
-    if parallel_gave_web_text:
+    if web_text:
         search_text = ""
-        logger.info("Skipping search snippets — Parallel.AI web text is authoritative")
+        logger.info("Skipping search snippets — have %d chars of web content", len(web_text))
     elif jina_key:
         search_text = _jina_search_snippets(company_name, jina_key)
         if not search_text:
