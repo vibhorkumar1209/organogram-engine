@@ -393,12 +393,25 @@ async def upload_file(file: UploadFile = File(...),
     # the org chart immediately and let the enrichment run in a background thread.
     # The frontend can re-fetch /chart after a few seconds to pick up BOD/EM data.
     def _run_enrichment(dag, classified, co_name, domain):
+        import logging, traceback
+        _log = logging.getLogger(__name__)
         try:
+            # Clear any stale empty cache entry so re-uploads always retry Parallel.AI
+            try:
+                from llm_fallback import _LEADERSHIP_CACHE
+                cache_key = f"{co_name.strip().lower()}|{(domain or '').strip().lower()}"
+                removed = _LEADERSHIP_CACHE.pop(cache_key, None)
+                if removed is not None:
+                    _log.info("Cleared stale cache for '%s' before enrichment", co_name)
+            except Exception:
+                pass
+            _log.info("Background enrichment starting for '%s' (domain=%s)", co_name, domain)
             _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
             _db.upsert_dag(dag)
+            _log.info("Background enrichment complete for '%s'", co_name)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(f"Leadership enrichment failed: {exc}")
+            _log.warning("Leadership enrichment failed for '%s': %s\n%s",
+                         co_name, exc, traceback.format_exc())
 
     if background_tasks is not None:
         background_tasks.add_task(_run_enrichment, _dag, _classified, company_name, _domain)
@@ -460,7 +473,8 @@ async def leadership_ready():
             continue
         meta = attrs.get("metadata", {})
         if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai"):
-            dept = attrs.get("dept_primary", "")
+            # dept_primary is stored inside metadata, not at the top-level node attrs
+            dept = meta.get("dept_primary", "")
             if "Board" in dept:
                 board_count += 1
             else:

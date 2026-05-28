@@ -1354,10 +1354,10 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     # ── Step 5: No knowledge fallback — web-sourced data only ───────────────
     # Knowledge fallback is disabled to prevent showing unverified executives.
     # Only people explicitly named in real web sources are shown.
-    logger.info("No web-sourced leaders found for '%s' — returning empty", company_name)
-    result = {"board": [], "executives": [], "_source": "none"}
-    _LEADERSHIP_CACHE[cache_key] = result
-    return result
+    # NOTE: Do NOT cache empty results — allows retry on next upload in case
+    # Parallel.AI was temporarily unavailable or timed out.
+    logger.info("No web-sourced leaders found for '%s' — returning empty (not cached)", company_name)
+    return {"board": [], "executives": [], "_source": "none"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
