@@ -532,19 +532,25 @@ Return ONE valid JSON object — no prose, no markdown:
 }
 
 PLACEMENT:
-board — everyone under Board of Directors / Supervisory Board / Board of \
-Trustees: Chairman, Vice-Chairman, Managing Director (when on board), \
-Executive Director, Non-Executive Director, Independent Director, Nominee \
-Director, Lead Director. Include committee memberships if mentioned.
+board — everyone listed under Board of Directors / Supervisory Board / Board \
+of Trustees, regardless of title: Chairman, Vice-Chairman, Managing Director \
+(when on board), Executive Director, Non-Executive Director, Independent \
+Director, Nominee Director, Lead Director. Include committee memberships if \
+mentioned.
 
-executives — everyone under Executive Management / C-Suite / Executive \
-Committee / Operating Committee / Management Committee / Leadership Team: \
-CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, CLO / General \
-Counsel, Chief Strategy Officer, Chief Digital Officer, Chief Commercial \
-Officer, Group President.
+executives — EVERY person explicitly listed as a member of the Executive \
+Committee, Operating Committee, Management Committee, Executive Leadership \
+Team, or C-Suite, regardless of their specific title. This includes (but is \
+NOT limited to): CEO, President, COO, CFO, CTO, CIO, CISO, CMO, CHRO, CRO, \
+CLO / General Counsel, Chief Strategy Officer, Chief Digital Officer, Chief \
+Commercial Officer, Group President — AND ALSO any EVP, Senior EVP, or \
+business head who appears on the same committee listing page. If the source \
+says "Operating Committee" or "Executive Team" and lists 14 people, put ALL \
+14 in executives.
 
-senior_leadership — SVPs, EVPs, VPs, Business Heads, Country Heads, Plant \
-Heads, Division Heads, Group Heads, Regional Heads named in the source.
+senior_leadership — EVPs, SVPs, VPs, Business Heads, Country Heads, Plant \
+Heads, Division Heads, Group Heads, Regional Heads named in the source who \
+are NOT already listed in executives above.
 
 RULES:
 - Include ONLY people explicitly named in the text — do not infer or invent.
@@ -1290,8 +1296,15 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         web_text = _fetch_leadership_text(domain)
 
     # ── Step 2: Search snippets ───────────────────────────────────────────────
-    # Jina Search (primary) → DuckDuckGo (fallback)
-    if jina_key:
+    # Skip when Parallel.AI already returned authoritative research text.
+    # Search snippets (DDG/Jina) mention employees in news context and add
+    # noise — Claude picks up names that pass _strip_hallucinations but aren't
+    # on the actual Operating Committee / Board.
+    parallel_gave_web_text = bool(parallel_key and web_text)
+    if parallel_gave_web_text:
+        search_text = ""
+        logger.info("Skipping search snippets — Parallel.AI web text is authoritative")
+    elif jina_key:
         search_text = _jina_search_snippets(company_name, jina_key)
         if not search_text:
             search_text = _ddg_leadership_snippets(company_name)
@@ -1318,8 +1331,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         if web_text:
             parts.append(f"[Website content]\n{web_text}")
         if search_text:
-            src_label = "Jina Web Search" if jina_key else "Search result snippets"
-            parts.append(f"[{src_label}]\n{search_text}")
+            src_label_str = "Jina Web Search" if jina_key else "Search result snippets"
+            parts.append(f"[{src_label_str}]\n{search_text}")
         if wiki_text:
             parts.append(f"[Wikipedia excerpt]\n{wiki_text}")
         user_msg = "\n\n".join(parts)
