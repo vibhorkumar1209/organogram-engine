@@ -1072,6 +1072,32 @@ class OrganogramDAG:
         board_sub = ""
         designation = rec.designation or ""
 
+        # ── CSV employee guard — only LLM-injected people in BOD/EM panels ──
+        # Uploaded employees whose titles happen to look like board/exec roles
+        # (e.g. "Independent Non-executive Director" at a bank, "Chief of Staff")
+        # should NOT appear in the Board of Directors or Executive Management
+        # panels.  Only people injected via llm_fetch_leadership belong there.
+        # True C-suite from the CSV (CEO, CFO, COO …) are allowed through so
+        # they still appear in the EM panel.
+        _is_llm_injected = rec.nlp_method in ("llm_leadership_web", "llm_leadership_ai")
+        if not _is_llm_injected:
+            _fallback_dept = (
+                rec.dept_primary.strip()
+                if rec.dept_primary and rec.dept_primary.strip().lower()
+                   not in ("board of management", "board of directors",
+                           "board", "executive management")
+                else "Strategy & Corporate Development"
+            )
+            if dept_p == "Board of Management":
+                # Redirect board-titled CSV employee to their functional dept
+                dept_p = _canonical_dept(_fallback_dept, 3)
+                layer  = 3
+            elif dept_p == "Executive Management" and layer == 1:
+                # Only genuine C-suite stays in EM; others go to functional dept
+                if not _is_csuite(designation):
+                    dept_p = _canonical_dept(_fallback_dept, 3)
+                    layer  = 3
+
         # ── Regional exec demotion (CSV path) ────────────────────────────
         # When NLP classifies "Australia CEO" as G1 (layer 1), keep them in
         # Executive Management but at layer 2 so they don't hijack the apex.
@@ -1672,6 +1698,46 @@ def _board_sub_role(title: str) -> str:
                 return role
         return "committee_chair"
     return "director"
+
+
+_CSUITE_RE = re.compile(
+    r"\bchief\s+(?:executive|financial|operating|technology|technical|"
+    r"information|marketing|revenue|product|data|legal|risk|commercial|"
+    r"strategy|digital|transformation|analytics|compliance|security|"
+    r"administrative|investment|science|medical|nursing|pharmacy|actuarial|"
+    r"underwriting|claims|accounting|people|talent|human\s+resources?|"
+    r"customer|experience|client|growth|innovation|sustainability|"
+    r"diversity|ai|artificial\s+intelligence|communications?|public\s+affairs|"
+    r"supply\s+chain|procurement)\b"
+    r"|\bce?[of][o]?\b"  # CEO, CFO, COO, CTO, CIO, CMO, CHRO, CRO, CPO, CDO, CLO, CSO …
+    r"|\bcoo\b|\bcto\b|\bcfo\b|\bcmo\b|\bchro\b|\bcro\b|\bcpo\b|\bcdo\b|\bclo\b|\bcso\b"
+    r"|\bcaio\b|\bcao\b|\bcxo\b"
+    r"|\b(?:group\s+)?president$"
+    r"|\bmanaging\s+partner$"
+    r"|\bgroup\s+managing\s+director$"
+    r"|\bchairman\s+(?:and|&)\s+managing\s+director\b|\bcmd\b",
+    re.IGNORECASE,
+)
+_CSUITE_EXCLUDE_RE = re.compile(
+    r"\b(?:deputy|vice|assistant|associate|regional|country|local|"
+    r"office|team|department|dept|group|division|function|desk)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_csuite(title: str) -> bool:
+    """
+    Return True when *title* is a genuine C-suite / apex executive role.
+    Excludes:  "Chief of Staff", titles with office/team suffixes (e.g. "CTO Office"),
+    and regional/deputy variants.
+    """
+    t = title.lower().strip()
+    # Explicit exclusions — support roles that look like C-suite
+    if re.search(r"\bchief\s+of\s+staff\b", t):
+        return False
+    if not _CSUITE_RE.search(t):
+        return False
+    return True
 
 
 def _is_ceo(title: str) -> bool:

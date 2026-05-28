@@ -157,11 +157,15 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         # ── Standard C-Suite (universal) ───────────────────────────────────
         r"\bchief\s+executive\b",               r"\bceo\b",
         r"\bchief\s+financial\b",               r"\bcfo\b",
-        r"\bchief\s+(?:technology|technical)\b",r"\bcto\b",
+        r"\bchief\s+(?:technology|technical)\b",
+        # CTO/CFO/CIO acronyms must NOT match when describing an office/team
+        # e.g. "VP – CTO Office" should be G4 VP, not G1 CTO
+        r"\bcto(?!\s+(?:office|team|department|dept|group|division|function|desk))\b",
         r"\bchief\s+operating\b",               r"\bcoo\b",
         r"\bchief\s+marketing\b",               r"\bcmo\b",
         r"\bchief\s+(?:human\s+resources?|people|talent)\b", r"\bchro\b",
-        r"\bchief\s+information\b",             r"\bcio\b",
+        r"\bchief\s+information\b",
+        r"\bcio(?!\s+(?:office|team|department|dept|group|division|function|desk))\b",
         r"\bchief\s+revenue\b",                 r"\bcro\b",
         r"\bchief\s+product\b",                 r"\bcpo\b",
         r"\bchief\s+data\b",                    r"\bcdo\b",
@@ -182,7 +186,6 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bchief\s+investment\b",              # CIO in Financial Markets (G1 per Excel)
         r"\bchief\s+administrative\b",          # Chief Administrative Officer (CAO)
         r"\bcao\b",                             # CAO acronym
-        r"\bchief\s+of\s+staff\b",             # Chief of Staff (COO-equivalent at large cos)
         r"\bchief\s+(?:ai|artificial\s+intelligence)\b",  # Chief AI Officer
         r"\bcaio\b",                            # CAIO
         r"\bchief\s+experience\b",              r"\bcxo\b",   # Chief Experience Officer
@@ -232,6 +235,10 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         r"\bsvp\b",
         r"\bexecutive\s+director\b",   # corporate ED ≈ SVP-equivalent
         r"\bgroup\s+vice\s+president\b",
+        # ── Chief of Staff — senior support/advisory role, NOT C-suite ──────
+        # At large companies Chief of Staff sits at SVP-equivalent in seniority
+        # but is a staff function, not an executive officer.
+        r"\bchief\s+of\s+staff\b",
         # ── Chief General Manager (senior banking/public-sector India) ──────
         r"chief\s+general\s+manager",
         r"^cgm$",                               # CGM standalone acronym
