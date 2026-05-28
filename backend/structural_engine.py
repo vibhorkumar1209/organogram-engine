@@ -1515,10 +1515,13 @@ def build_from_records(records: list[dict],
     if not primary_domain_pre and company_name:
         primary_domain_pre = _guess_domain(company_name)
 
-    # Classify company industry before running inference engine
+    # Classify company industry before running inference engine.
+    # quick=True → Claude knowledge-only, no DDG/homepage HTTP calls (fast, ~1s).
+    # The background enrichment task runs full web-based classification and
+    # updates the DAG root node metadata if a better result is found.
     from industry_classifier import classify_industry as _classify_industry
-    detected_industry = _classify_industry(company_name, primary_domain_pre)
-    logger.info("Detected industry for '%s': %s", company_name, detected_industry or "unknown")
+    detected_industry = _classify_industry(company_name, primary_domain_pre, quick=True)
+    logger.info("Detected industry for '%s': %s (quick)", company_name, detected_industry or "unknown")
 
     engine = InferenceEngine(industry=detected_industry)
     classified = engine.classify_all(records)

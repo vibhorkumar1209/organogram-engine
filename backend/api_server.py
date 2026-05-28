@@ -410,7 +410,26 @@ async def upload_file(file: UploadFile = File(...),
         import logging, traceback
         _log = logging.getLogger(__name__)
         try:
-            # Clear any stale empty cache entry so re-uploads always retry Parallel.AI
+            # ── Step 0: Full industry classification (web search + homepage) ──
+            # build_from_records used quick=True (Claude-knowledge only, ~1s).
+            # Here we run the full web-based classification and update the DAG
+            # root node if we get a better result.
+            try:
+                from industry_classifier import classify_industry as _clf, _INDUSTRY_CACHE
+                _ikey = co_name.strip().lower()
+                _INDUSTRY_CACHE.pop(_ikey, None)  # clear quick-mode result so full reruns
+                full_industry = _clf(co_name, domain or "", quick=False)
+                if full_industry and "root_global" in dag.G.nodes:
+                    meta = dict(dag.G.nodes["root_global"].get("metadata", {}))
+                    if meta.get("industry") != full_industry:
+                        meta["industry"] = full_industry
+                        dag.G.nodes["root_global"]["metadata"] = meta
+                        _log.info("Industry updated for '%s': %s", co_name, full_industry)
+            except Exception as _ie:
+                _log.debug("Background industry classification failed: %s", _ie)
+
+            # ── Step 1: Leadership enrichment (BOD + EM) ──────────────────────
+            # Clear any stale empty cache entry so re-uploads always retry
             try:
                 from llm_fallback import _LEADERSHIP_CACHE
                 cache_key = f"{co_name.strip().lower()}|{(domain or '').strip().lower()}"
@@ -474,11 +493,11 @@ async def upload_file(file: UploadFile = File(...),
 async def leadership_ready():
     """
     Poll this after upload to detect when background BOD/EM enrichment is done.
-    Returns board_count and exec_count from the current DAG.
-    Frontend polls every 10s; re-fetches /chart when counts > 0.
+    Returns board_count, exec_count, and the latest industry (updated by background task).
+    Frontend polls every 10s; re-fetches /tree when counts > 0 or industry changed.
     """
     if _dag is None:
-        return {"ready": False, "board_count": 0, "exec_count": 0}
+        return {"ready": False, "board_count": 0, "exec_count": 0, "industry": ""}
     board_count = 0
     exec_count  = 0
     for nid in _dag.G.nodes:
@@ -487,14 +506,17 @@ async def leadership_ready():
             continue
         meta = attrs.get("metadata", {})
         if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai"):
-            # dept_primary is stored inside metadata, not at the top-level node attrs
             dept = meta.get("dept_primary", "")
             if "Board" in dept:
                 board_count += 1
             else:
                 exec_count += 1
     ready = board_count > 0 or exec_count > 0
-    return {"ready": ready, "board_count": board_count, "exec_count": exec_count}
+    # Return latest industry from root node (may have been updated by background task)
+    root_meta = _dag.G.nodes.get("root_global", {}).get("metadata", {})
+    industry  = root_meta.get("industry", "")
+    return {"ready": ready, "board_count": board_count, "exec_count": exec_count,
+            "industry": industry}
 
 
 @app.post("/load-demo")

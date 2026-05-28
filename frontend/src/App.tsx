@@ -359,10 +359,14 @@ export default function App() {
           const pr = await fetch(`${API}/leadership-ready`)
           if (!pr.ok) { clearInterval(pollTimer); return }
           const pd = await pr.json()
+          // Update industry if background task refined it
+          if (pd.industry && pd.industry !== industry) {
+            setIndustry(pd.industry)
+          }
           if (pd.ready) {
             clearInterval(pollTimer)
             // Quietly reload the tree — BOD/EM nodes now exist in the DAG
-            await loadDeptStructure(data.stats, data.industry ?? '', 'upload')
+            await loadDeptStructure(data.stats, pd.industry || data.industry || '', 'upload')
           }
         } catch { clearInterval(pollTimer) }
       }, 10_000)

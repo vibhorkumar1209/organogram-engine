@@ -76,7 +76,7 @@ _SEARCH_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
-_SEARCH_TIMEOUT  = 4    # seconds per HTTP request (kept short — runs sync during upload)
+_SEARCH_TIMEOUT  = 2    # seconds per HTTP request (quick=False background path)
 _SNIPPET_MAX     = 6_000  # max chars of search snippets to send to LLM
 
 
@@ -218,14 +218,18 @@ _INDUSTRY_CACHE: dict[str, str] = {}
 # PUBLIC API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def classify_industry(company_name: str, email_domain: str = "") -> str:
+def classify_industry(company_name: str, email_domain: str = "",
+                       quick: bool = False) -> str:
     """
     Classify *company_name* into one of the 37 canonical industries.
 
-    Strategy (in order):
-      1. DuckDuckGo web search for "{company_name} industry sector"
-      2. Company homepage/about page (when email_domain is provided)
-      3. Claude LLM knowledge fallback
+    quick=False (default — background path):
+      1. DuckDuckGo web search
+      2. Company homepage (when email_domain is provided)
+      3. Claude LLM with gathered context
+
+    quick=True (upload path — no blocking HTTP):
+      1. Claude LLM knowledge-only (no web calls) — ~1s
 
     Returns one of the 37 industry strings, or "" if classification fails.
     Results are cached in-process per company name.
@@ -237,18 +241,27 @@ def classify_industry(company_name: str, email_domain: str = "") -> str:
     if cache_key in _INDUSTRY_CACHE:
         return _INDUSTRY_CACHE[cache_key]
 
-    # ── Step 1: web search ──────────────────────────────────────────────
+    if quick:
+        # ── Fast path: Claude knowledge only — no web calls ──────────────
+        # Used during upload so the response returns in <2s.
+        # Background task will run full classification and update if needed.
+        industry = _llm_classify(company_name, "")
+        if industry:
+            _INDUSTRY_CACHE[cache_key] = industry
+        return industry
+
+    # ── Step 1: web search ───────────────────────────────────────────────
     search_query = f"{company_name} industry sector business"
     snippets = _ddg_search(search_query)
     logger.debug("DDG search for '%s': %d chars", company_name, len(snippets))
 
-    # ── Step 2: company homepage (optional) ─────────────────────────────
+    # ── Step 2: company homepage (optional) ──────────────────────────────
     homepage = ""
     if email_domain:
         homepage = _homepage_text(email_domain)
         logger.debug("Homepage for %s: %d chars", email_domain, len(homepage))
 
-    # ── Step 3: combine context and classify ────────────────────────────
+    # ── Step 3: combine context and classify ─────────────────────────────
     context_parts: list[str] = []
     if snippets:
         context_parts.append(f"Web search snippets:\n{snippets}")
