@@ -213,7 +213,7 @@ def _scrape_wikipedia(company_name: str) -> str:
         _LEADERSHIP_KW = re.compile(
             r"^(board\s+of\s+directors?|board\s+members?|directors?|"
             r"executive\s+(?:team|officers?|management)|"
-            r"leadership|senior\s+management|management\s+team)",
+            r"leadership|senior\s+management|management\s+team|key\s+people)",
             re.IGNORECASE,
         )
         _STOP_KW = re.compile(
@@ -225,6 +225,24 @@ def _scrape_wikipedia(company_name: str) -> str:
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         relevant: list[str] = []
         in_section = False
+
+        # ── Infobox extraction — Wikipedia infoboxes collapse to a single long
+        # line containing "Key people" with the CEO/CFO.  Scan the first 200 lines
+        # (infobox is always near the top) and extract the Key people substring.
+        for line in lines[:200]:
+            low = line.lower()
+            if "key people" in low:
+                # Grab from "Key people" to end of line, cap at 500 chars
+                idx = low.find("key people")
+                snippet = line[idx:idx + 500]
+                # Trim at next financial/footer keyword
+                for stop in ("revenue", "products", "website", "footnotes", "number of employees"):
+                    si = snippet.lower().find(stop)
+                    if 0 < si < 450:
+                        snippet = snippet[:si]
+                relevant.append(f"[Wikipedia Infobox] {snippet.strip()}")
+                break
+
         for line in lines:
             if _LEADERSHIP_KW.match(line):
                 in_section = True
@@ -322,6 +340,16 @@ _LEADERSHIP_PATHS = [
     "/company/leadership",
     "/company/management",
     "/company/board-of-directors",
+    # US locale-prefix patterns (Medtronic, Honeywell, etc. use /en-us/)
+    "/en-us/about/leadership.html",
+    "/en-us/about/leadership",
+    "/en-us/about/board-of-directors.html",
+    "/en-us/about/board-of-directors",
+    "/en-us/company/leadership.html",
+    "/en-us/company/leadership",
+    "/en-us/about-us/leadership.html",
+    "/en-us/about-us/leadership",
+    "/en-us/investors/governance/board-of-directors",
     # International / global company URL patterns
     "/en/about/leadership",
     "/en/about-us/leadership",
@@ -436,6 +464,20 @@ def _fetch_leadership_text(domain: str) -> str:
                     continue
 
                 raw_html = r.text
+
+                # ── Bot-detection / access-denied guard ───────────────────
+                # Sites like Medtronic return HTTP 200 with an "Incorrect Browser"
+                # or "Access Denied" error page.  Treat these as failures so they
+                # don't block Parallel.AI from running.
+                _raw_lower = raw_html[:2000].lower()
+                if any(kw in _raw_lower for kw in [
+                    "incorrect browser", "access denied", "robot or human",
+                    "are you a human", "please enable javascript to",
+                    "cf-error-details", "captcha", "bot detected",
+                    "unusual traffic", "automated access",
+                ]):
+                    logger.debug(f"Bot-detection page detected, skipping: {url}")
+                    continue
 
                 # ── Three extraction layers for each page ──────────────────
                 # 1. JavaScript embedded data (Next.js/__NEXT_DATA__, etc.)
