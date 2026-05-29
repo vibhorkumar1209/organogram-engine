@@ -268,9 +268,26 @@ def _strip_html(html: str) -> str:
 
 
 # Ordered by hit-rate: most company sites use one of the first few.
+# Domain-specific paths for major professional-services / global firms are placed
+# early (positions 3-12) so they are tried before generic paths exhaust the budget.
+# Their URL patterns (/gx/en/..., /global/en/...) never match other companies,
+# so extra failed requests are negligible (fast 404s).
 _LEADERSHIP_PATHS = [
     "/leadership",
     "/about/leadership",
+    # ── PwC global & US (moved early — 225K-char leadership page) ────────────
+    "/gx/en/about/leadership.html",         # PwC global leadership page (direct)
+    "/gx/en/about/leadership",              # PwC global (redirect → .html)
+    "/gx/en/about/governance.html",         # PwC global governance
+    "/gx/en/about/governance",
+    "/us/en/about-us/leadership.html",      # PwC US leadership (343K chars)
+    "/us/en/about-us/leadership",
+    "/us/en/about/leadership.html",
+    "/us/en/about/leadership",
+    # ── Deloitte global ───────────────────────────────────────────────────────
+    "/global/en/about/leadership.html",
+    "/global/en/about/governance.html",
+    # ─────────────────────────────────────────────────────────────────────────
     "/about-us/leadership",
     "/about-us/our-leadership",
     "/about-us/governance/board-of-directors",  # Morgan Stanley
@@ -316,10 +333,11 @@ _LEADERSHIP_PATHS = [
     "/global/en/about/governance",           # Deloitte
     "/global/en/about/leadership.html",
     "/global/en/about/governance.html",
-    "/gx/en/about/leadership",               # PwC global
+    "/gx/en/about/leadership",               # PwC global (also listed early above)
     "/gx/en/about/governance",
     "/us/en/about/leadership",
     "/uk/en/about/leadership",
+    "/uk/en/about/leadership.html",
     "/worldwide/about/leadership",
     "/pages/about/leadership",
     "/pages/about-deloitte/articles/global-leadership",
@@ -337,7 +355,7 @@ _SEARCH_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 _WEB_TIMEOUT = 7          # seconds per HTTP request
-_MAX_PAGE_CHARS = 18_000  # chars to pass to Claude per page
+_MAX_PAGE_CHARS = 32_000  # chars to pass to Claude per page (raised from 18K for large leadership pages)
 _MAX_PAGES = 8            # up to 8 pages (BOD + exec + committee + individual profiles)
 _TOTAL_BUDGET = 35        # hard cap on website scraping time (seconds)
 
