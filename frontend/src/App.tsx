@@ -326,10 +326,35 @@ export default function App() {
       const uploadUrl = companyWebsite.trim()
         ? `${API}/upload?company_website=${encodeURIComponent(companyWebsite.trim())}`
         : `${API}/upload`
-      const res = await fetch(uploadUrl, { method: 'POST', body: form })
+
+      // Render free-tier spins down after inactivity (cold start ~30-60s, returns 503).
+      // Retry the upload once after a 45s wait when we get a 503 or network failure.
+      let res: Response
+      let attempt = 0
+      while (true) {
+        attempt++
+        try {
+          res = await fetch(uploadUrl, { method: 'POST', body: form })
+        } catch (fetchErr: any) {
+          // Network error (no connection, CORS preflight fail, DNS, etc.)
+          if (attempt === 1) {
+            setStatusMsg('Backend waking up… retrying in 45s')
+            await new Promise(r => setTimeout(r, 45_000))
+            continue
+          }
+          throw fetchErr
+        }
+        if (res.status === 503 && attempt === 1) {
+          // Render is deploying or cold-starting — wait and retry once
+          setStatusMsg('Backend waking up… retrying in 45s')
+          await new Promise(r => setTimeout(r, 45_000))
+          continue
+        }
+        break
+      }
       clearInterval(tick)
-      if (!res.ok) {
-        const errText = await res.text()
+      if (!res!.ok) {
+        const errText = await res!.text()
         let detail = errText
         try { detail = JSON.parse(errText).detail ?? errText } catch {}
         throw new Error(detail)
@@ -374,10 +399,12 @@ export default function App() {
     } catch (e: any) {
       clearInterval(tick)
       setStatus('error')
+      const msg: string = e?.message ?? ''
       setStatusMsg(
-        e.message?.includes('fetch') || e.message?.includes('network')
-          ? 'Upload timed out — backend may be cold-starting. Wait 30s and try again.'
-          : e.message
+        msg.includes('fetch') || msg.includes('network') || msg.includes('Failed') ||
+        msg.includes('503') || msg.toLowerCase().includes('unavailable')
+          ? 'Backend cold-starting — upload again (Render free tier wakes in ~30s)'
+          : msg
       )
     }
   }
