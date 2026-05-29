@@ -213,7 +213,7 @@ def _scrape_wikipedia(company_name: str) -> str:
         _LEADERSHIP_KW = re.compile(
             r"^(board\s+of\s+directors?|board\s+members?|directors?|"
             r"executive\s+(?:team|officers?|management)|"
-            r"leadership|senior\s+management|management\s+team|key\s+people)",
+            r"leadership|senior\s+management|management\s+team)",
             re.IGNORECASE,
         )
         _STOP_KW = re.compile(
