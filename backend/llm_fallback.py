@@ -285,6 +285,24 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
+def _is_js_shell(html: str) -> bool:
+    """
+    Detect if a page is an empty JavaScript-rendered shell with no useful text.
+    React/Next.js/Angular SPAs often return <div id="root"></div> with no content.
+    Returns True when visible text is under 300 chars (from scraper.py).
+    """
+    # Remove scripts and styles to get what a human would actually see
+    stripped = re.sub(
+        r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE
+    )
+    stripped = re.sub(
+        r"<style[^>]*>.*?</style>", " ", stripped, flags=re.DOTALL | re.IGNORECASE
+    )
+    visible = re.sub(r"<[^>]+>", " ", stripped)
+    visible = re.sub(r"\s+", " ", visible).strip()
+    return len(visible) < 300
+
+
 # Ordered by hit-rate: most company sites use one of the first few.
 # Domain-specific paths for major professional-services / global firms are placed
 # early (positions 3-12) so they are tried before generic paths exhaust the budget.
@@ -405,11 +423,139 @@ _LEADERSHIP_LINK_RE = re.compile(
 )
 
 
+_SITEMAP_LEADERSHIP_KW = {
+    "leadership", "board", "directors", "governance", "management",
+    "executives", "team", "people", "about", "investor", "senior",
+    "c-suite", "executive", "ir",
+}
+
+_NAV_LEADERSHIP_KW = {
+    "leadership", "board", "directors", "governance", "management",
+    "executives", "team", "people", "about", "investor",
+    "senior", "c-suite", "executive",
+}
+
+
+def _discover_via_sitemap(domain: str, headers: dict, deadline: float) -> list[str]:
+    """
+    Parse sitemap.xml for leadership-related URLs (from scraper.py Phase 1a).
+
+    Tries three common sitemap paths across the bare domain and www subdomain.
+    Returns up to 10 candidate URLs whose paths contain leadership keywords.
+    This finds exact page URLs for companies with non-standard URL structures
+    (e.g. PwC's /gx/en/about/leadership.html) without brute-force guessing.
+    """
+    try:
+        import httpx
+        import xml.etree.ElementTree as ET
+        import time
+    except ImportError:
+        return []
+
+    candidates: list[str] = []
+    sitemap_paths = ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"]
+
+    for base in [f"https://www.{domain}", f"https://{domain}"]:
+        for sitemap_path in sitemap_paths:
+            if time.monotonic() >= deadline or candidates:
+                break
+            url = f"{base}{sitemap_path}"
+            try:
+                r = httpx.get(url, headers=headers, timeout=5, follow_redirects=True)
+                if r.status_code != 200:
+                    continue
+                root = ET.fromstring(r.text)
+                ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+                locs = [el.text for el in root.findall(".//sm:loc", ns) if el.text]
+                for loc in locs:
+                    path_lower = loc.lower()
+                    if any(kw in path_lower for kw in _SITEMAP_LEADERSHIP_KW):
+                        candidates.append(loc)
+                if candidates:
+                    logger.debug(
+                        "Sitemap discovery for %s: %d candidates from %s",
+                        domain, len(candidates), url
+                    )
+                    return candidates[:10]
+            except Exception as exc:
+                logger.debug("Sitemap parse failed for %s: %s", url, exc)
+
+    return candidates
+
+
+def _discover_via_nav(domain: str, headers: dict, deadline: float) -> list[str]:
+    """
+    Scan homepage <nav>, <header>, <footer> for leadership-related internal links
+    (from scraper.py Phase 1b).
+
+    Fetches the homepage and extracts hrefs whose URL or anchor text contains
+    leadership keywords. More targeted than brute-force URL patterns — finds
+    the actual path used by this site in one request.
+    Returns up to 8 candidate URLs.
+    """
+    try:
+        import httpx
+        import time
+    except ImportError:
+        return []
+
+    candidates: list[str] = []
+
+    for base in [f"https://www.{domain}", f"https://{domain}"]:
+        if time.monotonic() >= deadline or candidates:
+            break
+        try:
+            r = httpx.get(base, headers=headers, timeout=6, follow_redirects=True)
+            if r.status_code != 200:
+                continue
+
+            # Extract nav/header/footer zones; fall back to whole page
+            nav_sections = re.findall(
+                r"<(?:nav|header|footer)[^>]*>(.*?)</(?:nav|header|footer)>",
+                r.text, flags=re.DOTALL | re.IGNORECASE,
+            )
+            zones = nav_sections if nav_sections else [r.text]
+
+            for zone in zones:
+                for m in re.finditer(r'href=["\']([^"\'#][^"\']*)["\']', zone):
+                    href = m.group(1)
+                    href_lower = href.lower()
+                    # Also grab the link text (next non-tag text after href)
+                    link_text = re.sub(r"<[^>]+>", " ", zone[m.end():m.end() + 80]).lower()
+                    if any(kw in href_lower or kw in link_text for kw in _NAV_LEADERSHIP_KW):
+                        if href.startswith("http"):
+                            full_url = href
+                        elif href.startswith("/"):
+                            full_url = f"{base}{href}"
+                        else:
+                            continue
+                        # Only keep same-domain URLs
+                        if domain in full_url and full_url not in candidates:
+                            candidates.append(full_url)
+
+            if candidates:
+                logger.debug(
+                    "Nav discovery for %s: %d candidates from %s",
+                    domain, len(candidates), base
+                )
+                return candidates[:8]
+        except Exception as exc:
+            logger.debug("Nav discovery failed for %s: %s", base, exc)
+
+    return candidates
+
+
 def _fetch_leadership_text(domain: str) -> str:
     """
     Try common leadership/about URLs on *domain* and return concatenated
     plain-text content from successful responses (max _MAX_PAGES pages,
     hard-capped at _TOTAL_BUDGET seconds total).
+
+    Discovery order (from scraper.py multi-phase strategy):
+      Phase 1a: Sitemap parsing — finds exact URLs, no guessing
+      Phase 1b: Homepage nav/footer scanning — follows actual site links
+      Phase 1c: URL pattern brute-force — _LEADERSHIP_PATHS fallback
+
     Returns "" if nothing useful is found or httpx is unavailable.
     """
     try:
@@ -445,125 +591,116 @@ def _fetch_leadership_text(domain: str) -> str:
     collected: list[str] = []
     tried: set[str] = set()
 
+    def _process_url(url: str) -> bool:
+        """
+        Fetch *url*, run all extraction layers, append to *collected* if useful.
+        Returns True if the page was useful and added to collected.
+        Mutates *tried* and *collected* in place.
+        """
+        nonlocal collected, tried
+        if url in tried:
+            return False
+        tried.add(url)
+        if time.monotonic() >= deadline or len(collected) >= _MAX_PAGES:
+            return False
+        remaining = max(1, deadline - time.monotonic())
+        timeout = min(_WEB_TIMEOUT, remaining)
+        try:
+            r = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+            ct = r.headers.get("content-type", "")
+            if r.status_code != 200 or "text/html" not in ct:
+                return False
+
+            raw_html = r.text
+
+            # ── Bot-detection / access-denied guard ───────────────────────────
+            _raw_lower = raw_html[:2000].lower()
+            if any(kw in _raw_lower for kw in [
+                "incorrect browser", "access denied", "robot or human",
+                "are you a human", "please enable javascript to",
+                "cf-error-details", "captcha", "bot detected",
+                "unusual traffic", "automated access",
+            ]):
+                logger.debug("Bot-detection page, skipping: %s", url)
+                return False
+
+            # ── JS shell detection ─────────────────────────────────────────────
+            # Skip pages that are empty React/Next.js shells — Parallel.AI or Jina
+            # will handle them with real rendering.
+            if _is_js_shell(raw_html):
+                logger.debug("JS-rendered shell detected, skipping: %s", url)
+                return False
+
+            # ── Three extraction layers ────────────────────────────────────────
+            js_text = _extract_js_data(raw_html)
+            ld_text = _extract_json_ld(raw_html)
+            text    = _strip_html(raw_html)
+
+            parts_for_page: list[str] = []
+            if js_text:
+                parts_for_page.append(f"[JS Data]\n{js_text}")
+            if ld_text:
+                parts_for_page.append(f"[Structured Data]\n{ld_text}")
+            if len(text) >= 400 or (not js_text and not ld_text):
+                parts_for_page.append(text[:_MAX_PAGE_CHARS])
+
+            combined = "\n\n".join(parts_for_page) if parts_for_page else ""
+            if not combined.strip():
+                return False
+            if len(text) < 200 and not js_text and not ld_text:
+                return False
+
+            collected.append(f"[Page: {url}]\n{combined}")
+            logger.debug(
+                "Scraped leadership page: %s (%d chars text, %d chars JSON-LD)",
+                url, len(text), len(ld_text),
+            )
+
+            # Discover sub-pages linked from this page
+            if len(collected) < _MAX_PAGES:
+                for link_m in _LEADERSHIP_LINK_RE.finditer(raw_html):
+                    href = link_m.group(1)
+                    if href.startswith("http"):
+                        linked_url = href
+                    elif href.startswith("/"):
+                        # Resolve against the base domain of this URL
+                        from urllib.parse import urlparse as _up
+                        parsed = _up(url)
+                        linked_url = f"{parsed.scheme}://{parsed.netloc}{href}"
+                    else:
+                        continue
+                    if linked_url not in tried and time.monotonic() < deadline:
+                        _process_url(linked_url)
+
+            return True
+        except Exception as exc:
+            logger.debug("Website scrape failed for %s: %s", url, exc)
+            return False
+
+    # ── Phase 1a: Sitemap discovery ───────────────────────────────────────────
+    sitemap_candidates = _discover_via_sitemap(domain, headers, deadline)
+    for url in sitemap_candidates:
+        if time.monotonic() >= deadline or len(collected) >= _MAX_PAGES:
+            break
+        _process_url(url)
+
+    # ── Phase 1b: Homepage nav/footer link discovery ──────────────────────────
+    if len(collected) < _MAX_PAGES and time.monotonic() < deadline:
+        nav_candidates = _discover_via_nav(domain, headers, deadline)
+        for url in nav_candidates:
+            if time.monotonic() >= deadline or len(collected) >= _MAX_PAGES:
+                break
+            _process_url(url)
+
+    # ── Phase 1c: URL pattern brute-force ─────────────────────────────────────
     for base in base_candidates:
         for path in _LEADERSHIP_PATHS:
             if time.monotonic() >= deadline:
-                logger.debug(f"Website scrape budget exhausted for {domain}")
+                logger.debug("Website scrape budget exhausted for %s", domain)
                 break
-            url = f"{base}{path}"
-            if url in tried:
-                continue
-            tried.add(url)
-            remaining = max(1, deadline - time.monotonic())
-            timeout = min(_WEB_TIMEOUT, remaining)
-            try:
-                r = httpx.get(url, headers=headers,
-                              timeout=timeout, follow_redirects=True)
-                ct = r.headers.get("content-type", "")
-                if r.status_code != 200 or "text/html" not in ct:
-                    continue
-
-                raw_html = r.text
-
-                # ── Bot-detection / access-denied guard ───────────────────
-                # Sites like Medtronic return HTTP 200 with an "Incorrect Browser"
-                # or "Access Denied" error page.  Treat these as failures so they
-                # don't block Parallel.AI from running.
-                _raw_lower = raw_html[:2000].lower()
-                if any(kw in _raw_lower for kw in [
-                    "incorrect browser", "access denied", "robot or human",
-                    "are you a human", "please enable javascript to",
-                    "cf-error-details", "captcha", "bot detected",
-                    "unusual traffic", "automated access",
-                ]):
-                    logger.debug(f"Bot-detection page detected, skipping: {url}")
-                    continue
-
-                # ── Three extraction layers for each page ──────────────────
-                # 1. JavaScript embedded data (Next.js/__NEXT_DATA__, etc.)
-                #    Works on modern SPAs that embed state in the HTML even
-                #    though visible text is rendered by JS at runtime.
-                js_text = _extract_js_data(raw_html)
-
-                # 2. JSON-LD structured data (<script type="application/ld+json">)
-                ld_text = _extract_json_ld(raw_html)
-
-                # 3. Plain-text strip (works for static-HTML sites)
-                text = _strip_html(raw_html)
-
-                # Merge all layers; JS data and JSON-LD win over thin plain text
-                parts_for_page: list[str] = []
-                if js_text:
-                    parts_for_page.append(f"[JS Data]\n{js_text}")
-                if ld_text:
-                    parts_for_page.append(f"[Structured Data]\n{ld_text}")
-                # Include plain text only when substantial or no structured data
-                if len(text) >= 400 or (not js_text and not ld_text):
-                    parts_for_page.append(text[:_MAX_PAGE_CHARS])
-
-                combined = "\n\n".join(parts_for_page) if parts_for_page else ""
-
-                # A page is "useful" if any layer produced content
-                if not combined.strip():
-                    logger.debug(f"Page produced no content, skipping: {url}")
-                    continue
-                if len(text) < 200 and not js_text and not ld_text:
-                    logger.debug(f"Page too thin ({len(text)} chars), skipping: {url}")
-                    continue
-
-                collected.append(f"[Page: {url}]\n{combined}")
-                logger.debug(
-                    f"Scraped leadership page: {url} "
-                    f"({len(text)} chars text, {len(ld_text)} chars JSON-LD)"
-                )
-
-                # Discover sub-pages linked from this leadership page
-                # (e.g. /board-of-directors, /operating-committee on same domain)
-                if len(collected) < _MAX_PAGES:
-                    for m in _LEADERSHIP_LINK_RE.finditer(raw_html):
-                        href = m.group(1)
-                        # Resolve relative links against the base
-                        if href.startswith("http"):
-                            linked_url = href
-                        elif href.startswith("/"):
-                            linked_url = f"{base}{href}"
-                        else:
-                            continue
-                        if linked_url not in tried:
-                            if time.monotonic() < deadline and len(collected) < _MAX_PAGES:
-                                tried.add(linked_url)
-                                remaining2 = max(1, deadline - time.monotonic())
-                                try:
-                                    r2 = httpx.get(
-                                        linked_url, headers=headers,
-                                        timeout=min(_WEB_TIMEOUT, remaining2),
-                                        follow_redirects=True,
-                                    )
-                                    ct2 = r2.headers.get("content-type", "")
-                                    if r2.status_code == 200 and "text/html" in ct2:
-                                        js2 = _extract_js_data(r2.text)
-                                        ld2 = _extract_json_ld(r2.text)
-                                        t2  = _strip_html(r2.text)
-                                        sub_parts: list[str] = []
-                                        if js2: sub_parts.append(f"[JS Data]\n{js2}")
-                                        if ld2: sub_parts.append(f"[Structured Data]\n{ld2}")
-                                        if len(t2) >= 400 or (not js2 and not ld2):
-                                            sub_parts.append(t2[:_MAX_PAGE_CHARS])
-                                        c2 = "\n\n".join(sub_parts)
-                                        if c2.strip():
-                                            collected.append(f"[Page: {linked_url}]\n{c2}")
-                                            logger.debug(
-                                                f"Scraped linked leadership page: {linked_url} "
-                                                f"({len(t2)} chars text)"
-                                            )
-                                except Exception as exc2:
-                                    logger.debug(f"Linked page scrape failed {linked_url}: {exc2}")
-
-                if len(collected) >= _MAX_PAGES:
-                    break
-            except Exception as exc:
-                logger.debug(f"Website scrape failed for {url}: {exc}")
-                continue
+            _process_url(f"{base}{path}")
+            if len(collected) >= _MAX_PAGES:
+                break
         if len(collected) >= _MAX_PAGES or time.monotonic() >= deadline:
             break
 
@@ -584,17 +721,37 @@ Return ONE valid JSON object — no prose, no markdown:
   "board": [
     {"name": "Full Name", "title": "Exact title from source",
      "director_type": "Executive|Non-Executive|Independent|Nominee|unknown",
-     "committees": [{"name": "Committee name", "role": "Chair|Member"}]}
+     "committees": [{"name": "Committee name", "role": "Chair|Member"}],
+     "linkedin_url": "https://linkedin.com/in/... or null",
+     "confidence": "HIGH|MEDIUM|LOW"}
   ],
   "executives": [
     {"name": "Full Name", "title": "Exact title",
      "function": "Finance|Technology|HR|Operations|Legal|Strategy|Sales|Marketing|Other",
-     "scope": "Global|Regional|Country name|BU name or null"}
+     "scope": "Global|Regional|Country name|BU name or null",
+     "linkedin_url": "https://linkedin.com/in/... or null",
+     "confidence": "HIGH|MEDIUM|LOW"}
   ],
   "senior_leadership": [
-    {"name": "Full Name", "title": "Exact title", "function_or_bu": "string"}
+    {"name": "Full Name", "title": "Exact title", "function_or_bu": "string",
+     "linkedin_url": "https://linkedin.com/in/... or null",
+     "confidence": "HIGH|MEDIUM|LOW"}
   ]
 }
+
+EXTRACTION TECHNIQUES — apply all:
+1. JSON-LD / schema.org: Person blocks with name, jobTitle, sameAs (LinkedIn)
+2. CSS heuristics: blocks with classes like person, member, leader, exec, bio, profile, card
+3. Image alt text: name + title often encoded in alt attributes
+4. H2/H3 headings: person name as heading followed by title in next element
+5. List scanning: <ul>/<li> blocks with name + title patterns
+6. LinkedIn URLs: scan ALL <a href> for "linkedin.com/in/" near a person's name
+7. [JS Data] / [Structured Data] blocks: walk all name/jobTitle fields
+
+CONFIDENCE:
+HIGH — name and title found together on a named leadership page or JSON-LD
+MEDIUM — name inferred from multiple signals (heading + nearby text)
+LOW — name mentioned once, title uncertain
 
 PLACEMENT:
 board — everyone listed under Board of Directors / Supervisory Board / Board \
@@ -622,6 +779,7 @@ RULES:
 - Use exact spelling of names and titles as they appear.
 - "committees" = [] if not mentioned. "function" = "Other" if unclear.
 - "scope" = null if not stated. "director_type" = "unknown" if unclear.
+- "linkedin_url" = null if not found — do NOT construct URLs from names.
 - EXCLUDE former, retired, ex-, past, emeritus office-holders.
 - DUAL ROLES: if one person holds both a board title AND an executive title \
 (e.g. "Executive Chairman & CEO"), list them in BOTH board and executives.
@@ -1631,7 +1789,8 @@ def _call_claude(system: str, user_msg: str, label: str,
                         continue
                     entry: dict = {"name": name, "title": title}
                     for k in ("director_type", "committees", "function",
-                              "scope", "function_or_bu"):
+                              "scope", "function_or_bu", "linkedin_url",
+                              "confidence"):
                         if b.get(k):
                             entry[k] = b[k]
                     out.append(entry)
@@ -1641,8 +1800,8 @@ def _call_claude(system: str, user_msg: str, label: str,
             execs   = _enrich_items(data.get("executives",        []), check_retired=True)
             senior  = _enrich_items(data.get("senior_leadership", []), check_retired=True)
             result  = {
-                "board":            board,
-                "executives":       execs + senior,   # senior goes into EM panel
+                "board":             board,
+                "executives":        execs + senior,   # senior goes into EM panel
                 "senior_leadership": senior,
             }
             if source_text:
@@ -1709,5 +1868,10 @@ def _clean_list(raw: list, is_board: bool = False) -> list[dict]:
         if not is_board and _is_retired(name, title):
             logger.debug("Skipping retired/former executive: %s — %s", name, title)
             continue
-        out.append({"name": name, "title": title})
+        entry: dict = {"name": name, "title": title}
+        for k in ("linkedin_url", "confidence", "director_type", "committees",
+                  "function", "scope", "function_or_bu"):
+            if item.get(k):
+                entry[k] = item[k]
+        out.append(entry)
     return out
