@@ -1703,11 +1703,12 @@ async def v2_corrections_summary():
 # ─────────────────────────────────────────────
 @app.get("/ping-llm")
 async def ping_llm():
-    """Fast diagnostic: env vars + minimal Claude API call. Returns in <10s."""
+    """Fast diagnostic: env vars + minimal Claude API call + Apify token check. Returns in <15s."""
     import os, time
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     parallel_key  = os.environ.get("PARALLEL_API_KEY", "")
     jina_key      = os.environ.get("JINA_API_KEY", "")
+    apify_key     = os.environ.get("APIFY_API_TOKEN", "")
 
     claude_result = {"ok": False, "error": "", "model": "", "response": ""}
     if anthropic_key:
@@ -1747,13 +1748,37 @@ async def ping_llm():
     except Exception as _we:
         wiki_chars = -1
 
+    # Apify token validation — GET /v2/users/me (no actor run, instant)
+    apify_result = {"token_set": bool(apify_key), "ok": False, "user": "", "error": ""}
+    if apify_key:
+        try:
+            import httpx as _hx
+            _ar = _hx.get(
+                "https://api.apify.com/v2/users/me",
+                params={"token": apify_key},
+                timeout=8,
+            )
+            if _ar.status_code == 200:
+                _ud = _ar.json().get("data", {})
+                apify_result["ok"]   = True
+                apify_result["user"] = _ud.get("username", _ud.get("id", ""))
+                apify_result["plan"] = _ud.get("plan", {}).get("id", "")
+            else:
+                apify_result["error"] = f"HTTP {_ar.status_code}: {_ar.text[:120]}"
+        except Exception as _ae:
+            apify_result["error"] = str(_ae)
+    else:
+        apify_result["error"] = "APIFY_API_TOKEN not set"
+
     return {
         "env": {
             "ANTHROPIC_API_KEY": bool(anthropic_key),
             "PARALLEL_API_KEY":  bool(parallel_key),
             "JINA_API_KEY":      bool(jina_key),
+            "APIFY_API_TOKEN":   bool(apify_key),
         },
-        "claude": claude_result,
+        "claude":   claude_result,
+        "apify":    apify_result,
         "wikipedia_chars_wells_fargo": wiki_chars,
     }
 
@@ -1776,6 +1801,53 @@ async def test_knowledge(company: str = "Wells Fargo"):
         "board_count": len(result.get("board", [])),
         "exec_count": len(result.get("executives", [])),
         "result": result,
+    }
+
+
+@app.get("/test-apify")
+async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
+    """
+    Test Apify scraper end-to-end: discover URLs → run actor → return markdown.
+    Takes 60-120s. Use /ping-llm first to confirm token is valid.
+    Example: /test-apify?company=Wells+Fargo&domain=wellsfargo.com
+    """
+    import os, time
+    from llm_fallback import _apify_fetch_leadership, _discover_via_sitemap, _discover_via_nav
+
+    apify_key = os.environ.get("APIFY_API_TOKEN", "")
+    if not apify_key:
+        return {"error": "APIFY_API_TOKEN not set"}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    deadline = time.monotonic() + 12
+
+    t0 = time.monotonic()
+    sitemap_urls = _discover_via_sitemap(domain, headers, deadline)
+    nav_urls     = _discover_via_nav(domain, headers, time.monotonic() + 8)
+    discovery_s  = round(time.monotonic() - t0, 2)
+
+    t1 = time.monotonic()
+    apify_text = _apify_fetch_leadership(company, domain, apify_key)
+    apify_s    = round(time.monotonic() - t1, 2)
+
+    return {
+        "company":        company,
+        "domain":         domain,
+        "discovery": {
+            "sitemap_urls": sitemap_urls,
+            "nav_urls":     nav_urls[:8],
+            "elapsed_s":    discovery_s,
+        },
+        "apify": {
+            "chars":     len(apify_text),
+            "elapsed_s": apify_s,
+            "preview":   apify_text[:2000] if apify_text else "",
+        },
     }
 
 
