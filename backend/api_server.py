@@ -1852,8 +1852,35 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
                 seen.add(u); start_urls.append(u)
     start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
 
-    # ── Apify run (raw items, no leadership filter yet) ───────────────────────
+    # ── Apify submit — direct call with full error capture ────────────────────
     t1 = time.monotonic()
+    submit_debug: dict = {}
+    try:
+        _actor = "apify~website-content-crawler"
+        _input = {
+            "startUrls":   [{"url": u} for u in start_urls[:6]],
+            "crawlerType": "playwright:chrome",
+            "maxCrawlDepth":  0,
+            "maxCrawlPages":  6,
+            "outputFormats":  ["markdown"],
+            "htmlTransformer": "readableText",
+        }
+        _sr = httpx.post(
+            f"https://api.apify.com/v2/acts/{_actor}/runs",
+            params={"token": apify_key},
+            json=_input,
+            timeout=15,
+        )
+        submit_debug["status_code"] = _sr.status_code
+        submit_debug["response_preview"] = _sr.text[:400]
+        if _sr.is_success:
+            _rd = _sr.json()["data"]
+            submit_debug["run_id"] = _rd["id"]
+            submit_debug["dataset_id"] = _rd["defaultDatasetId"]
+            submit_debug["run_status"] = _rd.get("status", "")
+    except Exception as _e:
+        submit_debug["error"] = str(_e)
+
     raw_items = _apify_run(start_urls, apify_key, timeout=120)
     apify_s   = round(time.monotonic() - t1, 2)
 
@@ -1886,6 +1913,7 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
             "raw_items_returned": len(raw_items),
             "items_with_leadership_signal": len(kept),
             "elapsed_s": apify_s,
+            "submit_debug": submit_debug,
             "items": item_summary,
         },
     }
