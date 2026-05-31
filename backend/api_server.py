@@ -1807,12 +1807,17 @@ async def test_knowledge(company: str = "Wells Fargo"):
 @app.get("/test-apify")
 async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
     """
-    Test Apify scraper end-to-end: discover URLs → run actor → return markdown.
+    Test Apify scraper end-to-end with full diagnostics.
     Takes 60-120s. Use /ping-llm first to confirm token is valid.
     Example: /test-apify?company=Wells+Fargo&domain=wellsfargo.com
+             /test-apify?company=Apple&domain=apple.com
     """
     import os, time
-    from llm_fallback import _apify_fetch_leadership, _discover_via_sitemap, _discover_via_nav
+    import httpx
+    from llm_fallback import (
+        _apify_run, _discover_via_sitemap, _discover_via_nav,
+        _LEADERSHIP_PATHS, _APIFY_ACTOR, _APIFY_BASE,
+    )
 
     apify_key = os.environ.get("APIFY_API_TOKEN", "")
     if not apify_key:
@@ -1826,27 +1831,60 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
     }
     deadline = time.monotonic() + 12
 
+    # ── URL discovery ──────────────────────────────────────────────────────────
     t0 = time.monotonic()
     sitemap_urls = _discover_via_sitemap(domain, headers, deadline)
     nav_urls     = _discover_via_nav(domain, headers, time.monotonic() + 8)
     discovery_s  = round(time.monotonic() - t0, 2)
 
+    # Build start_urls (same logic as _apify_fetch_leadership)
+    seen: set[str] = set()
+    start_urls: list[str] = []
+    for u in sitemap_urls + nav_urls:
+        if u not in seen:
+            seen.add(u); start_urls.append(u)
+    for path in _LEADERSHIP_PATHS[:20]:
+        for base in [f"https://www.{domain}", f"https://{domain}"]:
+            u = f"{base}{path}"
+            if u not in seen:
+                seen.add(u); start_urls.append(u)
+    start_urls = start_urls[:12]   # show more for diagnostics
+
+    # ── Apify run (raw items, no leadership filter yet) ───────────────────────
     t1 = time.monotonic()
-    apify_text = _apify_fetch_leadership(company, domain, apify_key)
-    apify_s    = round(time.monotonic() - t1, 2)
+    raw_items = _apify_run(start_urls, apify_key, timeout=120)
+    apify_s   = round(time.monotonic() - t1, 2)
+
+    # Per-item summary
+    item_summary = []
+    _SIGNAL = {"director","chairman","chief","ceo","president","officer",
+               "executive","board","governance","management","leadership","trustee"}
+    for item in raw_items:
+        text = (item.get("markdown") or item.get("text") or "").strip()
+        has_signal = any(kw in text.lower() for kw in _SIGNAL)
+        item_summary.append({
+            "url":         item.get("url", ""),
+            "chars":       len(text),
+            "has_leadership_signal": has_signal,
+            "preview":     text[:300] if text else "",
+        })
+
+    kept = [i for i in item_summary if i["has_leadership_signal"] and i["chars"] >= 200]
 
     return {
-        "company":        company,
-        "domain":         domain,
+        "company":   company,
+        "domain":    domain,
         "discovery": {
             "sitemap_urls": sitemap_urls,
             "nav_urls":     nav_urls[:8],
+            "start_urls_submitted": start_urls,
             "elapsed_s":    discovery_s,
         },
         "apify": {
-            "chars":     len(apify_text),
+            "raw_items_returned": len(raw_items),
+            "items_with_leadership_signal": len(kept),
             "elapsed_s": apify_s,
-            "preview":   apify_text[:2000] if apify_text else "",
+            "items": item_summary,
         },
     }
 
