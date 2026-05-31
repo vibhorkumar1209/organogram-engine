@@ -961,6 +961,204 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# APIFY  (api.apify.com — website-content-crawler, Playwright-based)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_APIFY_BASE          = "https://api.apify.com/v2"
+_APIFY_ACTOR         = "apify~website-content-crawler"
+_APIFY_POLL_INTERVAL = 5     # seconds between status polls
+_APIFY_TIMEOUT       = 120   # seconds to wait for actor run
+_APIFY_MAX_PAGES     = 6     # max pages per run (BOD + exec + sub-pages)
+_APIFY_MAX_CHARS     = 60_000
+
+
+def _apify_run(start_urls: list[str], api_token: str,
+               timeout: int = _APIFY_TIMEOUT) -> list[dict]:
+    """
+    Run the Apify website-content-crawler actor on *start_urls*.
+
+    Uses Playwright/Chrome so JavaScript-rendered SPAs are fully rendered
+    before text is extracted.  maxCrawlDepth=0 means only the given URLs
+    are fetched — no further link-following.
+
+    Returns a list of dataset items (each has 'url', 'text', 'markdown').
+    Returns [] on failure or timeout.
+    """
+    try:
+        import httpx
+        import time
+    except ImportError:
+        return []
+
+    if not start_urls or not api_token:
+        return []
+
+    actor_input = {
+        "startUrls":              [{"url": u} for u in start_urls],
+        "crawlerType":            "playwright:chrome",   # full JS rendering
+        "maxCrawlDepth":          0,                     # only start URLs
+        "maxCrawlPages":          _APIFY_MAX_PAGES,
+        "outputFormats":          ["markdown"],
+        "removeElementsCssSelector": "nav, footer, header, .cookie-banner, "
+                                     "#cookie-consent, .site-header, .site-footer",
+        "htmlTransformer":        "readableText",
+        "initialConcurrency":     3,
+        "maxConcurrency":         5,
+    }
+
+    hdrs = {"Content-Type": "application/json"}
+    params = {"token": api_token}
+
+    # ── Submit run ────────────────────────────────────────────────────────────
+    try:
+        resp = httpx.post(
+            f"{_APIFY_BASE}/acts/{_APIFY_ACTOR}/runs",
+            headers=hdrs, params=params, json=actor_input, timeout=15,
+        )
+        if not resp.is_success:
+            logger.warning("Apify actor start failed %d: %s",
+                           resp.status_code, resp.text[:200])
+            return []
+        run_data  = resp.json()["data"]
+        run_id    = run_data["id"]
+        dataset_id = run_data["defaultDatasetId"]
+        logger.info("Apify run started: %s (%d URLs)", run_id, len(start_urls))
+    except Exception as exc:
+        logger.warning("Apify submit error: %s", exc)
+        return []
+
+    # ── Poll status ───────────────────────────────────────────────────────────
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(_APIFY_POLL_INTERVAL)
+        try:
+            st = httpx.get(
+                f"{_APIFY_BASE}/acts/{_APIFY_ACTOR}/runs/{run_id}",
+                params=params, timeout=15,
+            )
+            if not st.is_success:
+                continue
+            status = st.json()["data"]["status"]
+            if status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                logger.warning("Apify run %s ended with status: %s", run_id, status)
+                return []
+            if status == "SUCCEEDED":
+                break
+        except Exception as exc:
+            logger.debug("Apify poll error: %s", exc)
+    else:
+        logger.warning("Apify run %s timed out after %ds", run_id, timeout)
+        return []
+
+    # ── Fetch dataset items ───────────────────────────────────────────────────
+    try:
+        res = httpx.get(
+            f"{_APIFY_BASE}/datasets/{dataset_id}/items",
+            params={**params, "format": "json", "limit": _APIFY_MAX_PAGES},
+            timeout=20,
+        )
+        if not res.is_success:
+            logger.warning("Apify dataset fetch failed %d", res.status_code)
+            return []
+        items = res.json()
+        logger.info("Apify run %s: %d items returned", run_id, len(items))
+        return items if isinstance(items, list) else []
+    except Exception as exc:
+        logger.warning("Apify dataset error: %s", exc)
+        return []
+
+
+def _apify_fetch_leadership(company_name: str, domain: str,
+                            api_token: str) -> str:
+    """
+    Primary JS-capable scraper for BOD/EM extraction.
+
+    Discovery strategy (fast, ~5s before Apify run):
+      1. Sitemap → find exact leadership page URLs
+      2. Nav scan → follow homepage nav/footer links
+      3. Fall back to top _LEADERSHIP_PATHS entries
+
+    Then submits all candidates to Apify's website-content-crawler, which
+    renders each page with Playwright/Chrome and returns clean markdown.
+
+    Returns concatenated markdown from all useful pages (≤ _APIFY_MAX_CHARS),
+    or "" if Apify is unavailable or returned no leadership content.
+    """
+    if not domain or not api_token:
+        return ""
+
+    import time
+    deadline = time.monotonic() + 12   # 12s budget for URL discovery
+
+    headers = {
+        "User-Agent": _SEARCH_UA,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    # ── Discover the most likely leadership URLs (fast, no rendering) ─────────
+    candidate_urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    def _add(url: str) -> None:
+        if url not in seen_urls:
+            seen_urls.add(url)
+            candidate_urls.append(url)
+
+    # Phase 1a: sitemap
+    for url in _discover_via_sitemap(domain, headers, deadline):
+        _add(url)
+
+    # Phase 1b: homepage nav
+    if time.monotonic() < deadline:
+        for url in _discover_via_nav(domain, headers, deadline):
+            _add(url)
+
+    # Phase 1c: top _LEADERSHIP_PATHS (covers both bare domain and www)
+    for path in _LEADERSHIP_PATHS[:20]:
+        _add(f"https://www.{domain}{path}")
+        _add(f"https://{domain}{path}")
+
+    # Deduplicate and cap — Apify charges per page
+    start_urls = candidate_urls[:_APIFY_MAX_PAGES * 2]
+    logger.info(
+        "Apify fetch for '%s': %d candidate URLs → submitting to actor",
+        company_name, len(start_urls),
+    )
+
+    # ── Run Apify actor ───────────────────────────────────────────────────────
+    items = _apify_run(start_urls, api_token)
+    if not items:
+        return ""
+
+    # ── Filter and assemble useful pages ──────────────────────────────────────
+    _LEADERSHIP_SIGNAL = {
+        "director", "chairman", "chief", "ceo", "president",
+        "officer", "executive", "board", "governance", "management",
+        "leadership", "trustee",
+    }
+    collected: list[str] = []
+    for item in items:
+        url  = item.get("url", "")
+        text = (item.get("markdown") or item.get("text") or "").strip()
+        if not text or len(text) < 200:
+            continue
+        lower = text.lower()
+        if not any(kw in lower for kw in _LEADERSHIP_SIGNAL):
+            logger.debug("Apify: skipping non-leadership page %s (%d chars)", url, len(text))
+            continue
+        collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
+        logger.info("Apify: kept page %s (%d chars)", url, len(text))
+
+    result = "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
+    logger.info(
+        "Apify leadership for '%s': %d pages kept, %d chars total",
+        company_name, len(collected), len(result),
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PARALLEL.AI  (api.parallel.ai — web research agent, task-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1440,22 +1638,28 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     """
     Fetch Board of Directors and Executive Management for a company.
 
-    Scraping priority (web-only, no AI knowledge fallback):
-      0.  Parallel.AI research agent — browses the real site + annual reports,
-          understands the question, returns structured name/title output.
-          Activated when PARALLEL_API_KEY is set. Best overall quality.
-      1a. Jina Reader — path-based (JINA_API_KEY, known _LEADERSHIP_PATHS).
-      1b. Jina Search-and-Fetch — discovers actual leadership URLs via search.
-      1c. Raw HTTP — httpx direct, static-HTML sites.
-      2.  Search snippets: Jina Search → DuckDuckGo fallback.
-      3.  Wikipedia static-HTML (always).
+    Scraping pipeline (web-only, no AI knowledge fallback):
+      0.  Raw HTTP — fast static-HTML path (httpx, 2-5s).  Includes sitemap
+          discovery and nav scanning from scraper.py.  If this yields ≥ 2000
+          chars the pipeline stops here — no point spending API budget.
+      1.  Apify website-content-crawler (PRIMARY JS scraper) — Playwright/
+          Chrome renders JS SPAs and returns clean markdown.  Activated when
+          APIFY_API_TOKEN is set.  ~30-120s.  Replaces Parallel.AI as the
+          first-choice deep scraper.
+      2.  Parallel.AI research agent — falls back when Apify is unavailable
+          or returns thin content.  Browses live site + annual reports.
+          ~120-160s.  PARALLEL_API_KEY required.
+      3a. Jina Reader — path-based (JINA_API_KEY, _LEADERSHIP_PATHS).
+      3b. Jina Search-and-Fetch — discovers URLs via Jina search, then reads.
+      4.  Search snippets: Jina Search → DuckDuckGo fallback.
+      5.  Wikipedia static-HTML (always — valuable for public companies).
 
     Results are cached in-process (keyed on company_name + domain).
 
     Returns:
         {
-            "board":      [{"name": str, "title": str}, ...],
-            "executives": [{"name": str, "title": str}, ...],
+            "board":      [{"name": str, "title": str, ...}, ...],
+            "executives": [{"name": str, "title": str, ...}, ...],
         }
     """
     if not company_name or len(company_name.strip()) < 3:
@@ -1466,6 +1670,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         logger.debug("LLM leadership skipped: ANTHROPIC_API_KEY not set")
         return {"board": [], "executives": []}
 
+    apify_key    = os.environ.get("APIFY_API_TOKEN", "")
     parallel_key = os.environ.get("PARALLEL_API_KEY", "")
     jina_key     = os.environ.get("JINA_API_KEY", "")
 
@@ -1473,26 +1678,41 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── Step 0: Raw HTTP scrape — FAST PATH (runs first, always) ────────────
-    # Audit showed wellsfargo.com/about/corporate/governance/ returns full
-    # name+title data in static HTML in ~2s.  Run this BEFORE Parallel.AI
-    # (which needs 120-160s) so known-path companies populate immediately.
-    # Also runs as fallback when Parallel.AI is unavailable or times out.
+    # ── Step 0: Raw HTTP — FAST PATH ─────────────────────────────────────────
+    # Sitemap → nav → URL patterns; static-HTML sites (Wells Fargo, Medtronic
+    # static pages) return full content in ~2s.  JS shells are detected and
+    # skipped so Apify fires immediately for SPA sites.
     web_text = ""
     if domain:
         web_text = _fetch_leadership_text(domain)
         if web_text:
             logger.info("Step 0 raw HTTP for '%s': %d chars", domain, len(web_text))
 
-    # ── Step 1: Parallel.AI research agent (deep research — JS SPAs, PDFs) ──
-    # Runs when PARALLEL_API_KEY is set and raw HTTP produced nothing useful
-    # (JS-only SPAs return empty shells via raw HTTP).
-    # Also runs as augmentation when raw HTTP succeeded but got thin content.
+    # ── Step 1: Apify — PRIMARY JS scraper ───────────────────────────────────
+    # Runs when APIFY_API_TOKEN is set and raw HTTP gave thin content
+    # (< 2000 chars typically means JS-rendered SPA returned empty shells).
+    # Apify renders pages with Playwright/Chrome — same fidelity as a real
+    # browser — and returns clean markdown.  Fast enough (~60-120s) to be the
+    # first-choice deep scraper.
+    if apify_key and (not web_text or len(web_text) < 2000):
+        logger.info(
+            "Step 1 Apify for '%s' (raw HTTP gave %d chars)", company_name, len(web_text)
+        )
+        apify_text = _apify_fetch_leadership(company_name, domain, apify_key)
+        if apify_text:
+            logger.info("Step 1 Apify for '%s': %d chars", company_name, len(apify_text))
+            web_text = (web_text + "\n\n" + apify_text) if web_text else apify_text
+
+    # ── Step 2: Parallel.AI — deep research fallback ─────────────────────────
+    # Used when Apify is unavailable (no APIFY_API_TOKEN) or returned nothing.
+    # Parallel.AI understands the research question and browses annual reports,
+    # governance pages, and press releases.
     if parallel_key and (not web_text or len(web_text) < 2000):
-        logger.info("Step 1 Parallel.AI for '%s' (raw HTTP gave %d chars)", company_name, len(web_text))
+        logger.info(
+            "Step 2 Parallel.AI for '%s' (have %d chars so far)", company_name, len(web_text)
+        )
         parallel_result = _parallel_fetch_leadership(company_name, domain, parallel_key)
         if parallel_result:
-            # JSON parsed successfully → return immediately, skip Claude
             if parallel_result.get("board") or parallel_result.get("executives"):
                 parallel_result["_source"] = "web"
                 _LEADERSHIP_CACHE[cache_key] = parallel_result
@@ -1503,32 +1723,23 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
                     len(parallel_result.get("executives", [])),
                 )
                 return parallel_result
-            # Raw text fallback — pass to Claude below
             parallel_text = parallel_result.get("_raw_text", "")
             if parallel_text:
                 logger.info("Parallel.AI raw-text for '%s': %d chars", company_name, len(parallel_text))
-                # Prefer longer source; combine if both have content
-                if web_text:
-                    web_text = web_text + "\n\n" + parallel_text
-                else:
-                    web_text = parallel_text
+                web_text = (web_text + "\n\n" + parallel_text) if web_text else parallel_text
 
-    # ── Step 2a: Jina Reader — path-based (known URL patterns) ──────────────
+    # ── Step 3a: Jina Reader — path-based ────────────────────────────────────
     if not web_text and jina_key and domain:
         web_text = _jina_fetch_leadership(domain, jina_key)
-        logger.info("Step 2a Jina path-based for '%s': %d chars", domain, len(web_text))
+        logger.info("Step 3a Jina path-based for '%s': %d chars", domain, len(web_text))
 
-    # ── Step 2b: Jina Search-and-Fetch — discover actual leadership URLs ─────
+    # ── Step 3b: Jina Search-and-Fetch ───────────────────────────────────────
     if jina_key and not web_text:
         web_text = _jina_search_and_fetch(company_name, domain, jina_key)
         if web_text:
-            logger.info("Step 2b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
+            logger.info("Step 3b Jina search-and-fetch for '%s': %d chars", company_name, len(web_text))
 
-    # ── Step 3: Search snippets ───────────────────────────────────────────────
-    # Skip when we already have authoritative web content (raw HTTP or Parallel.AI).
-    # Search snippets (DDG/Jina) mention employees in news context and add
-    # noise — Claude picks up names that pass _strip_hallucinations but aren't
-    # on the actual Operating Committee / Board.
+    # ── Step 4: Search snippets ───────────────────────────────────────────────
     if web_text:
         search_text = ""
         logger.info("Skipping search snippets — have %d chars of web content", len(web_text))
@@ -1539,11 +1750,12 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     else:
         search_text = _ddg_leadership_snippets(company_name)
 
-    # ── Step 3: Wikipedia (always — valuable for public companies) ───────────
+    # ── Step 5: Wikipedia (always) ────────────────────────────────────────────
     wiki_text = _scrape_wikipedia(company_name)
 
     src_label = (
-        "parallel_raw" if (parallel_key and not jina_key and web_text)
+        "apify"        if (apify_key and web_text)
+        else "parallel" if (parallel_key and web_text)
         else "jina"     if (jina_key and web_text)
         else "raw_http" if web_text
         else "none"
@@ -1553,7 +1765,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         company_name, len(web_text), src_label, len(search_text), len(wiki_text),
     )
 
-    # ── Step 4: Extract via Claude if any context found ───────────────────────
+    # ── Step 6: Extract via Claude ────────────────────────────────────────────
     if web_text or search_text or wiki_text:
         parts: list[str] = [f"Company: {company_name}"]
         if web_text:
@@ -1568,22 +1780,16 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         result = _call_claude(
             system=_SYSTEM_FROM_WEB,
             user_msg=user_msg,
-            label=f"{company_name} [{'jina' if jina_key else 'web'}+search+wiki]",
-            source_text=user_msg,   # used to strip hallucinated names
+            label=f"{company_name} [{src_label}+wiki]",
+            source_text=user_msg,
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
-        logger.info(
-            "Web+search+wiki context returned no leaders for '%s'", company_name
-        )
+        logger.info("Web+search+wiki returned no leaders for '%s'", company_name)
 
-    # ── Step 5: No knowledge fallback — web-sourced data only ───────────────
-    # Knowledge fallback is disabled to prevent showing unverified executives.
-    # Only people explicitly named in real web sources are shown.
-    # NOTE: Do NOT cache empty results — allows retry on next upload in case
-    # Parallel.AI was temporarily unavailable or timed out.
+    # ── No result — don't cache so next upload can retry ────────────────────
     logger.info("No web-sourced leaders found for '%s' — returning empty (not cached)", company_name)
     return {"board": [], "executives": [], "_source": "none"}
 
