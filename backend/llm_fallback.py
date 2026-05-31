@@ -970,8 +970,8 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 
 _APIFY_BASE          = "https://api.apify.com/v2"
 _APIFY_ACTOR         = "apify~website-content-crawler"
-_APIFY_POLL_INTERVAL = 5     # seconds between status polls
-_APIFY_TIMEOUT       = 120   # seconds to wait for actor run
+_APIFY_POLL_INTERVAL = 8     # seconds between status polls
+_APIFY_TIMEOUT       = 180   # seconds to wait for actor run
 _APIFY_MAX_PAGES     = 6     # max pages per run (BOD + exec + sub-pages)
 _APIFY_MAX_CHARS     = 60_000
 
@@ -998,16 +998,12 @@ def _apify_run(start_urls: list[str], api_token: str,
         return []
 
     actor_input = {
-        "startUrls":              [{"url": u} for u in start_urls],
-        "crawlerType":            "playwright:chrome",   # full JS rendering
-        "maxCrawlDepth":          0,                     # only start URLs
-        "maxCrawlPages":          _APIFY_MAX_PAGES,
-        "outputFormats":          ["markdown"],
-        "removeElementsCssSelector": "nav, footer, header, .cookie-banner, "
-                                     "#cookie-consent, .site-header, .site-footer",
-        "htmlTransformer":        "readableText",
-        "initialConcurrency":     3,
-        "maxConcurrency":         5,
+        "startUrls":     [{"url": u} for u in start_urls[:_APIFY_MAX_PAGES]],
+        "crawlerType":   "playwright:chrome",   # full JS rendering
+        "maxCrawlDepth": 0,                     # only start URLs
+        "maxCrawlPages": _APIFY_MAX_PAGES,
+        "outputFormats": ["markdown"],
+        "htmlTransformer": "readableText",
     }
 
     hdrs = {"Content-Type": "application/json"}
@@ -1058,7 +1054,8 @@ def _apify_run(start_urls: list[str], api_token: str,
     try:
         res = httpx.get(
             f"{_APIFY_BASE}/datasets/{dataset_id}/items",
-            params={**params, "format": "json", "limit": _APIFY_MAX_PAGES},
+            params={**params, "format": "json", "limit": _APIFY_MAX_PAGES,
+                    "fields": "url,markdown,text"},
             timeout=20,
         )
         if not res.is_success:
