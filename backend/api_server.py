@@ -1815,8 +1815,9 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
     import os, time
     import httpx
     from llm_fallback import (
-        _apify_run, _discover_via_sitemap, _discover_via_nav,
-        _LEADERSHIP_PATHS, _APIFY_ACTOR, _APIFY_BASE,
+        _apify_run, _discover_via_nav,
+        _APIFY_LEADERSHIP_PATHS, _STRONG_LEADERSHIP_PATH_KW,
+        _APIFY_ACTOR, _APIFY_BASE, _APIFY_MAX_PAGES,
     )
 
     apify_key = os.environ.get("APIFY_API_TOKEN", "")
@@ -1831,24 +1832,25 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
     }
     deadline = time.monotonic() + 12
 
-    # ── URL discovery ──────────────────────────────────────────────────────────
+    # ── URL discovery (mirrors _apify_fetch_leadership logic exactly) ──────────
     t0 = time.monotonic()
-    sitemap_urls = _discover_via_sitemap(domain, headers, deadline)
-    nav_urls     = _discover_via_nav(domain, headers, time.monotonic() + 8)
-    discovery_s  = round(time.monotonic() - t0, 2)
+    nav_urls = _discover_via_nav(domain, headers, time.monotonic() + 8)
+    discovery_s = round(time.monotonic() - t0, 2)
 
-    # Build start_urls (same logic as _apify_fetch_leadership)
     seen: set[str] = set()
     start_urls: list[str] = []
-    for u in sitemap_urls + nav_urls:
-        if u not in seen:
-            seen.add(u); start_urls.append(u)
-    for path in _LEADERSHIP_PATHS[:20]:
+    # Priority 1: nav URLs with strong leadership path signal
+    for u in nav_urls:
+        if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
+            if u not in seen:
+                seen.add(u); start_urls.append(u)
+    # Priority 2: curated specific paths
+    for path in _APIFY_LEADERSHIP_PATHS:
         for base in [f"https://www.{domain}", f"https://{domain}"]:
             u = f"{base}{path}"
             if u not in seen:
                 seen.add(u); start_urls.append(u)
-    start_urls = start_urls[:12]   # show more for diagnostics
+    start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
 
     # ── Apify run (raw items, no leadership filter yet) ───────────────────────
     t1 = time.monotonic()
@@ -1875,10 +1877,10 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
         "company":   company,
         "domain":    domain,
         "discovery": {
-            "sitemap_urls": sitemap_urls,
-            "nav_urls":     nav_urls[:8],
-            "start_urls_submitted": start_urls,
-            "elapsed_s":    discovery_s,
+            "nav_urls_all":           nav_urls[:10],
+            "nav_urls_with_signal":   [u for u in nav_urls if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW)],
+            "start_urls_submitted":   start_urls,
+            "elapsed_s":              discovery_s,
         },
         "apify": {
             "raw_items_returned": len(raw_items),

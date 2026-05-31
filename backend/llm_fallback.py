@@ -423,16 +423,20 @@ _LEADERSHIP_LINK_RE = re.compile(
 )
 
 
+# Sitemap keywords must be specific — broad words like "ir", "about", "team"
+# produce false positives (e.g. "ir" matches "airplay", "airpods").
 _SITEMAP_LEADERSHIP_KW = {
-    "leadership", "board", "directors", "governance", "management",
-    "executives", "team", "people", "about", "investor", "senior",
-    "c-suite", "executive", "ir",
+    "leadership", "board-of-directors", "board_of_directors",
+    "governance", "executive-team", "executive_team",
+    "executives", "senior-leadership", "senior_leadership",
+    "management-team", "management_team", "investor-relations",
+    "board-members", "directors",
 }
 
+# Nav keywords for homepage link scanning — slightly broader but still specific
 _NAV_LEADERSHIP_KW = {
-    "leadership", "board", "directors", "governance", "management",
-    "executives", "team", "people", "about", "investor",
-    "senior", "c-suite", "executive",
+    "leadership", "board", "directors", "governance",
+    "executive", "management", "investor", "c-suite",
 }
 
 
@@ -1068,27 +1072,62 @@ def _apify_run(start_urls: list[str], api_token: str,
         return []
 
 
+# Curated short list of specific leadership paths for Apify.
+# Kept short because Apify charges per page render.
+# Ordered by hit-rate: generic first, then firm-specific.
+_APIFY_LEADERSHIP_PATHS = [
+    "/leadership",
+    "/about/leadership",
+    "/about/corporate/governance",          # Wells Fargo
+    "/about-us/governance/board-of-directors",  # Morgan Stanley
+    "/board-of-directors",
+    "/governance/board-of-directors",
+    "/investors/governance/board-of-directors",
+    "/investor-relations/corporate-governance",
+    "/corporate-governance/board-of-directors",
+    "/about/board-of-directors",
+    "/executive-team",
+    "/about-us/leadership",
+    "/company/leadership",
+    "/about/management",
+    "/our-team",
+    "/who-we-are/leadership",
+    "/en/about/leadership",
+    "/en-us/about/leadership",
+]
+
+# Strong URL-path signal for identifying leadership-specific nav links
+_STRONG_LEADERSHIP_PATH_KW = {
+    "leadership", "board", "governance", "executive", "directors",
+    "management-team", "management_team", "investor-relation",
+    "our-team", "about-us",
+}
+
+
 def _apify_fetch_leadership(company_name: str, domain: str,
                             api_token: str) -> str:
     """
     Primary JS-capable scraper for BOD/EM extraction.
 
-    Discovery strategy (fast, ~5s before Apify run):
-      1. Sitemap → find exact leadership page URLs
-      2. Nav scan → follow homepage nav/footer links
-      3. Fall back to top _LEADERSHIP_PATHS entries
+    URL strategy (prioritised to avoid wasting Apify page credits):
+      1. Nav-discovered URLs whose path contains strong leadership keywords
+         (e.g. apple.com/leadership/ found in nav, not airpods pages)
+      2. Curated _APIFY_LEADERSHIP_PATHS on www. and bare domain
+         (covers Wells Fargo /about/corporate/governance, Morgan Stanley, etc.)
 
-    Then submits all candidates to Apify's website-content-crawler, which
-    renders each page with Playwright/Chrome and returns clean markdown.
+    Sitemap is intentionally excluded here — Apple's sitemap contains
+    hundreds of product pages that match weak keywords and exhaust the
+    per-run page budget before the real leadership page is reached.
 
-    Returns concatenated markdown from all useful pages (≤ _APIFY_MAX_CHARS),
-    or "" if Apify is unavailable or returned no leadership content.
+    Submits deduplicated URLs to Apify's website-content-crawler
+    (Playwright/Chrome) and returns concatenated markdown from pages
+    that contain leadership signals.
     """
     if not domain or not api_token:
         return ""
 
     import time
-    deadline = time.monotonic() + 12   # 12s budget for URL discovery
+    deadline = time.monotonic() + 10
 
     headers = {
         "User-Agent": _SEARCH_UA,
@@ -1096,33 +1135,33 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    # ── Discover the most likely leadership URLs (fast, no rendering) ─────────
-    candidate_urls: list[str] = []
     seen_urls: set[str] = set()
+    start_urls: list[str] = []
 
     def _add(url: str) -> None:
         if url not in seen_urls:
             seen_urls.add(url)
-            candidate_urls.append(url)
+            start_urls.append(url)
 
-    # Phase 1a: sitemap
-    for url in _discover_via_sitemap(domain, headers, deadline):
-        _add(url)
-
-    # Phase 1b: homepage nav
-    if time.monotonic() < deadline:
-        for url in _discover_via_nav(domain, headers, deadline):
+    # ── Priority 1: nav-discovered URLs with strong leadership path signal ────
+    # Only keep nav links whose URL path itself contains specific leadership
+    # terms — avoids "about/careers", "about/inclusion", product pages, etc.
+    nav_urls = _discover_via_nav(domain, headers, deadline)
+    for url in nav_urls:
+        path_lower = url.lower()
+        if any(kw in path_lower for kw in _STRONG_LEADERSHIP_PATH_KW):
             _add(url)
 
-    # Phase 1c: top _LEADERSHIP_PATHS (covers both bare domain and www)
-    for path in _LEADERSHIP_PATHS[:20]:
+    # ── Priority 2: curated specific paths ───────────────────────────────────
+    for path in _APIFY_LEADERSHIP_PATHS:
         _add(f"https://www.{domain}{path}")
         _add(f"https://{domain}{path}")
 
-    # Deduplicate and cap — Apify charges per page
-    start_urls = candidate_urls[:_APIFY_MAX_PAGES * 2]
+    # Cap total — Apify charges per render, keep budget lean
+    start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
+
     logger.info(
-        "Apify fetch for '%s': %d candidate URLs → submitting to actor",
+        "Apify fetch for '%s': submitting %d URLs to actor",
         company_name, len(start_urls),
     )
 
@@ -1131,7 +1170,7 @@ def _apify_fetch_leadership(company_name: str, domain: str,
     if not items:
         return ""
 
-    # ── Filter and assemble useful pages ──────────────────────────────────────
+    # ── Filter to pages with real leadership content ──────────────────────────
     _LEADERSHIP_SIGNAL = {
         "director", "chairman", "chief", "ceo", "president",
         "officer", "executive", "board", "governance", "management",
@@ -1143,9 +1182,8 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         text = (item.get("markdown") or item.get("text") or "").strip()
         if not text or len(text) < 200:
             continue
-        lower = text.lower()
-        if not any(kw in lower for kw in _LEADERSHIP_SIGNAL):
-            logger.debug("Apify: skipping non-leadership page %s (%d chars)", url, len(text))
+        if not any(kw in text.lower() for kw in _LEADERSHIP_SIGNAL):
+            logger.debug("Apify: no leadership signal, skipping %s (%d chars)", url, len(text))
             continue
         collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
         logger.info("Apify: kept page %s (%d chars)", url, len(text))
