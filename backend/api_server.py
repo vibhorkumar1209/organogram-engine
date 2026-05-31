@@ -1852,11 +1852,20 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
                 seen.add(u); start_urls.append(u)
     start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
 
-    # ── Apify submit — direct call with full error capture ────────────────────
+    # ── Apify: submit once, poll inline, fetch dataset ───────────────────────
     t1 = time.monotonic()
-    submit_debug: dict = {}
+    _APIFY_B  = "https://api.apify.com/v2"
+    _ACTOR    = "apify~website-content-crawler"
+    _POLL_INT = 8          # seconds between status polls
+    _TIMEOUT  = 180        # max seconds to wait for run
+    _SIGNAL   = {"director","chairman","chief","ceo","president","officer",
+                 "executive","board","governance","management","leadership","trustee"}
+
+    apify_diag: dict = {"phase": "submit"}
+    run_id = dataset_id = None
+    raw_items: list[dict] = []
+
     try:
-        _actor = "apify~website-content-crawler"
         _input = {
             "startUrls":   [{"url": u} for u in start_urls[:6]],
             "crawlerType": "playwright:chrome",
@@ -1866,28 +1875,69 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
             "htmlTransformer": "readableText",
         }
         _sr = httpx.post(
-            f"https://api.apify.com/v2/acts/{_actor}/runs",
+            f"{_APIFY_B}/acts/{_ACTOR}/runs",
             params={"token": apify_key},
             json=_input,
-            timeout=15,
+            timeout=20,
         )
-        submit_debug["status_code"] = _sr.status_code
-        submit_debug["response_preview"] = _sr.text[:400]
-        if _sr.is_success:
+        apify_diag["submit_status"] = _sr.status_code
+        apify_diag["submit_preview"] = _sr.text[:500]
+        if not _sr.is_success:
+            apify_diag["phase"] = "submit_failed"
+        else:
             _rd = _sr.json()["data"]
-            submit_debug["run_id"] = _rd["id"]
-            submit_debug["dataset_id"] = _rd["defaultDatasetId"]
-            submit_debug["run_status"] = _rd.get("status", "")
-    except Exception as _e:
-        submit_debug["error"] = str(_e)
+            run_id     = _rd["id"]
+            dataset_id = _rd["defaultDatasetId"]
+            apify_diag["run_id"]     = run_id
+            apify_diag["dataset_id"] = dataset_id
+            apify_diag["phase"]      = "polling"
 
-    raw_items = _apify_run(start_urls, apify_key, timeout=120)
-    apify_s   = round(time.monotonic() - t1, 2)
+            # ── Poll until SUCCEEDED / failed / timeout ───────────────────────
+            _deadline = time.monotonic() + _TIMEOUT
+            _poll_log: list[dict] = []
+            while time.monotonic() < _deadline:
+                time.sleep(_POLL_INT)
+                _ps = httpx.get(
+                    f"{_APIFY_B}/acts/{_ACTOR}/runs/{run_id}",
+                    params={"token": apify_key}, timeout=15,
+                )
+                _status = _ps.json()["data"]["status"] if _ps.is_success else "POLL_ERR"
+                _poll_log.append({"elapsed_s": round(time.monotonic()-t1,1), "status": _status})
+                if _status == "SUCCEEDED":
+                    apify_diag["phase"] = "fetching"
+                    break
+                if _status in ("FAILED","ABORTED","TIMED-OUT","POLL_ERR"):
+                    apify_diag["phase"] = f"run_{_status.lower()}"
+                    apify_diag["poll_log"] = _poll_log
+                    break
+            else:
+                apify_diag["phase"] = "timeout"
+
+            apify_diag["poll_log"] = _poll_log
+
+            # ── Fetch dataset items ───────────────────────────────────────────
+            if apify_diag["phase"] == "fetching":
+                _di = httpx.get(
+                    f"{_APIFY_B}/datasets/{dataset_id}/items",
+                    params={"token": apify_key, "format": "json",
+                            "limit": 10, "fields": "url,markdown,text"},
+                    timeout=30,
+                )
+                apify_diag["dataset_status"] = _di.status_code
+                if _di.is_success:
+                    raw_items = _di.json()
+                    apify_diag["phase"] = "done"
+                else:
+                    apify_diag["dataset_preview"] = _di.text[:300]
+                    apify_diag["phase"] = "fetch_failed"
+
+    except Exception as _e:
+        apify_diag["error"] = str(_e)
+
+    apify_s = round(time.monotonic() - t1, 2)
 
     # Per-item summary
     item_summary = []
-    _SIGNAL = {"director","chairman","chief","ceo","president","officer",
-               "executive","board","governance","management","leadership","trustee"}
     for item in raw_items:
         text = (item.get("markdown") or item.get("text") or "").strip()
         has_signal = any(kw in text.lower() for kw in _SIGNAL)
@@ -1910,11 +1960,11 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
             "elapsed_s":              discovery_s,
         },
         "apify": {
-            "raw_items_returned": len(raw_items),
+            "raw_items_returned":         len(raw_items),
             "items_with_leadership_signal": len(kept),
-            "elapsed_s": apify_s,
-            "submit_debug": submit_debug,
-            "items": item_summary,
+            "elapsed_s":                  apify_s,
+            "diag":                       apify_diag,
+            "items":                      item_summary,
         },
     }
 
