@@ -970,6 +970,7 @@ def _ddg_leadership_snippets(company_name: str) -> str:
 
 _APIFY_BASE          = "https://api.apify.com/v2"
 _APIFY_ACTOR         = "apify~website-content-crawler"
+_APIFY_RAG_ACTOR     = "apify~rag-web-browser"      # Google search + content extraction
 _APIFY_POLL_INTERVAL = 8     # seconds between status polls
 _APIFY_TIMEOUT       = 180   # seconds to wait for actor run
 _APIFY_MAX_PAGES     = 6     # max pages per run (BOD + exec + sub-pages)
@@ -1069,6 +1070,90 @@ def _apify_run(start_urls: list[str], api_token: str,
         return []
 
 
+def _apify_rag_search(query: str, api_token: str,
+                      max_results: int = 3) -> list[dict]:
+    """
+    Use Apify rag-web-browser to run a Google search and return
+    rendered page content for the top results.
+
+    Each result item has: url, markdown (or text), searchResult.title.
+    Returns [] on failure or timeout.
+    """
+    try:
+        import httpx
+        import time
+    except ImportError:
+        return []
+
+    if not query or not api_token:
+        return []
+
+    actor_input = {
+        "query":      query,
+        "maxResults": max_results,
+    }
+    params = {"token": api_token}
+
+    # ── Submit ────────────────────────────────────────────────────────────────
+    try:
+        resp = httpx.post(
+            f"{_APIFY_BASE}/acts/{_APIFY_RAG_ACTOR}/runs",
+            params=params, json=actor_input, timeout=20,
+        )
+        if not resp.is_success:
+            logger.warning("Apify rag-web-browser start failed %d: %s",
+                           resp.status_code, resp.text[:200])
+            return []
+        run_data   = resp.json()["data"]
+        run_id     = run_data["id"]
+        dataset_id = run_data["defaultDatasetId"]
+        logger.info("Apify rag run started: %s (query: %s)", run_id, query[:80])
+    except Exception as exc:
+        logger.warning("Apify rag submit error: %s", exc)
+        return []
+
+    # ── Poll ──────────────────────────────────────────────────────────────────
+    deadline = time.monotonic() + _APIFY_TIMEOUT
+    while time.monotonic() < deadline:
+        time.sleep(_APIFY_POLL_INTERVAL)
+        try:
+            st = httpx.get(
+                f"{_APIFY_BASE}/acts/{_APIFY_RAG_ACTOR}/runs/{run_id}",
+                params=params, timeout=15,
+            )
+            if not st.is_success:
+                continue
+            status = st.json()["data"]["status"]
+            if status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                logger.warning("Apify rag run %s: %s", run_id, status)
+                return []
+            if status == "SUCCEEDED":
+                break
+        except Exception as exc:
+            logger.debug("Apify rag poll error: %s", exc)
+    else:
+        logger.warning("Apify rag run %s timed out", run_id)
+        return []
+
+    # ── Fetch dataset ─────────────────────────────────────────────────────────
+    try:
+        res = httpx.get(
+            f"{_APIFY_BASE}/datasets/{dataset_id}/items",
+            params={**params, "format": "json", "limit": max_results,
+                    "fields": "url,markdown,text,searchResult"},
+            timeout=20,
+        )
+        if not res.is_success:
+            logger.warning("Apify rag dataset fetch failed %d", res.status_code)
+            return []
+        items = res.json()
+        logger.info("Apify rag: %d items returned for query: %s", len(items), query[:60])
+        return items if isinstance(items, list) else []
+    except Exception as exc:
+        logger.warning("Apify rag dataset error: %s", exc)
+        return []
+
+
 # Curated short list of specific leadership paths for Apify.
 # Kept short because Apify charges per page render.
 # Ordered by hit-rate: generic first, then firm-specific.
@@ -1113,26 +1198,64 @@ def _apify_fetch_leadership(company_name: str, domain: str,
     """
     Primary JS-capable scraper for BOD/EM extraction.
 
-    URL strategy (prioritised to avoid wasting Apify page credits):
-      1. Nav-discovered URLs whose path contains strong leadership keywords
-         (e.g. apple.com/leadership/ found in nav, not airpods pages)
-      2. Curated _APIFY_LEADERSHIP_PATHS on www. and bare domain
-         (covers Wells Fargo /about/corporate/governance, Morgan Stanley, etc.)
+    Strategy (two-phase, each phase returns on success):
 
-    Sitemap is intentionally excluded here — Apple's sitemap contains
-    hundreds of product pages that match weak keywords and exhaust the
-    per-run page budget before the real leadership page is reached.
+    Phase 1 — Google search via rag-web-browser:
+      Query: '"Company" board of directors executive leadership site:domain'
+      Google already knows the exact URL for every company's leadership page,
+      so this works for any locale/URL structure (e.g. Medtronic /en-us/,
+      international sites, etc.) without any URL-pattern guessing.
 
-    Submits deduplicated URLs to Apify's website-content-crawler
-    (Playwright/Chrome) and returns concatenated markdown from pages
-    that contain leadership signals.
+    Phase 2 — Fallback: nav-discovery + curated URL crawl:
+      Used only when Google search returns nothing useful (e.g. site has
+      no indexed leadership page, or rag-web-browser actor is unavailable).
+      Nav-discovered links are filtered to strong leadership path keywords.
+      Curated _APIFY_LEADERSHIP_PATHS cover known patterns (Wells Fargo,
+      Morgan Stanley, etc.).
     """
     if not domain or not api_token:
         return ""
 
+    _LEADERSHIP_SIGNAL = {
+        "director", "chairman", "chief", "ceo", "president",
+        "officer", "executive", "board", "governance", "management",
+        "leadership", "trustee",
+    }
+
+    def _filter_items(items: list[dict]) -> str:
+        """Extract and concatenate leadership-signal pages from Apify results."""
+        collected: list[str] = []
+        for item in items:
+            # rag-web-browser puts URL in item.url or item.searchResult.url
+            url  = (item.get("url")
+                    or (item.get("searchResult") or {}).get("url", ""))
+            text = (item.get("markdown") or item.get("text") or "").strip()
+            if not text or len(text) < 200:
+                continue
+            if not any(kw in text.lower() for kw in _LEADERSHIP_SIGNAL):
+                logger.debug("Apify: no leadership signal in %s (%d chars)", url, len(text))
+                continue
+            collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
+            logger.info("Apify: kept %s (%d chars)", url, len(text))
+        return "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
+
+    # ── Phase 1: Google search → rag-web-browser ──────────────────────────────
+    query = (
+        f'"{company_name}" board of directors executive leadership '
+        f'site:{domain}'
+    )
+    logger.info("Apify Phase 1 — rag-web-browser search for '%s'", company_name)
+    rag_items = _apify_rag_search(query, api_token, max_results=3)
+    result = _filter_items(rag_items)
+    if result:
+        logger.info("Apify Phase 1 succeeded for '%s': %d chars", company_name, len(result))
+        return result
+
+    logger.info("Apify Phase 1 empty for '%s', falling back to URL crawl", company_name)
+
+    # ── Phase 2: nav-discovery + curated URL patterns ─────────────────────────
     import time
     deadline = time.monotonic() + 10
-
     headers = {
         "User-Agent": _SEARCH_UA,
         "Accept": "text/html,application/xhtml+xml",
@@ -1147,56 +1270,22 @@ def _apify_fetch_leadership(company_name: str, domain: str,
             seen_urls.add(url)
             start_urls.append(url)
 
-    # ── Priority 1: nav-discovered URLs with strong leadership path signal ────
-    # Only keep nav links whose URL path itself contains specific leadership
-    # terms — avoids "about/careers", "about/inclusion", product pages, etc.
     nav_urls = _discover_via_nav(domain, headers, deadline)
     for url in nav_urls:
-        path_lower = url.lower()
-        if any(kw in path_lower for kw in _STRONG_LEADERSHIP_PATH_KW):
+        if any(kw in url.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
             _add(url)
 
-    # ── Priority 2: curated specific paths (www-only — bare always redirects) ──
-    # Using only www. gives us 6 unique paths within the 6-page Apify budget
-    # instead of wasting half the budget on bare-domain duplicates.
     for path in _APIFY_LEADERSHIP_PATHS:
         _add(f"https://www.{domain}{path}")
 
-    # Cap total — Apify charges per render, keep budget lean
     start_urls = start_urls[:_APIFY_MAX_PAGES]
+    logger.info("Apify Phase 2 for '%s': %d URLs", company_name, len(start_urls))
 
+    crawl_items = _apify_run(start_urls, api_token)
+    result = _filter_items(crawl_items)
     logger.info(
-        "Apify fetch for '%s': submitting %d URLs to actor",
-        company_name, len(start_urls),
-    )
-
-    # ── Run Apify actor ───────────────────────────────────────────────────────
-    items = _apify_run(start_urls, api_token)
-    if not items:
-        return ""
-
-    # ── Filter to pages with real leadership content ──────────────────────────
-    _LEADERSHIP_SIGNAL = {
-        "director", "chairman", "chief", "ceo", "president",
-        "officer", "executive", "board", "governance", "management",
-        "leadership", "trustee",
-    }
-    collected: list[str] = []
-    for item in items:
-        url  = item.get("url", "")
-        text = (item.get("markdown") or item.get("text") or "").strip()
-        if not text or len(text) < 200:
-            continue
-        if not any(kw in text.lower() for kw in _LEADERSHIP_SIGNAL):
-            logger.debug("Apify: no leadership signal, skipping %s (%d chars)", url, len(text))
-            continue
-        collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
-        logger.info("Apify: kept page %s (%d chars)", url, len(text))
-
-    result = "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
-    logger.info(
-        "Apify leadership for '%s': %d pages kept, %d chars total",
-        company_name, len(collected), len(result),
+        "Apify Phase 2 for '%s': %d chars total",
+        company_name, len(result),
     )
     return result
 
