@@ -1073,12 +1073,19 @@ def _apify_run(start_urls: list[str], api_token: str,
 # Kept short because Apify charges per page render.
 # Ordered by hit-rate: generic first, then firm-specific.
 _APIFY_LEADERSHIP_PATHS = [
+    # ── Slot 1-2: most common generic paths ──────────────────────────────────
     "/leadership",
     "/about/leadership",
+    # ── Slot 3: locale-prefixed (Medtronic, Honeywell, 3M, etc.) ─────────────
+    "/en-us/about/leadership.html",         # Medtronic confirmed
+    # ── Slot 4: governance/BOD variants ──────────────────────────────────────
     "/about/corporate/governance",          # Wells Fargo
     "/about-us/governance/board-of-directors",  # Morgan Stanley
-    "/board-of-directors",
     "/governance/board-of-directors",
+    # ── Slot 7+: additional paths (reached when nav fails) ───────────────────
+    "/en-us/about/board-of-directors.html", # Medtronic BOD
+    "/en-us/company/leadership",
+    "/board-of-directors",
     "/investors/governance/board-of-directors",
     "/investor-relations/corporate-governance",
     "/corporate-governance/board-of-directors",
@@ -1149,13 +1156,14 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         if any(kw in path_lower for kw in _STRONG_LEADERSHIP_PATH_KW):
             _add(url)
 
-    # ── Priority 2: curated specific paths ───────────────────────────────────
+    # ── Priority 2: curated specific paths (www-only — bare always redirects) ──
+    # Using only www. gives us 6 unique paths within the 6-page Apify budget
+    # instead of wasting half the budget on bare-domain duplicates.
     for path in _APIFY_LEADERSHIP_PATHS:
         _add(f"https://www.{domain}{path}")
-        _add(f"https://{domain}{path}")
 
     # Cap total — Apify charges per render, keep budget lean
-    start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
+    start_urls = start_urls[:_APIFY_MAX_PAGES]
 
     logger.info(
         "Apify fetch for '%s': submitting %d URLs to actor",

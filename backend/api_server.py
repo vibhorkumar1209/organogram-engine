@@ -1844,13 +1844,12 @@ async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com
         if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
             if u not in seen:
                 seen.add(u); start_urls.append(u)
-    # Priority 2: curated specific paths
+    # Priority 2: curated specific paths (www-only to maximise unique paths)
     for path in _APIFY_LEADERSHIP_PATHS:
-        for base in [f"https://www.{domain}", f"https://{domain}"]:
-            u = f"{base}{path}"
-            if u not in seen:
-                seen.add(u); start_urls.append(u)
-    start_urls = start_urls[:_APIFY_MAX_PAGES * 2]
+        u = f"https://www.{domain}{path}"
+        if u not in seen:
+            seen.add(u); start_urls.append(u)
+    start_urls = start_urls[:_APIFY_MAX_PAGES]
 
     # ── Apify: submit once, poll inline, fetch dataset ───────────────────────
     t1 = time.monotonic()
