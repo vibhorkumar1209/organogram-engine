@@ -1706,9 +1706,10 @@ async def ping_llm():
     """Fast diagnostic: env vars + minimal Claude API call + Apify token check. Returns in <15s."""
     import os, time
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    parallel_key  = os.environ.get("PARALLEL_API_KEY", "")
-    jina_key      = os.environ.get("JINA_API_KEY", "")
-    apify_key     = os.environ.get("APIFY_API_TOKEN", "")
+    parallel_key    = os.environ.get("PARALLEL_API_KEY", "")
+    jina_key        = os.environ.get("JINA_API_KEY", "")
+    apify_key       = os.environ.get("APIFY_API_TOKEN", "")
+    scraper_api_url = os.environ.get("SCRAPER_API_URL", "")
 
     claude_result = {"ok": False, "error": "", "model": "", "response": ""}
     if anthropic_key:
@@ -1776,6 +1777,7 @@ async def ping_llm():
             "PARALLEL_API_KEY":  bool(parallel_key),
             "JINA_API_KEY":      bool(jina_key),
             "APIFY_API_TOKEN":   bool(apify_key),
+            "SCRAPER_API_URL":   bool(scraper_api_url),
         },
         "claude":   claude_result,
         "apify":    apify_result,

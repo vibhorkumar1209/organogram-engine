@@ -1291,6 +1291,103 @@ def _apify_fetch_leadership(company_name: str, domain: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SCRAPER-API  (github.com/vibhorkumar1209/scraper-api — cheerio/axios)
+# Fallback between Apify and Parallel.AI.  Works on static/SSR sites that
+# Apify couldn't reach.  Does NOT render JavaScript.
+# Set env vars: SCRAPER_API_URL, SCRAPER_API_KEY (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _scraper_api_fetch(domain: str, base_url: str,
+                       api_key: str = "") -> str:
+    """
+    Call the scraper-api /scrape/web endpoint for candidate leadership URLs.
+
+    Tries nav-discovered + curated paths via the external cheerio scraper.
+    Returns concatenated bodyText from pages that have a leadership signal.
+    Returns "" if base_url is empty or all pages fail.
+    """
+    try:
+        import httpx
+        import time
+    except ImportError:
+        return ""
+
+    if not base_url or not domain:
+        return ""
+
+    base_url = base_url.rstrip("/")
+    hdrs: dict = {"Accept": "application/json"}
+    if api_key:
+        hdrs["x-api-key"] = api_key
+
+    _LEADERSHIP_SIGNAL = {
+        "director", "chairman", "chief", "ceo", "president",
+        "officer", "executive", "board", "governance", "management",
+        "leadership", "trustee",
+    }
+
+    # Build candidate URLs (same curated list as Apify fallback, www-only)
+    seen: set[str] = set()
+    candidate_urls: list[str] = []
+    for path in _APIFY_LEADERSHIP_PATHS:
+        u = f"https://www.{domain}{path}"
+        if u not in seen:
+            seen.add(u)
+            candidate_urls.append(u)
+
+    # Also try nav discovery (fast raw HTTP — scraper-api will do it too,
+    # but this lets us pick the best URLs before calling the API)
+    headers = {
+        "User-Agent": _SEARCH_UA,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    nav_urls = _discover_via_nav(domain, headers, time.monotonic() + 8)
+    for u in nav_urls:
+        if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
+            if u not in seen:
+                seen.add(u)
+                candidate_urls.insert(0, u)   # nav URLs first
+
+    candidate_urls = candidate_urls[:8]        # cap at 8 API calls
+
+    collected: list[str] = []
+    for url in candidate_urls:
+        try:
+            r = httpx.get(
+                f"{base_url}/scrape/web",
+                params={"url": url},
+                headers=hdrs,
+                timeout=20,
+            )
+            if not r.is_success:
+                logger.debug("scraper-api %s → HTTP %d", url, r.status_code)
+                continue
+            data = r.json().get("data", {})
+            body = (data.get("bodyText") or "").strip()
+            if not body or len(body) < 200:
+                continue
+            if not any(kw in body.lower() for kw in _LEADERSHIP_SIGNAL):
+                logger.debug("scraper-api: no signal in %s (%d chars)", url, len(body))
+                continue
+            # Enrich with headings for better LLM context
+            headings = data.get("headings", [])
+            heading_block = "\n".join(headings[:20]) if headings else ""
+            text = f"[Page: {url}]\n{heading_block}\n{body[:_MAX_PAGE_CHARS]}"
+            collected.append(text)
+            logger.info("scraper-api: kept %s (%d chars)", url, len(body))
+            if len(collected) >= 3:     # enough pages → stop early
+                break
+        except Exception as exc:
+            logger.debug("scraper-api error for %s: %s", url, exc)
+
+    result = "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
+    logger.info("scraper-api: %d pages, %d chars total for %s",
+                len(collected), len(result), domain)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PARALLEL.AI  (api.parallel.ai — web research agent, task-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1802,9 +1899,11 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         logger.debug("LLM leadership skipped: ANTHROPIC_API_KEY not set")
         return {"board": [], "executives": []}
 
-    apify_key    = os.environ.get("APIFY_API_TOKEN", "")
-    parallel_key = os.environ.get("PARALLEL_API_KEY", "")
-    jina_key     = os.environ.get("JINA_API_KEY", "")
+    apify_key       = os.environ.get("APIFY_API_TOKEN", "")
+    parallel_key    = os.environ.get("PARALLEL_API_KEY", "")
+    jina_key        = os.environ.get("JINA_API_KEY", "")
+    scraper_api_url = os.environ.get("SCRAPER_API_URL", "")
+    scraper_api_key = os.environ.get("SCRAPER_API_KEY", "")
 
     cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
     if cache_key in _LEADERSHIP_CACHE:
@@ -1834,6 +1933,19 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         if apify_text:
             logger.info("Step 1 Apify for '%s': %d chars", company_name, len(apify_text))
             web_text = (web_text + "\n\n" + apify_text) if web_text else apify_text
+
+    # ── Step 1.5: scraper-api — cheerio/axios fallback ───────────────────────
+    # github.com/vibhorkumar1209/scraper-api deployed as separate Render service.
+    # Faster and cheaper than Parallel.AI for SSR/static sites that Apify missed.
+    # No JS rendering — pure HTTP + cheerio.
+    if scraper_api_url and (not web_text or len(web_text) < 2000):
+        logger.info(
+            "Step 1.5 scraper-api for '%s' (have %d chars)", company_name, len(web_text)
+        )
+        scraper_text = _scraper_api_fetch(domain, scraper_api_url, scraper_api_key)
+        if scraper_text:
+            logger.info("Step 1.5 scraper-api for '%s': %d chars", company_name, len(scraper_text))
+            web_text = (web_text + "\n\n" + scraper_text) if web_text else scraper_text
 
     # ── Step 2: Parallel.AI — deep research fallback ─────────────────────────
     # Used when Apify is unavailable (no APIFY_API_TOKEN) or returned nothing.
