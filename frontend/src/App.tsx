@@ -178,10 +178,12 @@ export default function App() {
     bumpFit()
     // Reload backend data so /executives calls succeed after restore.
     // Demo entries always reload the demo dataset.
-    // Upload entries: silently attempt reload — backend may still have data in memory.
-    if (entry.source === 'demo') {
-      fetch(`${API}/load-demo`, { method: 'POST' }).catch(() => {/* cold-start wake */})
-    }
+    // Upload entries: wake the backend (ping) — can't restore CSV without the file.
+    fetch(entry.source === 'demo'
+      ? `${API}/load-demo`
+      : `${API}/ping`,
+      entry.source === 'demo' ? { method: 'POST' } : {}
+    ).catch(() => {/* wake-only, ignore errors */})
   }, [])
 
   const deleteSnapshot = useCallback((id: string) => {
@@ -319,21 +321,40 @@ export default function App() {
         : undefined
 
       if (cached !== undefined) {
-        // Serve from cache instantly
+        // Serve from cache instantly — no backend call needed
         setPanelExecs(cached)
       } else {
         setPanelExecs(null)
-        fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}`)
-          .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
-          .then(data => {
-            const people = (data.executives as Record<string, any>[])
-              .filter(p => p.node_id)
-              .map(p => toPersonNode(p, node.color))
-            setPanelExecs(people)
-            // Persist to exec cache so future history restores work offline
-            if (entryId) updateExecCache(entryId, node.node_id, people)
-          })
-          .catch(() => setPanelExecs([]))
+        const deptId    = node.node_id
+        const nodeColor = node.color
+
+        const fetchAndSet = (retryAfterReload = false): Promise<void> =>
+          fetch(`${API}/executives?dept_id=${encodeURIComponent(deptId)}`)
+            .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
+            .then(async (data) => {
+              // Backend restarted and lost in-memory data (Render free tier)
+              if (data.loaded === false && !retryAfterReload) {
+                const src = entryId
+                  ? historyRef.current.find(e => e.id === entryId)?.source
+                  : undefined
+                if (src === 'demo') {
+                  // Auto-reload demo and retry once
+                  await fetch(`${API}/load-demo`, { method: 'POST' })
+                  return fetchAndSet(true)
+                }
+                // Upload entry — backend can't restore without the file
+                setPanelExecs([])
+                return
+              }
+              const people = (data.executives as Record<string, any>[])
+                .filter((p: Record<string, any>) => p.node_id)
+                .map((p: Record<string, any>) => toPersonNode(p, nodeColor))
+              setPanelExecs(people)
+              if (entryId) updateExecCache(entryId, deptId, people)
+            })
+            .catch(() => setPanelExecs([]))
+
+        fetchAndSet()
       }
     }
   }, [updateExecCache])

@@ -865,9 +865,12 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose, apiB
             color: '#627184', fontSize: 12, lineHeight: 1.6,
           }}>
             <div style={{ fontSize: 20, marginBottom: 8, opacity: 0.3 }}>⊘</div>
-            <div>No people found for this department.</div>
-            <div style={{ fontSize: 10, color: '#bad4dc', marginTop: 6 }}>
-              If you restored from history, re-upload your CSV<br/>to reload executives from the server.
+            <div>No executives found for this department.</div>
+            <div style={{ fontSize: 10, color: '#bad4dc', marginTop: 6, lineHeight: 1.6 }}>
+              This can happen if:
+              <br />· The department has no people in the uploaded data
+              <br />· The server restarted (Render free tier) — re-upload your CSV
+              <br />· Board / EM data is still being fetched in the background
             </div>
           </div>
         )}
