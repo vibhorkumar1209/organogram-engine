@@ -194,7 +194,7 @@ export default function App() {
     })
   }, [])
 
-  // Write fetched executives into the active history entry's exec cache
+  // Write fetched executives into a specific history entry's exec cache
   const updateExecCache = useCallback((entryId: string, deptId: string, people: OrgNode[]) => {
     setHistory(prev => {
       const next = prev.map(e =>
@@ -206,6 +206,37 @@ export default function App() {
       return next
     })
   }, [])
+
+  // Eagerly pre-fetch executives for every dept in the tree so the history
+  // entry is self-contained — restoring from history shows the full org chart
+  // without any backend calls.
+  const prefetchAllExecutives = useCallback(async (tree: OrgNode, entryId: string) => {
+    const deptNodes = flattenTree(tree).filter(n =>
+      n.node_type === 'dept_primary' ||
+      n.node_type === 'dept_secondary' ||
+      n.node_type === 'dept_tertiary'
+    )
+    if (!deptNodes.length) return
+
+    // Fetch 4 departments concurrently to balance speed vs backend load
+    const BATCH = 4
+    for (let i = 0; i < deptNodes.length; i += BATCH) {
+      await Promise.all(
+        deptNodes.slice(i, i + BATCH).map(async (node) => {
+          try {
+            const r = await fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}`)
+            if (!r.ok) return
+            const data = await r.json()
+            if (data.loaded === false) return
+            const people: OrgNode[] = (data.executives as Record<string, any>[])
+              .filter((p: Record<string, any>) => p.node_id)
+              .map((p: Record<string, any>) => toPersonNode(p, node.color))
+            updateExecCache(entryId, node.node_id, people)
+          } catch { /* silent — background pre-fetch */ }
+        })
+      )
+    }
+  }, [updateExecCache])
 
   const handleReset = async () => {
     try { await fetch(`${API}/reset`, { method: 'POST' }) } catch {}
@@ -271,7 +302,12 @@ export default function App() {
     bumpFit()          // force fit-to-screen on next render
     setStatus('ready')
     // Auto-save to history whenever a chart successfully loads
-    if (currentStats) saveSnapshot(filtered, currentStats, currentIndustry ?? '', src)
+    if (currentStats) {
+      saveSnapshot(filtered, currentStats, currentIndustry ?? '', src)
+      // Fire-and-forget: eagerly cache all executives so history is self-contained
+      const snapId = activeEntryIdRef.current
+      if (snapId) prefetchAllExecutives(filtered, snapId)
+    }
   }
 
   // ── Handle node click: expand / collapse / open panel ─────────────
@@ -768,11 +804,22 @@ export default function App() {
                       {relativeTime(entry.timestamp)}
                       {entry.industry ? ` · ${entry.industry}` : ''}
                     </div>
-                    {Object.keys(entry.execCache ?? {}).length > 0 && (
-                      <div style={{ fontSize: 8, color: 'rgba(52,145,232,0.7)', marginTop: 1 }}>
-                        ✦ {Object.values(entry.execCache).reduce((s, arr) => s + arr.length, 0)} execs cached
-                      </div>
-                    )}
+                    {(() => {
+                      const cache = entry.execCache ?? {}
+                      const deptCount  = Object.keys(cache).length
+                      const execCount  = Object.values(cache).reduce((s, arr) => s + arr.length, 0)
+                      if (!deptCount) return null
+                      return (
+                        <div style={{ fontSize: 8, color: 'rgba(52,145,232,0.75)', marginTop: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{
+                            background: 'rgba(52,145,232,0.15)', borderRadius: 3,
+                            padding: '1px 4px', border: '1px solid rgba(52,145,232,0.25)',
+                          }}>
+                            ✦ {execCount} execs · {deptCount} depts
+                          </span>
+                        </div>
+                      )
+                    })()}
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); deleteSnapshot(entry.id) }}
