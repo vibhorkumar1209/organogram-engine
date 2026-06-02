@@ -1,12 +1,15 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import type { OrgNode } from '../types'
+import { FeedbackModal } from './FeedbackModal'
 
 type GroupMode = 'region' | 'country'
 
 interface Props {
-  deptNode:   OrgNode | null
-  executives: OrgNode[] | null   // null = loading; flat sorted-by-layer list
-  onClose:    () => void
+  deptNode:    OrgNode | null
+  executives:  OrgNode[] | null   // null = loading; flat sorted-by-layer list
+  onClose:     () => void
+  apiBase?:    string
+  companyName?: string
 }
 
 // Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
@@ -247,14 +250,15 @@ const INFERRED_REPORT_NOTE =
   'This person has been connected to the nearest available senior executive.'
 
 const PersonRow: React.FC<{
-  node:       ExecTreeNode
-  depth:      number
-  isLast:     boolean
+  node:        ExecTreeNode
+  depth:       number
+  isLast:      boolean
   parentLines: boolean[]   // which ancestor levels still have more siblings
-  color:      string
-  onToggle:   (id: string) => void
-  collapsed:  Set<string>
-}> = ({ node, depth, isLast, parentLines, color, onToggle, collapsed }) => {
+  color:       string
+  onToggle:    (id: string) => void
+  collapsed:   Set<string>
+  onReport?:   (person: OrgNode) => void
+}> = ({ node, depth, isLast, parentLines, color, onToggle, collapsed, onReport }) => {
   const p      = node.person
   const pColor = nodeColor(p, color)
   const hasReports = node.reports.length > 0
@@ -437,6 +441,26 @@ const PersonRow: React.FC<{
             {node.reports.length}↓
           </div>
         )}
+
+        {/* Flag button */}
+        {onReport && (
+          <button
+            onClick={e => { e.stopPropagation(); onReport(p) }}
+            title="Report a change for this person"
+            style={{
+              flexShrink: 0, marginLeft: 4,
+              background: 'none', border: 'none',
+              color: '#bad4dc', fontSize: 11,
+              cursor: 'pointer', padding: '0 2px',
+              lineHeight: 1, opacity: 0.6,
+              transition: 'opacity 0.12s, color 0.12s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; (e.currentTarget as HTMLButtonElement).style.color = '#E63946' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.6'; (e.currentTarget as HTMLButtonElement).style.color = '#bad4dc' }}
+          >
+            ⚑
+          </button>
+        )}
       </div>
 
       {/* ── Reportees (recursive) ─────────────────────────────── */}
@@ -450,6 +474,7 @@ const PersonRow: React.FC<{
           color={color}
           onToggle={onToggle}
           collapsed={collapsed}
+          onReport={onReport}
         />
       ))}
     </>
@@ -494,9 +519,11 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────
-export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) => {
+export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose, apiBase = '', companyName = '' }) => {
   const isOpen = deptNode !== null
   const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] ?? deptNode.color ?? '#3491E8') : '#3491E8'
+
+  const [reportPerson, setReportPerson] = useState<OrgNode | null>(null)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleCollapse = (id: string) =>
@@ -845,6 +872,22 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
           </div>
         )}
 
+        {/* Empty state hint to report new exec */}
+        {executives !== null && executives.length === 0 && apiBase && (
+          <div style={{ padding: '0 18px 16px', textAlign: 'center' }}>
+            <button
+              onClick={() => setReportPerson({ node_id: '__new__', label: '', type: 'person' } as unknown as OrgNode)}
+              style={{
+                background: 'rgba(52,145,232,0.08)', border: '1px solid rgba(52,145,232,0.25)',
+                borderRadius: 6, padding: '6px 16px', color: '#3491E8',
+                fontSize: 10, cursor: 'pointer', fontWeight: 600,
+              }}
+            >
+              + Report a missing executive
+            </button>
+          </div>
+        )}
+
         {/* ── Geographic sub-cards ─────────────────────────────── */}
         {regionGroups.map(([region, regionExecs], gi) => {
           // Primary region uses the full hierarchy builder (Chairman / CEO apex).
@@ -903,12 +946,45 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose }) =>
                   color={color}
                   onToggle={toggleCollapse}
                   collapsed={collapsed}
+                  onReport={apiBase ? setReportPerson : undefined}
                 />
               ))}
             </div>
           )
         })}
       </div>
+
+      {/* ── Footer: report new exec ───────────────────────────── */}
+      {apiBase && executives !== null && executives.length > 0 && (
+        <div style={{
+          padding: '8px 14px',
+          borderTop: '1px solid #eef2f5',
+          background: '#f5f9fb',
+          display: 'flex', justifyContent: 'flex-end',
+        }}>
+          <button
+            onClick={() => setReportPerson({ node_id: '__new__', label: '', type: 'person' } as unknown as OrgNode)}
+            style={{
+              background: 'none', border: '1px solid rgba(52,145,232,0.25)',
+              borderRadius: 5, padding: '4px 12px',
+              color: '#3491E8', fontSize: 9, cursor: 'pointer', fontWeight: 600,
+            }}
+          >
+            + Report missing executive
+          </button>
+        </div>
+      )}
+
+      {/* ── Feedback modal ────────────────────────────────────── */}
+      {reportPerson && apiBase && (
+        <FeedbackModal
+          person={reportPerson.node_id === '__new__' ? undefined : reportPerson}
+          deptName={deptNode?.label ?? ''}
+          companyName={companyName}
+          apiBase={apiBase}
+          onClose={() => setReportPerson(null)}
+        />
+      )}
     </div>
   )
 }

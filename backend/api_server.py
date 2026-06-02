@@ -7,7 +7,10 @@ import io
 import json
 import re
 import tempfile
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 # ── Load .env file for local development ─────────────────────────────────────
 # On Render/production, env vars are injected by the platform.
@@ -2004,6 +2007,44 @@ async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfar
         },
         "result": result,
     }
+
+
+# ─────────────────────────────────────────────
+# CHANGE REPORTS  (user-submitted corrections)
+# ─────────────────────────────────────────────
+
+# In-memory store (survives the process lifetime; lost on restart).
+# For persistence, swap with a DB write or webhook call.
+_CHANGE_REPORTS: list[dict] = []
+
+
+class ChangeReportPayload(BaseModel):
+    type:        str             # no_longer_here | wrong_dept | wrong_hierarchy | new_executive | other
+    companyName: str
+    personName:  Optional[str] = None
+    personTitle: Optional[str] = None
+    currentDept: Optional[str] = None
+    linkedInUrl: Optional[str] = None
+    notes:       Optional[str] = None
+    timestamp:   Optional[int] = None
+
+
+@app.post("/report-change")
+async def report_change(payload: ChangeReportPayload):
+    """Accept a user-reported correction to the org chart."""
+    entry = payload.dict()
+    entry["id"]          = str(uuid.uuid4())
+    entry["received_at"] = datetime.now(timezone.utc).isoformat()
+    _CHANGE_REPORTS.append(entry)
+    import logging as _lg
+    _lg.getLogger(__name__).info("Change report received: %s", json.dumps(entry))
+    return {"ok": True, "id": entry["id"]}
+
+
+@app.get("/change-reports")
+async def get_change_reports():
+    """Return all received change reports (admin / review endpoint)."""
+    return {"count": len(_CHANGE_REPORTS), "reports": _CHANGE_REPORTS}
 
 
 # ─────────────────────────────────────────────

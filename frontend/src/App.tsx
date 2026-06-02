@@ -18,6 +18,7 @@ interface HistoryEntry {
   stats:       Stats
   industry:    string
   source:      'demo' | 'upload'   // so restore knows whether to reload backend
+  execCache:   Record<string, OrgNode[]>   // dept_id → executives (for offline restore)
 }
 
 function loadHistory(): HistoryEntry[] {
@@ -138,6 +139,11 @@ export default function App() {
   // ── History state ──────────────────────────────────────────────────
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
 
+  // Refs for stale-closure-safe access inside handleNodeClick ([] deps)
+  const activeEntryIdRef = useRef<string | null>(null)
+  const historyRef       = useRef<HistoryEntry[]>(history)
+  useEffect(() => { historyRef.current = history }, [history])
+
   const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string, src: 'demo' | 'upload' = 'upload') => {
     const entry: HistoryEntry = {
       id:          `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -147,7 +153,9 @@ export default function App() {
       stats:       s,
       industry:    ind,
       source:      src,
+      execCache:   {},
     }
+    activeEntryIdRef.current = entry.id
     setHistory(prev => {
       // Replace existing entry for same company so history stays tidy
       const filtered = prev.filter(e => e.companyName !== entry.companyName)
@@ -159,6 +167,7 @@ export default function App() {
 
   const restoreSnapshot = useCallback((entry: HistoryEntry) => {
     // Restore visual state from localStorage immediately
+    activeEntryIdRef.current = entry.id
     setDeptTree(entry.deptTree)
     setStats(entry.stats)
     setIndustry(entry.industry)
@@ -178,6 +187,19 @@ export default function App() {
   const deleteSnapshot = useCallback((id: string) => {
     setHistory(prev => {
       const next = prev.filter(e => e.id !== id)
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
+  // Write fetched executives into the active history entry's exec cache
+  const updateExecCache = useCallback((entryId: string, deptId: string, people: OrgNode[]) => {
+    setHistory(prev => {
+      const next = prev.map(e =>
+        e.id === entryId
+          ? { ...e, execCache: { ...e.execCache, [deptId]: people } }
+          : e
+      )
       persistHistory(next)
       return next
     })
@@ -289,18 +311,32 @@ export default function App() {
 
       // ── Always open ExecPanel (employees view – never change this) ────
       setPanelDept(node)
-      setPanelExecs(null)
-      fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}`)
-        .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
-        .then(data => {
-          const people = (data.executives as Record<string, any>[])
-            .filter(p => p.node_id)
-            .map(p => toPersonNode(p, node.color))
-          setPanelExecs(people)
-        })
-        .catch(() => setPanelExecs([]))
+
+      // Check exec cache first — allows offline history restore to show executives
+      const entryId = activeEntryIdRef.current
+      const cached  = entryId
+        ? (historyRef.current.find(e => e.id === entryId)?.execCache ?? {})[node.node_id]
+        : undefined
+
+      if (cached !== undefined) {
+        // Serve from cache instantly
+        setPanelExecs(cached)
+      } else {
+        setPanelExecs(null)
+        fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}`)
+          .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
+          .then(data => {
+            const people = (data.executives as Record<string, any>[])
+              .filter(p => p.node_id)
+              .map(p => toPersonNode(p, node.color))
+            setPanelExecs(people)
+            // Persist to exec cache so future history restores work offline
+            if (entryId) updateExecCache(entryId, node.node_id, people)
+          })
+          .catch(() => setPanelExecs([]))
+      }
     }
-  }, [])
+  }, [updateExecCache])
 
   // ── File upload ────────────────────────────────────────────────────
   const handleUpload = async (file: File) => {
@@ -711,6 +747,11 @@ export default function App() {
                       {relativeTime(entry.timestamp)}
                       {entry.industry ? ` · ${entry.industry}` : ''}
                     </div>
+                    {Object.keys(entry.execCache ?? {}).length > 0 && (
+                      <div style={{ fontSize: 8, color: 'rgba(52,145,232,0.7)', marginTop: 1 }}>
+                        ✦ {Object.values(entry.execCache).reduce((s, arr) => s + arr.length, 0)} execs cached
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); deleteSnapshot(entry.id) }}
@@ -847,6 +888,8 @@ export default function App() {
             deptNode={panelDept}
             executives={panelExecs}
             onClose={() => { setPanelDept(null); setPanelExecs(null) }}
+            apiBase={API}
+            companyName={deptTree?.label ?? ''}
           />
         </div>
       </div>
