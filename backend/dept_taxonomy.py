@@ -1360,10 +1360,9 @@ TAXONOMY: list[dict] = [
                 "name": "Data & Analytics",
                 "keywords": [
                     "data", "analytics", "business intelligence", "data engineering",
-                    "data science", "data platform", "data warehouse", "bi",
+                    "data platform", "data warehouse", "bi",
                     "insights", "data & analytics",
                     # GTM library variants
-                    "head data science", "vp data science", "chief data science",
                     "head data engineering", "vp data engineering",
                 ],
                 "sub_depts": [
@@ -1383,11 +1382,29 @@ TAXONOMY: list[dict] = [
                         ],
                         "teams": [],
                     },
+                ],
+            },
+            {
+                # ── Separate sub-department under IT for all AI / ML work ─────
+                "name": "AI & Machine Learning",
+                "keywords": [
+                    "artificial intelligence", "ai", "machine learning", "ml",
+                    "data science", "generative ai", "genai", "llm",
+                    "large language model", "applied ai", "nlp", "computer vision",
+                    "mlops", "predictive analytics", "deep learning",
+                    "neural network", "ai platform", "ai engineering",
+                    # GTM library variants
+                    "head ai", "vp ai", "chief ai", "director ai",
+                    "head data science", "vp data science", "chief data science",
+                    "chief ai officer", "caio",
+                ],
+                "sub_depts": [
                     {
                         "name": "Data Science & ML",
                         "keywords": [
                             "data science", "machine learning", "ml",
                             "predictive analytics", "statistical modeling",
+                            "deep learning", "neural network",
                         ],
                         "teams": [],
                     },
@@ -1396,9 +1413,17 @@ TAXONOMY: list[dict] = [
                         "keywords": [
                             "artificial intelligence", "ai", "generative ai", "genai",
                             "llm", "large language model", "applied ai", "nlp",
-                            "computer vision",
+                            "computer vision", "ai platform", "ai engineering",
                             # GTM library variants
                             "head ai", "vp ai", "chief ai", "director ai",
+                        ],
+                        "teams": [],
+                    },
+                    {
+                        "name": "MLOps",
+                        "keywords": [
+                            "mlops", "ml platform", "ml infrastructure",
+                            "model deployment", "model operations", "feature store",
                         ],
                         "teams": [],
                     },
