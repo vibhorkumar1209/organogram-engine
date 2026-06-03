@@ -695,12 +695,48 @@ def export_pptx():
     root_meta  = root_attrs.get("metadata", {})
     industry   = root_meta.get("industry", "")
 
-    # ── Collect dept_primary nodes in BFS order ───────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────
     from collections import deque as _deque
 
-    _SUB_TYPES    = {"dept_secondary", "dept_tertiary"}
-    _ALL_DEPT_TYPES = {"dept_primary", "dept_secondary", "dept_tertiary"}
+    _DEPT_TYPES = {"dept_primary", "dept_secondary", "dept_tertiary"}
+    _SUB_TYPES  = {"dept_secondary", "dept_tertiary"}
+    _PALETTE_P  = [
+        (0x2c,0x5f,0x8a),(0x1b,0x7a,0x53),(0x7a,0x1f,0x96),
+        (0xb0,0x26,0x26),(0xc9,0x70,0x1e),(0x10,0x6b,0x84),
+    ]
 
+    def _all_people_in(nid: str, stop_at_primary: bool = True) -> list[dict]:
+        """DFS: collect every person node in subtree (stops at dept_primary boundary)."""
+        out: list[dict] = []
+        seen: set[str]  = set()
+        def _dfs(n: str, depth: int = 0) -> None:
+            if n in seen:
+                return
+            seen.add(n)
+            a  = dag.G.nodes.get(n, {})
+            nt = a.get("node_type", "")
+            if nt == "person":
+                out.append(dict(a))
+                return
+            if stop_at_primary and depth > 0 and nt == "dept_primary":
+                return
+            for c in dag.G.successors(n):
+                _dfs(c, depth + 1)
+        _dfs(nid)
+        out.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
+        return out
+
+    def _direct_people(nid: str) -> list[dict]:
+        """Only immediate person-children of a node."""
+        out = []
+        for c in dag.G.successors(nid):
+            a = dag.G.nodes.get(c, {})
+            if a.get("node_type") == "person":
+                out.append(dict(a))
+        out.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
+        return out
+
+    # ── Collect dept_primary nodes (BFS from root) ────────────────────────
     dept_nodes:  list[str] = []
     visited_bfs: set[str]  = set()
     q = _deque(["root_global"])
@@ -709,87 +745,113 @@ def export_pptx():
         if nid in visited_bfs:
             continue
         visited_bfs.add(nid)
-        attrs     = dag.G.nodes.get(nid, {})
-        node_type = attrs.get("node_type", "")
-        if node_type == "dept_primary":
+        nt = dag.G.nodes.get(nid, {}).get("node_type", "")
+        if nt == "dept_primary":
             dept_nodes.append(nid)
-        for child in dag.G.successors(nid):
-            q.append(child)
+        for c in dag.G.successors(nid):
+            q.append(c)
 
-    # If no dept_primary nodes found, fall back to using root's direct dept children
+    # Fallback: if no dept_primary, use any top-level dept under root
     if not dept_nodes:
-        for child in dag.G.successors("root_global"):
-            attrs = dag.G.nodes.get(child, {})
-            if attrs.get("node_type", "") in _ALL_DEPT_TYPES:
-                dept_nodes.append(child)
+        for c in dag.G.successors("root_global"):
+            if dag.G.nodes.get(c, {}).get("node_type", "") in _DEPT_TYPES:
+                dept_nodes.append(c)
 
-    # ── Helpers ───────────────────────────────────────────────────────────
-    MAX_PPTX_PER_SECTION = 15   # people shown per slide; paginate after this
+    # ── Build column structure for each dept ──────────────────────────────
+    MAX_MEMBERS = 8   # max stacked members per column
 
-    def _collect_direct_people(dept_id: str) -> tuple[list[dict], int]:
-        """People directly under dept_id (not inside sub-depts). Returns (capped, total)."""
-        people: list[dict] = []
-        for child in dag.G.successors(dept_id):
-            attrs = dict(dag.G.nodes.get(child, {}))
-            if attrs.get("node_type") == "person":
-                people.append(attrs)
-        people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
-        return people[:MAX_PPTX_PER_SECTION], len(people)
+    def _build_columns_for_dept(dept_id: str) -> tuple[dict | None, list[dict], int]:
+        """
+        Returns (dept_head, columns, headcount).
+        Each column: {head, members, accent_rgb}
+        """
+        dept_color = dag.G.nodes.get(dept_id, {}).get("color", "#3491E8")
+        dept_rgb   = tuple(int(dept_color.lstrip("#")[i:i+2], 16) for i in (0,2,4)) \
+                     if len(dept_color.lstrip("#")) == 6 else (0x3d, 0x51, 0x68)
 
-    def _count_subtree_people(dept_id: str) -> int:
-        """Count all people in subtree (stops at dept_primary boundaries)."""
-        count, visited = 0, set()
-        def _dfs(nid: str, depth: int = 0) -> None:
-            nonlocal count
-            if nid in visited:
-                return
-            visited.add(nid)
-            attrs = dag.G.nodes.get(nid, {})
-            nt    = attrs.get("node_type", "")
-            if nt == "person":
-                count += 1
-                return
-            if depth > 0 and nt == "dept_primary":
-                return
-            for child in dag.G.successors(nid):
-                _dfs(child, depth + 1)
-        _dfs(dept_id)
-        return count
+        all_ppl    = _all_people_in(dept_id)
+        headcount  = len(all_ppl)
+        if not all_ppl:
+            return None, [], 0
 
-    def _collect_subdepts(dept_id: str) -> list[dict]:
-        """Immediate dept_secondary / dept_tertiary children of dept_id."""
-        result: list[dict] = []
-        for child in dag.G.successors(dept_id):
-            attrs = dag.G.nodes.get(child, {})
-            if attrs.get("node_type") in _SUB_TYPES:
-                direct, total = _collect_direct_people(child)
-                if total == 0:
-                    total = _count_subtree_people(child)
-                if total:
-                    result.append({
-                        "label":      attrs.get("label", child),
-                        "color":      attrs.get("color", "#3491E8"),
-                        "headcount":  total,
-                        "executives": direct,
+        dept_head  = all_ppl[0] if all_ppl else None
+
+        # Try sub-dept nodes first (natural columns)
+        sub_dept_ids = [c for c in dag.G.successors(dept_id)
+                        if dag.G.nodes.get(c, {}).get("node_type") in _SUB_TYPES]
+
+        columns: list[dict] = []
+
+        if sub_dept_ids:
+            for idx, sd_id in enumerate(sub_dept_ids):
+                sd_ppl   = _all_people_in(sd_id, stop_at_primary=False)
+                if not sd_ppl:
+                    continue
+                sd_color = dag.G.nodes.get(sd_id, {}).get("color", dept_color)
+                sd_rgb   = tuple(int(sd_color.lstrip("#")[i:i+2], 16) for i in (0,2,4)) \
+                           if len(sd_color.lstrip("#")) == 6 else _PALETTE_P[idx % 6]
+                if sd_rgb == dept_rgb:
+                    sd_rgb = _PALETTE_P[idx % 6]
+                columns.append({
+                    "head":       sd_ppl[0],
+                    "members":    sd_ppl[1:MAX_MEMBERS+1],
+                    "accent_rgb": sd_rgb,
+                })
+        else:
+            # No sub-depts: distribute remaining people as implied columns
+            # Dept head is the most senior; everyone else splits into columns by layer
+            rest = all_ppl[1:]  # exclude dept head
+            if not rest:
+                return dept_head, [], headcount
+
+            # Group by layer
+            layer_groups: dict[int, list[dict]] = {}
+            for p in rest:
+                layer_groups.setdefault(p.get("layer", 9), []).append(p)
+            layers = sorted(layer_groups.keys())
+
+            if len(layers) >= 2:
+                # First sub-layer = column heads; remaining = their stacked members
+                col_heads = layer_groups[layers[0]]
+                deeper    = []
+                for L in layers[1:]:
+                    deeper.extend(layer_groups[L])
+                n_heads = len(col_heads)
+                for i, ch in enumerate(col_heads):
+                    start  = (i * len(deeper)) // n_heads
+                    end    = ((i+1) * len(deeper)) // n_heads
+                    acc    = _PALETTE_P[i % 6]
+                    columns.append({
+                        "head":       ch,
+                        "members":    deeper[start:min(start+MAX_MEMBERS, end)],
+                        "accent_rgb": acc,
                     })
-        return result
+            else:
+                # All same layer → one-person columns
+                for i, p in enumerate(rest[:MAX_MEMBERS * 4]):
+                    columns.append({
+                        "head":       p,
+                        "members":    [],
+                        "accent_rgb": _PALETTE_P[i % 6],
+                    })
+
+        return dept_head, columns, headcount
 
     depts: list[dict] = []
     for dept_id in dept_nodes:
-        attrs     = dag.G.nodes.get(dept_id, {})
-        label     = attrs.get("label", dept_id)
-        color     = attrs.get("color", "#3491E8")
-        direct, _ = _collect_direct_people(dept_id)
-        headcount = _count_subtree_people(dept_id)
-        subdepts  = _collect_subdepts(dept_id)
-        if headcount:
-            depts.append({
-                "label":      label,
-                "color":      color,
-                "headcount":  headcount,
-                "executives": direct,
-                "subdepts":   subdepts,
-            })
+        attrs  = dag.G.nodes.get(dept_id, {})
+        label  = attrs.get("label", dept_id)
+        color  = attrs.get("color", "#3491E8")
+        head, columns, hc = _build_columns_for_dept(dept_id)
+        if hc == 0:
+            continue
+        depts.append({
+            "label":     label,
+            "color":     color,
+            "headcount": hc,
+            "head":      head,
+            "columns":   columns,
+        })
 
     if not depts:
         raise HTTPException(status_code=404,

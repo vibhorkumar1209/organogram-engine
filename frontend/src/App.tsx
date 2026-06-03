@@ -702,7 +702,7 @@ export default function App() {
             <button
               onClick={handleExportPPT}
               disabled={exportingPPT}
-              title="Download org chart as PowerPoint (one slide per department)"
+              title={`Download org chart as PowerPoint for ${deptTree?.label ?? 'current company'} — one slide per department`}
               style={{
                 background: 'transparent', border: '1px solid rgba(52,145,232,0.45)', borderRadius: 7,
                 padding: '5px 10px', color: '#3491E8', fontSize: 11, cursor: exportingPPT ? 'wait' : 'pointer',
@@ -716,6 +716,19 @@ export default function App() {
               </svg>
               {exportingPPT ? 'Building…' : 'Download PPT'}
             </button>
+            {/* Show which company the backend will export — alerts user if stale */}
+            {deptTree?.label && !exportingPPT && (
+              <div style={{ fontSize: 9, color: '#4a7a9b', maxWidth: 180, textAlign: 'right', lineHeight: 1.3 }}>
+                For: {deptTree.label}
+                {' · '}
+                <span
+                  style={{ cursor: 'pointer', textDecoration: 'underline', color: '#3491E8' }}
+                  title="Re-upload your CSV if the company shown is incorrect"
+                >
+                  wrong co.?
+                </span>
+              </div>
+            )}
             {pptError && (
               <div style={{ fontSize: 9, color: '#E63946', maxWidth: 180, textAlign: 'right', lineHeight: 1.3 }}>
                 ⚠ {pptError}
