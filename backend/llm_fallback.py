@@ -392,6 +392,14 @@ _LEADERSHIP_PATHS = [
     "/our-firm/leadership",
     "/our-company/leadership",
     "/our-company/board-of-directors",
+    # ── Latin American / Spanish corporate sites (Grupo Sura, Bancolombia, etc.)
+    "/en/our-company/ethics-and-corporate-governance",
+    "/en/our-company/corporate-governance",
+    "/en/our-company/governance",
+    "/en/our-company/board-of-directors",
+    "/en/our-company/leadership",
+    "/our-company/ethics-and-corporate-governance",
+    "/our-company/corporate-governance",
     "/press-room/bios",
     "/media/bios",
 ]
@@ -413,7 +421,7 @@ _LEADERSHIP_LINK_RE = re.compile(
     r'|executive[-_]committee|management[-_]committee'
     r'|senior[-_]leadership|our[-_]leaders?'
     r'|supervisory[-_]board|advisory[-_]board'
-    r'|governance[-_/]board|corporate[-_/]governance'
+    r'|governance[-_/]board|corporate[-_/]governance|ethics[-_]and[-_]corporate[-_]governance'
     r'|audit[-_]committee|nominations[-_]committee'
     r'|compensation[-_]committee|risk[-_]committee'
     r'|board[-_]members?|director[-_]profiles?'
@@ -1183,6 +1191,16 @@ _APIFY_LEADERSHIP_PATHS = [
     "/who-we-are/leadership",
     "/en/about/leadership",
     "/en-us/about/leadership",
+    # ── Latin American / Spanish corporate sites ──────────────────────────────
+    # Grupo Sura, Bancolombia, ISA, Nutresa, etc. use /en/our-company/ nesting
+    # with an ethics-and- prefix on the governance segment.
+    "/en/our-company/ethics-and-corporate-governance",
+    "/en/our-company/corporate-governance",
+    "/en/our-company/governance",
+    "/en/our-company/board-of-directors",
+    "/en/our-company/leadership",
+    "/our-company/ethics-and-corporate-governance",
+    "/our-company/corporate-governance",
 ]
 
 # Strong URL-path signal for identifying leadership-specific nav links
@@ -1240,12 +1258,15 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         return "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
 
     # ── Phase 1: Google search → rag-web-browser ──────────────────────────────
+    # Include "corporate governance" as an OR alternative so governance pages
+    # like gruposura.com/en/our-company/ethics-and-corporate-governance/ surface
+    # even when they don't mention "board of directors" in their title/H1.
     query = (
-        f'"{company_name}" board of directors executive leadership '
+        f'"{company_name}" (board of directors OR "corporate governance" OR executive leadership) '
         f'site:{domain}'
     )
     logger.info("Apify Phase 1 — rag-web-browser search for '%s'", company_name)
-    rag_items = _apify_rag_search(query, api_token, max_results=3)
+    rag_items = _apify_rag_search(query, api_token, max_results=5)
     result = _filter_items(rag_items)
     if result:
         logger.info("Apify Phase 1 succeeded for '%s': %d chars", company_name, len(result))
