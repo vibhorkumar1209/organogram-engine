@@ -268,9 +268,9 @@ export default function App() {
   }, [deptTree])
 
   // ── Load demo ──────────────────────────────────────────────────────
-  const loadDemo = async () => {
+  const loadDemo = async (retrying = false) => {
     setStatus('loading')
-    setStatusMsg('Loading demo dataset…')
+    setStatusMsg(retrying ? 'Reconnecting to backend…' : 'Loading demo dataset…')
     setPanelDept(null); setPanelExecs(null)
     try {
       const res = await fetch(`${API}/load-demo`, { method: 'POST' })
@@ -278,7 +278,14 @@ export default function App() {
       const data = await res.json()
       setStats(data.stats)
       await loadDeptStructure(data.stats, data.industry ?? '', 'demo')
-    } catch {
+    } catch (e: any) {
+      const isNetwork = (e?.message ?? '').toLowerCase().includes('fetch')
+      if (isNetwork && !retrying) {
+        // Backend may be mid-deploy — wait 6s and retry once
+        setStatusMsg('Backend waking up — retrying in 6s…')
+        setTimeout(() => loadDemo(true), 6000)
+        return
+      }
       setStatus('error')
       setStatusMsg('Backend not running — using embedded demo. Start with: cd backend && uvicorn api_server:app')
       loadEmbeddedDemo()
@@ -464,7 +471,12 @@ export default function App() {
       clearInterval(tick)
       setStatus('error')
       const msg: string = e?.message ?? ''
-      setStatusMsg(msg || 'Upload failed — please try again.')
+      const isNetwork = msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network')
+      setStatusMsg(
+        isNetwork
+          ? 'Connection failed — backend may be restarting. Wait a moment and try again.'
+          : msg || 'Upload failed — please try again.'
+      )
     }
   }
 
