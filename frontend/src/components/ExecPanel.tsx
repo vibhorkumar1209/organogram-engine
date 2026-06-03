@@ -7,6 +7,7 @@ type GroupMode = 'region' | 'country'
 interface Props {
   deptNode:    OrgNode | null
   executives:  OrgNode[] | null   // null = loading; flat sorted-by-layer list
+  totalCount?: number             // full headcount for this dept (may exceed executives.length)
   onClose:     () => void
   apiBase?:    string
   companyName?: string
@@ -519,7 +520,7 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────
-export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose, apiBase = '', companyName = '' }) => {
+export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '' }) => {
   const isOpen = deptNode !== null
   const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] ?? deptNode.color ?? '#3491E8') : '#3491E8'
 
@@ -761,6 +762,17 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose, apiB
             {executives !== null && executives.length > 0 && (
               <div style={{ fontSize: 9, color: '#627184', marginTop: 5, lineHeight: 1.5 }}>
                 {layerSummary}
+              </div>
+            )}
+            {/* Large-dataset note: shown when the backend paginated the response */}
+            {executives !== null && totalCount > executives.length && (
+              <div style={{
+                fontSize: 8, color: '#b45309', marginTop: 4,
+                background: '#fffbeb', border: '1px solid #fde68a',
+                borderRadius: 3, padding: '2px 6px', display: 'inline-block',
+              }}>
+                Showing top {executives.length.toLocaleString()} of {totalCount.toLocaleString()} by seniority
+                &nbsp;·&nbsp;Export CSV for full list
               </div>
             )}
           </div>

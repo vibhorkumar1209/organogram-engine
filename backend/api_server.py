@@ -371,8 +371,9 @@ async def upload_file(file: UploadFile = File(...),
     if not records:
         raise HTTPException(status_code=422, detail="File appears empty.")
 
-    MAX_ROWS = 500
+    MAX_ROWS = 200_000
     if len(records) > MAX_ROWS:
+        logger.warning("Upload truncated: %d → %d rows", len(records), MAX_ROWS)
         records = records[:MAX_ROWS]
 
     # ── Fix 1: always prefer org name inferred from data ────────────────
@@ -784,12 +785,23 @@ def get_full_graph():
 
 
 @app.get("/tree")
-def get_tree(root: str = Query("root_global"), max_depth: int = Query(20)):
-    """Return nested tree JSON rooted at `root`."""
+def get_tree(
+    root: str = Query("root_global"),
+    max_depth: int = Query(20),
+    dept_only: bool = Query(False),
+):
+    """
+    Return nested tree JSON rooted at `root`.
+
+    dept_only=true: strips person/ghost nodes from the response and adds a
+    ``headcount`` key to every dept node with the total person count in that
+    subtree.  Use this for large datasets (>10K people) to keep the payload
+    small — people are loaded on demand via /executives.
+    """
     if not _dag_loaded():
         return {"loaded": False, "id": root, "children": []}
     dag, _ = _require_dag()
-    tree = dag.get_subtree(root, max_depth=max_depth)
+    tree = dag.get_subtree(root, max_depth=max_depth, dept_only=dept_only)
     if not tree:
         raise HTTPException(status_code=404, detail=f"Node '{root}' not found.")
     return tree
@@ -862,14 +874,22 @@ async def reset_data():
 
 
 @app.get("/executives")
-def get_executives(dept_id: str = Query(...)):
+def get_executives(
+    dept_id: str = Query(...),
+    offset: int = Query(0, ge=0),
+    limit:  int = Query(200, ge=1, le=5000),
+):
     """
-    Return all person nodes in the subtree rooted at dept_id via DFS.
-    No source filtering — every person node in the subtree is included
-    regardless of whether they came from the upload or web scraping.
+    Return person nodes in the subtree rooted at dept_id, sorted by seniority
+    (layer asc) then name.
+
+    Pagination: offset + limit (default limit=200).  Response includes
+    ``total`` so the client can show "showing N of M" and fetch more pages.
+    People are sorted most-senior first, so the first page always contains
+    the highest-layer executives.
     """
     if not _dag_loaded():
-        return {"loaded": False, "executives": [], "count": 0}
+        return {"loaded": False, "executives": [], "count": 0, "total": 0}
     dag, _ = _require_dag()
     if dept_id not in dag.G:
         raise HTTPException(status_code=404, detail=f"Node '{dept_id}' not found.")
@@ -894,7 +914,15 @@ def get_executives(dept_id: str = Query(...)):
     collect(dept_id, set())
 
     people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
-    return {"executives": people, "count": len(people)}
+    total = len(people)
+    page  = people[offset : offset + limit]
+    return {
+        "executives": page,
+        "count":  len(page),
+        "total":  total,
+        "offset": offset,
+        "limit":  limit,
+    }
 
 
 # ─────────────────────────────────────────────

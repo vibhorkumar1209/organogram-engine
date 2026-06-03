@@ -132,6 +132,8 @@ export default function App() {
   // ExecPanel state
   const [panelDept, setPanelDept]   = useState<OrgNode | null>(null)
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
+  // Total person count for the open dept (may exceed panelExecs.length when paginated)
+  const [panelTotal, setPanelTotal] = useState<number>(0)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
@@ -207,7 +209,13 @@ export default function App() {
   // Eagerly pre-fetch executives for every dept in the tree so the history
   // entry is self-contained — restoring from history shows the full org chart
   // without any backend calls.
-  const prefetchAllExecutives = useCallback(async (tree: OrgNode, entryId: string) => {
+  // Skipped for large datasets (>10K people) to avoid fetching MBs of data
+  // in the background — users click depts to load people on demand instead.
+  const prefetchAllExecutives = useCallback(async (
+    tree: OrgNode, entryId: string, currentStats?: Stats | null,
+  ) => {
+    if ((currentStats?.people_nodes ?? 0) > 10_000) return
+
     const deptNodes = flattenTree(tree).filter(n =>
       n.node_type === 'dept_primary' ||
       n.node_type === 'dept_secondary' ||
@@ -221,7 +229,7 @@ export default function App() {
       await Promise.all(
         deptNodes.slice(i, i + BATCH).map(async (node) => {
           try {
-            const r = await fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}`)
+            const r = await fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}&limit=200`)
             if (!r.ok) return
             const data = await r.json()
             if (data.loaded === false) return
@@ -246,6 +254,7 @@ export default function App() {
     setAllNodes([])
     setPanelDept(null)
     setPanelExecs(null)
+    setPanelTotal(0)
     setColWarning(null)
     setHighlight(null)
     setCompanyWebsite('')
@@ -294,9 +303,10 @@ export default function App() {
 
   // ── Fetch dept-only structure ──────────────────────────────────────
   const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string, src: 'demo' | 'upload' = 'upload') => {
-    // max_depth=3: root(0) → BOD(1) → EM(2) → direct depts(3).
-    // Sub-departments expand lazily on click (has_more=true triggers lazy fetch).
-    const res = await fetch(`${API}/tree?root=root_global&max_depth=3`)
+    // dept_only=true: strips person nodes server-side; adds headcount to each
+    // dept node.  Keeps the response small regardless of how many people are
+    // in the org — people load on demand via /executives when a dept is clicked.
+    const res = await fetch(`${API}/tree?root=root_global&max_depth=3&dept_only=true`)
     if (!res.ok) throw new Error(await res.text())
     const raw: OrgNode = await res.json()
     const filtered = filterToDeptNodes(raw)
@@ -306,9 +316,10 @@ export default function App() {
     // Auto-save to history whenever a chart successfully loads
     if (currentStats) {
       saveSnapshot(filtered, currentStats, currentIndustry ?? '', src)
-      // Fire-and-forget: eagerly cache all executives so history is self-contained
+      // Fire-and-forget: eagerly cache all executives so history is self-contained.
+      // Skipped for large datasets — people load on demand instead.
       const snapId = activeEntryIdRef.current
-      if (snapId) prefetchAllExecutives(filtered, snapId)
+      if (snapId) prefetchAllExecutives(filtered, snapId, currentStats)
     }
   }
 
@@ -333,9 +344,9 @@ export default function App() {
         // Collapse: remove children, re-mark as expandable
         setViewTree(prev => prev ? collapseNode(prev, node.node_id) : null)
       } else if (node.has_more) {
-        // Expand: lazy-fetch only this dept's immediate sub-depts
+        // Expand: lazy-fetch only this dept's immediate sub-depts (dept_only keeps it small)
         setExpandingId(node.node_id)
-        fetch(`${API}/tree?root=${encodeURIComponent(node.node_id)}&max_depth=2`)
+        fetch(`${API}/tree?root=${encodeURIComponent(node.node_id)}&max_depth=2&dept_only=true`)
           .then(r => { if (!r.ok) throw new Error(); return r.json() })
           .then((fetched: OrgNode) => {
             const children = (filterToDeptNodes(fetched).children ?? []).filter(c => c.node_id)
@@ -351,6 +362,7 @@ export default function App() {
 
       // ── Always open ExecPanel (employees view – never change this) ────
       setPanelDept(node)
+      setPanelTotal(0)
 
       // Check exec cache first — allows offline history restore to show executives
       const entryId = activeEntryIdRef.current
@@ -361,13 +373,16 @@ export default function App() {
       if (cached !== undefined) {
         // Serve from cache instantly — no backend call needed
         setPanelExecs(cached)
+        setPanelTotal(cached.length)
       } else {
         setPanelExecs(null)
         const deptId    = node.node_id
         const nodeColor = node.color
 
+        // First page: most-senior 200 people (sorted by layer asc then name).
+        // panelTotal carries the full count so ExecPanel can show "200 of N".
         const fetchAndSet = (retryAfterReload = false): Promise<void> =>
-          fetch(`${API}/executives?dept_id=${encodeURIComponent(deptId)}`)
+          fetch(`${API}/executives?dept_id=${encodeURIComponent(deptId)}&limit=200`)
             .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
             .then(async (data) => {
               // Backend restarted and lost in-memory data (Render free tier)
@@ -388,6 +403,7 @@ export default function App() {
                 .filter((p: Record<string, any>) => p.node_id)
                 .map((p: Record<string, any>) => toPersonNode(p, nodeColor))
               setPanelExecs(people)
+              setPanelTotal(data.total ?? people.length)
               if (entryId) updateExecCache(entryId, deptId, people)
             })
             .catch(() => setPanelExecs([]))
@@ -410,8 +426,8 @@ export default function App() {
     const tick = setInterval(() => {
       elapsed += 1
       const phase =
-        elapsed < 12 ? 'Classifying roles & departments…' :
-        elapsed < 20 ? 'Identifying company industry…' :
+        elapsed < 30 ? 'Classifying roles & departments…' :
+        elapsed < 55 ? 'Building org hierarchy…' :
         'Fetching Board & Executive leadership from web…'
       setStatusMsg(`${phase}  (${elapsed}s)`)
     }, 1000)
@@ -650,7 +666,7 @@ export default function App() {
         />
 
         <button
-          onClick={loadDemo}
+          onClick={() => loadDemo()}
           style={{
             background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
             padding: '5px 10px', color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
@@ -989,7 +1005,8 @@ export default function App() {
           <ExecPanel
             deptNode={panelDept}
             executives={panelExecs}
-            onClose={() => { setPanelDept(null); setPanelExecs(null) }}
+            totalCount={panelTotal}
+            onClose={() => { setPanelDept(null); setPanelExecs(null); setPanelTotal(0) }}
             apiBase={API}
             companyName={deptTree?.label ?? ''}
           />

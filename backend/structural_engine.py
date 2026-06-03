@@ -1369,27 +1369,82 @@ class OrganogramDAG:
                             G.add_edge(em_id, child_id)
 
     # ─── Recursive CTE-style drill-down ──────
-    def get_subtree(self, node_id: str, max_depth: int = 20) -> dict:
+    def get_subtree(self, node_id: str, max_depth: int = 20,
+                    dept_only: bool = False) -> dict:
         """
         Returns a nested dict representing the subtree rooted at node_id,
         up to max_depth levels deep — like a recursive CTE.
         Children at each level are sorted:
           Board of Directors → Executive Management → CEO Office →
           functional depts (Finance, HR, IT …) → people (by layer) → ghosts.
+
+        dept_only=True:
+          Person and ghost nodes are stripped from the response.
+          Each dept node gains a ``headcount`` key with the total count of
+          person descendants in its entire subtree (computed in one O(N) pass
+          — no extra traversal).  ``has_more`` is only True when there are
+          dept children beyond max_depth (person-only depths don't count).
+          Use this for large datasets (>10K people) so the /tree response
+          stays small regardless of headcount.
         """
+        _DEPT_TYPES = frozenset(("dept_primary", "dept_secondary", "dept_tertiary", "global"))
+
         if node_id not in self.G:
             return {}
 
-        def recurse(nid: str, depth: int) -> dict:
-            attrs = dict(self.G.nodes[nid])
-            raw_children = list(self.G.successors(nid))
-            if depth >= max_depth:
-                return {**attrs, "children": [], "has_more": len(raw_children) > 0}
-            children = sorted(raw_children, key=self._dept_sort_key)
-            child_nodes = [recurse(c, depth + 1) for c in children]
-            return {**attrs, "children": child_nodes}
+        if not dept_only:
+            def recurse(nid: str, depth: int) -> dict:
+                attrs = dict(self.G.nodes[nid])
+                raw_children = list(self.G.successors(nid))
+                if depth >= max_depth:
+                    return {**attrs, "children": [], "has_more": len(raw_children) > 0}
+                children = sorted(raw_children, key=self._dept_sort_key)
+                child_nodes = [recurse(c, depth + 1) for c in children]
+                return {**attrs, "children": child_nodes}
+            return recurse(node_id, 0)
 
-        return recurse(node_id, 0)
+        # dept_only path — single O(N) recursive pass
+        # Returns (node_dict | None, person_count_in_subtree)
+        def recurse_dept(nid: str, depth: int):
+            attrs    = dict(self.G.nodes[nid])
+            ntype    = attrs.get("node_type", "")
+            children = list(self.G.successors(nid))
+
+            # Person nodes: don't include but count
+            if ntype == NODE_PERSON:
+                return None, 1
+
+            if depth >= max_depth:
+                # Only flag has_more for dept children (not persons)
+                has_dept_more = any(
+                    self.G.nodes.get(c, {}).get("node_type", "") in _DEPT_TYPES
+                    for c in children
+                )
+                # Count direct person children (can't recurse further)
+                direct_persons = sum(
+                    1 for c in children
+                    if self.G.nodes.get(c, {}).get("node_type", "") == NODE_PERSON
+                )
+                result = {**attrs, "children": [], "has_more": has_dept_more}
+                if direct_persons:
+                    result["headcount"] = direct_persons
+                return result, direct_persons
+
+            dept_children: list[dict] = []
+            total_persons = 0
+            for c in sorted(children, key=self._dept_sort_key):
+                child_result, child_persons = recurse_dept(c, depth + 1)
+                total_persons += child_persons
+                if child_result is not None:
+                    dept_children.append(child_result)
+
+            result = {**attrs, "children": dept_children}
+            if total_persons:
+                result["headcount"] = total_persons
+            return result, total_persons
+
+        result, _ = recurse_dept(node_id, 0)
+        return result or {}
 
     def get_flat_nodes(self) -> list[dict]:
         return [dict(self.G.nodes[n]) for n in self.G.nodes]
