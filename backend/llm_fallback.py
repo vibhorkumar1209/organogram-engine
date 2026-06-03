@@ -2028,13 +2028,45 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             source_text=user_msg,
         )
         if result.get("board") or result.get("executives"):
+            # Supplement missing board from Claude knowledge when web found execs only
+            if result.get("executives") and not result.get("board"):
+                logger.info(
+                    "Web found execs but no board for '%s' — supplementing from knowledge",
+                    company_name,
+                )
+                kb = _call_claude(
+                    system=_SYSTEM_FROM_KNOWLEDGE,
+                    user_msg=f"Company: {company_name}",
+                    label=f"{company_name} [board-supplement]",
+                )
+                if kb.get("board"):
+                    result["board"] = kb["board"]
+                    logger.info(
+                        "Knowledge supplement added %d board members for '%s'",
+                        len(result["board"]), company_name,
+                    )
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info("Web+search+wiki returned no leaders for '%s'", company_name)
 
-    # ── No result — don't cache so next upload can retry ────────────────────
-    logger.info("No web-sourced leaders found for '%s' — returning empty (not cached)", company_name)
+    # ── Knowledge fallback — no web content found ─────────────────────────
+    logger.info("No web-sourced leaders for '%s' — trying Claude knowledge fallback", company_name)
+    kb = _call_claude(
+        system=_SYSTEM_FROM_KNOWLEDGE,
+        user_msg=f"Company: {company_name}",
+        label=f"{company_name} [knowledge-fallback]",
+    )
+    if kb.get("board") or kb.get("executives"):
+        kb["_source"] = "ai"
+        _LEADERSHIP_CACHE[cache_key] = kb
+        logger.info(
+            "Knowledge fallback for '%s': %d board, %d execs",
+            company_name, len(kb.get("board", [])), len(kb.get("executives", [])),
+        )
+        return kb
+
+    logger.info("No leaders found for '%s' from any source", company_name)
     return {"board": [], "executives": [], "_source": "none"}
 
 

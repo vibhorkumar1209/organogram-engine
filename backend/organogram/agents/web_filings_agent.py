@@ -39,6 +39,7 @@ from ..utils.html_fetcher import HTMLFetcher
 from ..utils.llm_extractor import LLMExtractor, ExtractedLeader
 from ..utils.sec_edgar import SecEdgarClient, EdgarResult
 from ..utils.provenance_log import ProvenanceLog, ProvenanceEntry
+from ..utils.scraper_client import scrape_linkedin_company, scrape_web
 
 # Source-type precedence (lower number = higher authority)
 SOURCE_PRECEDENCE = {
@@ -57,6 +58,9 @@ class Agent2Config:
 
     # Firm website — at least one URL required
     website_urls: list[str]
+
+    # LinkedIn company page URL (optional — used with scraper API)
+    linkedin_company_url: Optional[str] = None
 
     # SEC/EDGAR (US Public firms only)
     filing_ticker: Optional[str] = None   # e.g. "BWA" for BorgWarner
@@ -100,6 +104,9 @@ class WebFilingsAgent:
         # Phase 1 — Firm website (fastest, most current)
         self._phase_website()
 
+        # Phase 1b — LinkedIn company page via scraper API (stealth browser)
+        self._phase_linkedin_company()
+
         # Phase 2 — Annual report / SEC filing (most authoritative)
         self._phase_filings()
 
@@ -141,6 +148,45 @@ class WebFilingsAgent:
             print(f"  [website] Extracted {len(leaders)} candidates from {url}")
             for L in leaders:
                 self._record(L, result.cache_hit)
+
+    # ------------------------------------------------------------------
+    # PHASE 1b — LINKEDIN COMPANY PAGE (via scraper API, stealth browser)
+    # ------------------------------------------------------------------
+    def _phase_linkedin_company(self):
+        url = self.config.linkedin_company_url
+        if not url:
+            print("[agent 2] Phase 1b: No LinkedIn company URL — skipping.")
+            return
+
+        print(f"[agent 2] Phase 1b: Fetching LinkedIn company page via scraper API: {url}")
+        data = scrape_linkedin_company(url)
+        if not data:
+            print("  [linkedin-co] MISS — scraper API unavailable or returned no data.")
+            return
+
+        # Build a text block the LLM extractor can parse
+        parts = [f"Company: {data.get('name', '')}"]
+        if data.get('tagline'):
+            parts.append(f"Tagline: {data['tagline']}")
+        if data.get('about'):
+            parts.append(f"About: {data['about']}")
+        if data.get('industry'):
+            parts.append(f"Industry: {data['industry']}")
+        text_block = "\n".join(parts)
+
+        print(f"  [linkedin-co] OK — {len(text_block)} chars, "
+              f"industry: {data.get('industry', 'n/a')}")
+
+        # Pass to LLM extractor — leadership names sometimes appear in About
+        leaders = self.extractor.extract(
+            cleaned_text=text_block,
+            source_url=url,
+            source_type="firm_website",  # same precedence tier as website
+            firm_name=self.config.firm_name,
+        )
+        print(f"  [linkedin-co] Extracted {len(leaders)} candidates")
+        for L in leaders:
+            self._record(L, cache_hit=False)
 
     # ------------------------------------------------------------------
     # PHASE 2 — ANNUAL REPORT / SEC FILING
