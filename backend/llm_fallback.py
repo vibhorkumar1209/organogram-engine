@@ -1216,20 +1216,27 @@ def _apify_fetch_leadership(company_name: str, domain: str,
     """
     Primary JS-capable scraper for BOD/EM extraction.
 
-    Strategy (two-phase, each phase returns on success):
+    Three-phase cascade — each phase runs only when the previous returns no
+    useful content:
 
-    Phase 1 — Google search via rag-web-browser:
-      Query: '"Company" board of directors executive leadership site:domain'
-      Google already knows the exact URL for every company's leadership page,
-      so this works for any locale/URL structure (e.g. Medtronic /en-us/,
-      international sites, etc.) without any URL-pattern guessing.
+    Phase 1a — Site-targeted, language-agnostic Google search:
+      Query: site:{domain} directors OR governance OR leadership OR board
+      No company name, no phrases — single keywords work for Spanish, French,
+      Portuguese, etc.  Google ranks the governance/board page highest for
+      "directors OR governance OR board".  Finds gruposura.com's
+      ethics-and-corporate-governance URL because the page content has
+      "directors" and the URL segment has "governance".
 
-    Phase 2 — Fallback: nav-discovery + curated URL crawl:
-      Used only when Google search returns nothing useful (e.g. site has
-      no indexed leadership page, or rag-web-browser actor is unavailable).
-      Nav-discovered links are filtered to strong leadership path keywords.
-      Curated _APIFY_LEADERSHIP_PATHS cover known patterns (Wells Fargo,
-      Morgan Stanley, etc.).
+    Phase 1b — Broad search, no site restriction (only if 1a fails):
+      Query: "{company_name}" board directors executives OR leadership
+      No site: restriction — returns Wikipedia, Bloomberg, annual reports, press
+      releases, and any third-party source listing the company's leadership.
+      Best fallback for companies whose corporate site has no indexed page.
+
+    Phase 2 — Nav-discovery + curated URL crawl (only if both searches fail):
+      Used when the site has no indexed leadership page or rag-web-browser is
+      unavailable.  Nav-discovered links filtered to strong path keywords.
+      Curated _APIFY_LEADERSHIP_PATHS cover known URL patterns.
     """
     if not domain or not api_token:
         return ""
@@ -1240,39 +1247,57 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         "leadership", "trustee",
     }
 
+    seen_urls: set[str] = set()
+
     def _filter_items(items: list[dict]) -> str:
-        """Extract and concatenate leadership-signal pages from Apify results."""
+        """
+        Extract and deduplicate leadership-signal pages from Apify results.
+        Deduplication is cross-call so Phase 1b never re-fetches Phase 1a pages.
+        """
         collected: list[str] = []
         for item in items:
-            # rag-web-browser puts URL in item.url or item.searchResult.url
             url  = (item.get("url")
                     or (item.get("searchResult") or {}).get("url", ""))
             text = (item.get("markdown") or item.get("text") or "").strip()
             if not text or len(text) < 200:
                 continue
+            if url and url in seen_urls:
+                logger.debug("Apify: dedup skip %s", url)
+                continue
             if not any(kw in text.lower() for kw in _LEADERSHIP_SIGNAL):
                 logger.debug("Apify: no leadership signal in %s (%d chars)", url, len(text))
                 continue
+            if url:
+                seen_urls.add(url)
             collected.append(f"[Page: {url}]\n{text[:_MAX_PAGE_CHARS]}")
             logger.info("Apify: kept %s (%d chars)", url, len(text))
         return "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
 
-    # ── Phase 1: Google search → rag-web-browser ──────────────────────────────
-    # Include "corporate governance" as an OR alternative so governance pages
-    # like gruposura.com/en/our-company/ethics-and-corporate-governance/ surface
-    # even when they don't mention "board of directors" in their title/H1.
-    query = (
-        f'"{company_name}" (board of directors OR "corporate governance" OR executive leadership) '
-        f'site:{domain}'
-    )
-    logger.info("Apify Phase 1 — rag-web-browser search for '%s'", company_name)
-    rag_items = _apify_rag_search(query, api_token, max_results=5)
-    result = _filter_items(rag_items)
+    # ── Phase 1a: Site-targeted, language-agnostic ────────────────────────────
+    # Single keywords (not phrases) so Google matches regardless of whether the
+    # page uses English or Spanish terminology.  No company name needed —
+    # site: already restricts to the right domain.
+    q1 = f"site:{domain} directors OR governance OR leadership OR board OR executives"
+    logger.info("Apify Phase 1a — site-targeted search for '%s'", company_name)
+    items_1a = _apify_rag_search(q1, api_token, max_results=5)
+    result = _filter_items(items_1a)
     if result:
-        logger.info("Apify Phase 1 succeeded for '%s': %d chars", company_name, len(result))
+        logger.info("Apify Phase 1a succeeded for '%s': %d chars", company_name, len(result))
         return result
 
-    logger.info("Apify Phase 1 empty for '%s', falling back to URL crawl", company_name)
+    # ── Phase 1b: Broad search — no site restriction ──────────────────────────
+    # Finds Wikipedia, Bloomberg, annual reports, press releases.
+    # Used when the corporate site has no indexed governance page or when 1a
+    # returns only irrelevant pages.
+    q2 = f'"{company_name}" board directors executives OR leadership'
+    logger.info("Apify Phase 1b — broad search for '%s' (1a returned nothing useful)", company_name)
+    items_1b = _apify_rag_search(q2, api_token, max_results=4)
+    result = _filter_items(items_1b)
+    if result:
+        logger.info("Apify Phase 1b succeeded for '%s': %d chars", company_name, len(result))
+        return result
+
+    logger.info("Apify search phases empty for '%s', falling back to URL crawl", company_name)
 
     # ── Phase 2: nav-discovery + curated URL patterns ─────────────────────────
     import time
@@ -2049,45 +2074,13 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
             source_text=user_msg,
         )
         if result.get("board") or result.get("executives"):
-            # Supplement missing board from Claude knowledge when web found execs only
-            if result.get("executives") and not result.get("board"):
-                logger.info(
-                    "Web found execs but no board for '%s' — supplementing from knowledge",
-                    company_name,
-                )
-                kb = _call_claude(
-                    system=_SYSTEM_FROM_KNOWLEDGE,
-                    user_msg=f"Company: {company_name}",
-                    label=f"{company_name} [board-supplement]",
-                )
-                if kb.get("board"):
-                    result["board"] = kb["board"]
-                    logger.info(
-                        "Knowledge supplement added %d board members for '%s'",
-                        len(result["board"]), company_name,
-                    )
             result["_source"] = "web"
             _LEADERSHIP_CACHE[cache_key] = result
             return result
         logger.info("Web+search+wiki returned no leaders for '%s'", company_name)
 
-    # ── Knowledge fallback — no web content found ─────────────────────────
-    logger.info("No web-sourced leaders for '%s' — trying Claude knowledge fallback", company_name)
-    kb = _call_claude(
-        system=_SYSTEM_FROM_KNOWLEDGE,
-        user_msg=f"Company: {company_name}",
-        label=f"{company_name} [knowledge-fallback]",
-    )
-    if kb.get("board") or kb.get("executives"):
-        kb["_source"] = "ai"
-        _LEADERSHIP_CACHE[cache_key] = kb
-        logger.info(
-            "Knowledge fallback for '%s': %d board, %d execs",
-            company_name, len(kb.get("board", [])), len(kb.get("executives", [])),
-        )
-        return kb
-
-    logger.info("No leaders found for '%s' from any source", company_name)
+    # ── No result — don't cache so next upload can retry ────────────────────
+    logger.info("No web-sourced leaders found for '%s' — returning empty (not cached)", company_name)
     return {"board": [], "executives": [], "_source": "none"}
 
 
