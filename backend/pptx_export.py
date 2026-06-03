@@ -1,26 +1,29 @@
 """
 PPTX export for the Organogram Engine.
 
-One slide per department, hierarchical person cards arranged in layer bands.
+One slide per department: top-down tree org chart (CEO → VPs → Directors…)
+with L-shaped connectors and branch-colour coding.
 """
 from __future__ import annotations
 
 import io
-import math
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Inches, Pt
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Slide geometry ─────────────────────────────────────────────────────────────
 
-SLIDE_W = Inches(13.333)   # 16:9 widescreen
-SLIDE_H = Inches(7.5)
+SLIDE_W  = Inches(13.333)   # 16:9 widescreen
+SLIDE_H  = Inches(7.5)
+HEADER_H = Inches(1.10)
 
-# Seniority label per layer
+# ── Layer labels (reference, not used in tree layout) ─────────────────────────
+
 LAYER_LABELS: dict[int, str] = {
     0:  "Board",
     1:  "C-Suite",
@@ -35,40 +38,55 @@ LAYER_LABELS: dict[int, str] = {
     10: "Analyst / Specialist",
 }
 
-# Fill colour per layer: dark navy → light slate
-_LAYER_RGB: list[tuple[int, int, int]] = [
-    (0x08, 0x15, 0x22),   # L0
-    (0x0c, 0x28, 0x3f),   # L1
-    (0x0f, 0x3e, 0x6e),   # L2
-    (0x17, 0x53, 0x88),   # L3
-    (0x21, 0x6b, 0xa8),   # L4
-    (0x2e, 0x86, 0xc1),   # L5
-    (0x44, 0x9b, 0xd5),   # L6
-    (0x5b, 0xb0, 0xe6),   # L7
-    (0x85, 0xc1, 0xed),   # L8
-    (0xa8, 0xd5, 0xf5),   # L9
-    (0xcc, 0xe8, 0xfa),   # L10
+# ── Tree card defaults ─────────────────────────────────────────────────────────
+# These are scaled down at runtime when the tree is wider/taller than the slide.
+
+_TREE_CARD_W   = Inches(2.0)
+_TREE_CARD_H   = Inches(0.72)
+_TREE_GAP_X    = Inches(0.22)   # horizontal gap between sibling subtrees
+_TREE_GAP_Y    = Inches(0.72)   # vertical gap between layers (for connectors)
+_TREE_SIDE_PAD = Inches(0.5)    # left / right slide padding
+_TREE_TOP_Y    = HEADER_H + Inches(0.22)   # y-start of tree area
+
+_TREE_AVAIL_W  = SLIDE_W - 2 * _TREE_SIDE_PAD
+_TREE_AVAIL_H  = SLIDE_H - _TREE_TOP_Y - Inches(0.2)
+
+# ── Branch colour palette ──────────────────────────────────────────────────────
+
+_BRANCH_COLORS: list[tuple[int, int, int]] = [
+    (0x21, 0x6b, 0xa8),   # steel blue
+    (0x1e, 0x88, 0x5e),   # forest green
+    (0x8e, 0x24, 0xaa),   # purple
+    (0xc6, 0x28, 0x28),   # deep red
+    (0xe6, 0x81, 0x2e),   # burnt orange
+    (0x00, 0x7b, 0x91),   # teal
 ]
 
-def _layer_rgb(layer: int) -> tuple[int, int, int]:
-    return _LAYER_RGB[min(layer, len(_LAYER_RGB) - 1)]
+# ── Colour helpers ─────────────────────────────────────────────────────────────
+
+def _lighten(rgb: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+    r, g, b = rgb
+    return (
+        min(255, r + int((255 - r) * amount)),
+        min(255, g + int((255 - g) * amount)),
+        min(255, b + int((255 - b) * amount)),
+    )
+
+def _luminance(rgb: tuple[int, int, int]) -> float:
+    r, g, b = rgb
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+def _hex_to_rgb_tuple(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return (0x34, 0x91, 0xE8)
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 def _rgb(r: int, g: int, b: int) -> RGBColor:
     return RGBColor(r, g, b)
 
-# White text for dark layers, dark text for light layers
-def _text_rgb(layer: int) -> RGBColor:
-    return RGBColor(0xFF, 0xFF, 0xFF) if layer <= 6 else RGBColor(0x08, 0x15, 0x22)
 
-# Convert hex string like "#3491E8" or "3491E8" → RGBColor
-def _hex_to_rgb(hex_color: str) -> RGBColor:
-    h = hex_color.lstrip("#")
-    if len(h) != 6:
-        return RGBColor(0x34, 0x91, 0xE8)
-    return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-
-
-# ── Slide helpers ─────────────────────────────────────────────────────────────
+# ── Low-level drawing helpers ─────────────────────────────────────────────────
 
 def _add_rect(
     slide, left, top, width, height,
@@ -77,7 +95,6 @@ def _add_rect(
     line_width: float = 0,
     corner_radius: int = 0,
 ):
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
     from pptx.oxml.ns import qn
     from lxml import etree
 
@@ -99,7 +116,6 @@ def _add_rect(
         shape.line.fill.background()
 
     if corner_radius:
-        # Set rounded corners via XML
         sp = shape._element
         spPr = sp.find(qn("p:spPr"))
         prstGeom = spPr.find(qn("a:prstGeom"))
@@ -107,18 +123,19 @@ def _add_rect(
             spPr.remove(prstGeom)
         new_geom = etree.SubElement(spPr, qn("a:prstGeom"), attrib={"prst": "roundRect"})
         avLst = etree.SubElement(new_geom, qn("a:avLst"))
-        # adj value: corner radius as a fraction of half the min dimension * 100000
         adj_val = min(50000, int(corner_radius * 100000 // min(width, height)))
         etree.SubElement(avLst, qn("a:gd"), attrib={"name": "adj", "fmla": f"val {adj_val}"})
 
     return shape
 
 
-def _add_textbox(slide, left, top, width, height, text: str,
-                 font_size: float, bold: bool = False,
-                 color: RGBColor | None = None,
-                 align=PP_ALIGN.LEFT,
-                 wrap: bool = True):
+def _add_textbox(
+    slide, left, top, width, height, text: str,
+    font_size: float, bold: bool = False,
+    color: RGBColor | None = None,
+    align=PP_ALIGN.LEFT,
+    wrap: bool = True,
+):
     txBox = slide.shapes.add_textbox(int(left), int(top), int(width), int(height))
     tf    = txBox.text_frame
     tf.word_wrap = wrap
@@ -133,39 +150,16 @@ def _add_textbox(slide, left, top, width, height, text: str,
     return txBox
 
 
-def _set_shape_text(shape, text: str, font_size: float, bold: bool = False,
-                    color: RGBColor | None = None, align=PP_ALIGN.LEFT,
-                    word_wrap: bool = True):
-    tf = shape.text_frame
-    tf.word_wrap = word_wrap
-    p  = tf.paragraphs[0]
-    p.alignment = align
-    # Clear existing runs
-    for run in p.runs:
-        run.text = ""
-    if not p.runs:
-        run = p.add_run()
-    else:
-        run = p.runs[0]
-    run.text = text
-    run.font.size = Pt(font_size)
-    run.font.bold = bold
-    if color:
-        run.font.color.rgb = color
+_LINE_PX = 9525   # ~0.75 pt in EMU (1 pt = 12700 EMU)
 
-
-# ── Card dimensions ───────────────────────────────────────────────────────────
-
-CARD_W    = Inches(2.55)
-CARD_H    = Inches(0.85)
-CARD_GAP  = Inches(0.12)
-BAND_GAP  = Inches(0.28)   # vertical gap between layer bands
-LEFT_PAD  = Inches(0.5)
-TOP_START = Inches(1.40)   # below header
-HEADER_H  = Inches(1.25)
-
-# Max cards across one row
-MAX_CARDS_ROW = 4
+def _add_line(slide, x1: int, y1: int, x2: int, y2: int, color: RGBColor) -> None:
+    """Draw a horizontal or vertical line as a thin filled rectangle."""
+    if abs(x2 - x1) < _LINE_PX:   # vertical
+        _add_rect(slide, x1 - _LINE_PX // 2, min(y1, y2),
+                  _LINE_PX, max(abs(y2 - y1), _LINE_PX), fill_rgb=color)
+    else:                           # horizontal
+        _add_rect(slide, min(x1, x2), y1 - _LINE_PX // 2,
+                  abs(x2 - x1), max(abs(y2 - y1), _LINE_PX), fill_rgb=color)
 
 
 # ── Cover slide ───────────────────────────────────────────────────────────────
@@ -174,14 +168,11 @@ def _make_cover(prs: Presentation, company: str, total_people: int,
                 dept_count: int, industry: str):
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
 
-    # Full-bleed dark gradient via two rects
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H,
               fill_rgb=RGBColor(0x08, 0x15, 0x22))
-    # Accent bar on the left
     _add_rect(slide, 0, 0, Inches(0.22), SLIDE_H,
               fill_rgb=RGBColor(0x34, 0x91, 0xE8))
 
-    # Company name
     _add_textbox(slide,
                  Inches(0.55), Inches(2.2),
                  Inches(11.0), Inches(1.6),
@@ -189,18 +180,15 @@ def _make_cover(prs: Presentation, company: str, total_people: int,
                  font_size=44, bold=True,
                  color=RGBColor(0xFF, 0xFF, 0xFF))
 
-    # Sub-line
     sub = f"Organisational Chart  ·  {total_people:,} people  ·  {dept_count} departments"
     if industry:
         sub += f"  ·  {industry}"
     _add_textbox(slide,
                  Inches(0.55), Inches(3.85),
                  Inches(11.0), Inches(0.55),
-                 sub,
-                 font_size=13,
+                 sub, font_size=13,
                  color=RGBColor(0x7e, 0xc8, 0xf8))
 
-    # Date
     _add_textbox(slide,
                  Inches(0.55), Inches(6.6),
                  Inches(6.0), Inches(0.4),
@@ -209,234 +197,309 @@ def _make_cover(prs: Presentation, company: str, total_people: int,
                  color=RGBColor(0x44, 0x6e, 0x88))
 
 
-# ── Department slide(s) ───────────────────────────────────────────────────────
+# ── Dept slide header ─────────────────────────────────────────────────────────
 
 def _draw_header(slide, dept_label: str, company: str,
-                 dept_color: RGBColor, people_count: int):
-    # Full-width coloured header bar
+                 dept_color: RGBColor,
+                 total_headcount: int,
+                 displayed_count: int | None = None):
+    """Full-width coloured header bar."""
     _add_rect(slide, 0, 0, SLIDE_W, HEADER_H, fill_rgb=dept_color)
-
-    # White accent bottom border
     _add_rect(slide, 0, HEADER_H - Inches(0.04), SLIDE_W, Inches(0.04),
               fill_rgb=RGBColor(0xFF, 0xFF, 0xFF))
 
-    # Department name
     _add_textbox(slide,
-                 Inches(0.45), Inches(0.20),
-                 Inches(9.5), Inches(0.72),
+                 Inches(0.45), Inches(0.18),
+                 Inches(9.5), Inches(0.65),
                  dept_label.upper(),
-                 font_size=26, bold=True,
+                 font_size=24, bold=True,
                  color=RGBColor(0xFF, 0xFF, 0xFF))
 
-    # Company + count on the right
+    if displayed_count is not None and displayed_count < total_headcount:
+        count_str = f"Top {displayed_count} of {total_headcount:,} people"
+    else:
+        count_str = f"{total_headcount:,} people"
+
     _add_textbox(slide,
-                 Inches(10.2), Inches(0.36),
-                 Inches(3.0), Inches(0.45),
-                 f"{company}\n{people_count} people",
+                 Inches(10.2), Inches(0.30),
+                 Inches(3.0), Inches(0.55),
+                 f"{company}\n{count_str}",
                  font_size=9,
                  color=RGBColor(0xFF, 0xFF, 0xFF),
                  align=PP_ALIGN.RIGHT)
 
 
-def _draw_person_card(slide, left, top, person: dict, layer: int):
-    """Draw a single person card (rounded rect + name + title + badge)."""
-    fill_r, fill_g, fill_b = _layer_rgb(layer)
-    fill  = RGBColor(fill_r, fill_g, fill_b)
-    txt   = _text_rgb(layer)
+# ── Tree data structure ───────────────────────────────────────────────────────
 
-    # Card background
-    card = _add_rect(slide, left, top, CARD_W, CARD_H,
-                     fill_rgb=fill, corner_radius=8000)
+@dataclass
+class TreeNode:
+    person:      dict
+    children:    list["TreeNode"]        = field(default_factory=list)
+    depth:       int                     = 0
+    branch_rgb:  tuple[int, int, int]    = (0x34, 0x91, 0xE8)
+    cx:          int                     = 0   # centre-x EMU (assigned later)
+    ty:          int                     = 0   # top-y EMU (assigned later)
+    subtree_w:   int                     = 0   # total subtree width EMU (assigned later)
 
-    name  = str(person.get("label", "—"))[:38]
-    title = str(person.get("metadata", {}).get("designation", "") or "")[:52]
-    badge = f"L{layer}"
 
-    # Name
+# ── Tree building ─────────────────────────────────────────────────────────────
+
+def _build_person_tree(people: list[dict]) -> list[TreeNode]:
+    """
+    Build an implied tree from a flat people list.
+    Uses the `layer` field as hierarchy depth; distributes children
+    across parents in the layer above as evenly as possible.
+    """
+    if not people:
+        return []
+
+    sorted_ppl = sorted(people, key=lambda p: (p.get("layer", 9), p.get("label", "")))
+
+    layer_groups: dict[int, list[dict]] = {}
+    for p in sorted_ppl:
+        layer_groups.setdefault(p.get("layer", 9), []).append(p)
+
+    layers    = sorted(layer_groups.keys())
+    depth_map = {L: i for i, L in enumerate(layers)}
+
+    nodes_by_layer: dict[int, list[TreeNode]] = {
+        L: [TreeNode(person=p, depth=depth_map[L]) for p in layer_groups[L]]
+        for L in layers
+    }
+
+    for i in range(len(layers) - 1):
+        parents  = nodes_by_layer[layers[i]]
+        children = nodes_by_layer[layers[i + 1]]
+        np_, nc  = len(parents), len(children)
+        for j, child in enumerate(children):
+            parent_idx = (j * np_) // nc
+            parents[parent_idx].children.append(child)
+
+    return nodes_by_layer[layers[0]]
+
+
+def _assign_branch_colors(roots: list[TreeNode],
+                           root_rgb: tuple[int, int, int]) -> None:
+    """
+    Assign branch colours:
+    - Root nodes              → root_rgb (dept colour)
+    - Root's direct children  → cycling _BRANCH_COLORS (one per branch)
+    - Deeper descendants      → progressively lighter shade of branch colour
+    """
+    def _subtree(node: TreeNode, color: tuple[int, int, int]) -> None:
+        node.branch_rgb = color
+        lighter = _lighten(color, 0.30)
+        for child in node.children:
+            _subtree(child, lighter)
+
+    for root in roots:
+        root.branch_rgb = root_rgb
+        for i, child in enumerate(root.children):
+            branch_color = _BRANCH_COLORS[i % len(_BRANCH_COLORS)]
+            _subtree(child, branch_color)
+
+
+# ── Layout helpers ────────────────────────────────────────────────────────────
+
+def _calc_subtree_width(node: TreeNode, card_w: int, gap_x: int) -> int:
+    """Post-order pass: set node.subtree_w for every node."""
+    if not node.children:
+        node.subtree_w = card_w
+        return card_w
+    children_w = sum(_calc_subtree_width(c, card_w, gap_x) for c in node.children)
+    children_w += gap_x * (len(node.children) - 1)
+    node.subtree_w = max(card_w, children_w)
+    return node.subtree_w
+
+
+def _assign_positions(node: TreeNode, cx: int, ty: int,
+                       card_h: int, gap_y: int, gap_x: int) -> None:
+    """Pre-order pass: set node.cx and node.ty for every node."""
+    node.cx = cx
+    node.ty = ty
+    if not node.children:
+        return
+    total_w = sum(c.subtree_w for c in node.children) + gap_x * (len(node.children) - 1)
+    child_x = cx - total_w // 2
+    child_ty = ty + card_h + gap_y
+    for child in node.children:
+        child_cx = child_x + child.subtree_w // 2
+        _assign_positions(child, child_cx, child_ty, card_h, gap_y, gap_x)
+        child_x += child.subtree_w + gap_x
+
+
+def _max_depth_of(nodes: list[TreeNode]) -> int:
+    def _depth(n: TreeNode) -> int:
+        if not n.children:
+            return n.depth
+        return max(_depth(c) for c in n.children)
+    return max((_depth(r) for r in nodes), default=0)
+
+
+# ── Drawing ───────────────────────────────────────────────────────────────────
+
+_CONN_COLOR = RGBColor(0xb0, 0xb8, 0xc4)   # neutral grey for connector lines
+
+
+def _draw_connectors(slide, node: TreeNode, card_h: int, gap_y: int) -> None:
+    """Draw L-shaped connectors from node to each child, then recurse."""
+    if not node.children:
+        return
+
+    parent_cx = node.cx
+    parent_by = node.ty + card_h   # bottom of parent box
+
+    if len(node.children) == 1:
+        child = node.children[0]
+        _add_line(slide, parent_cx, parent_by, parent_cx, child.ty, _CONN_COLOR)
+    else:
+        mid_y = parent_by + gap_y // 2
+        _add_line(slide, parent_cx, parent_by, parent_cx, mid_y, _CONN_COLOR)
+        left_cx  = node.children[0].cx
+        right_cx = node.children[-1].cx
+        _add_line(slide, left_cx, mid_y, right_cx, mid_y, _CONN_COLOR)
+        for child in node.children:
+            _add_line(slide, child.cx, mid_y, child.cx, child.ty, _CONN_COLOR)
+
+    for child in node.children:
+        _draw_connectors(slide, child, card_h, gap_y)
+
+
+def _draw_box(slide, node: TreeNode, card_w: int, card_h: int, scale: float) -> None:
+    """Draw a single person box with name, title, and branch colour fill."""
+    r, g, b = node.branch_rgb
+    fill = RGBColor(r, g, b)
+    txt  = (RGBColor(0xFF, 0xFF, 0xFF) if _luminance((r, g, b)) < 155
+            else RGBColor(0x08, 0x15, 0x22))
+
+    left = node.cx - card_w // 2
+    top  = node.ty
+
+    _add_rect(slide, left, top, card_w, card_h, fill_rgb=fill, corner_radius=8000)
+
+    person = node.person
+    name   = str(person.get("label", "—"))[:36]
+    title  = str(person.get("metadata", {}).get("designation", "") or "")[:48]
+
+    name_pt  = max(5.5, 8.5 * scale)
+    title_pt = max(4.5, 6.5 * scale)
+    pad_x    = max(_LINE_PX, int(Inches(0.09) * scale))
+    name_top = top + int(Inches(0.06))
+    name_h   = int(Inches(0.28))
+
     _add_textbox(slide,
-                 left + Inches(0.12), top + Inches(0.06),
-                 CARD_W - Inches(0.55), Inches(0.35),
-                 name,
-                 font_size=9.5, bold=True, color=txt, wrap=False)
+                 left + pad_x, name_top,
+                 card_w - 2 * pad_x, name_h,
+                 name, font_size=name_pt, bold=True, color=txt, wrap=False)
 
-    # Title (smaller, lighter)
-    title_color = RGBColor(
-        min(fill_r + 80, 255),
-        min(fill_g + 80, 255),
-        min(fill_b + 80, 255),
-    ) if layer <= 6 else RGBColor(0x44, 0x6e, 0x88)
-
-    if title:
+    if title and card_h > int(Inches(0.48)):
+        title_color = (
+            RGBColor(min(r + 70, 255), min(g + 70, 255), min(b + 70, 255))
+            if _luminance((r, g, b)) < 155
+            else RGBColor(0x55, 0x75, 0x88)
+        )
+        title_top = top + int(Inches(0.34))
         _add_textbox(slide,
-                     left + Inches(0.12), top + Inches(0.38),
-                     CARD_W - Inches(0.55), Inches(0.40),
-                     title,
-                     font_size=7.5, bold=False, color=title_color)
-
-    # Region tag (small, bottom-left)
-    region = str(person.get("metadata", {}).get("region", "") or "")
-    if region and region != "Global HQ":
-        _add_textbox(slide,
-                     left + Inches(0.12), top + CARD_H - Inches(0.22),
-                     Inches(1.4), Inches(0.20),
-                     f"🌐 {region[:18]}",
-                     font_size=6.5, color=title_color)
-
-    # Layer badge pill (top-right)
-    badge_fill = RGBColor(
-        min(fill_r + 40, 255),
-        min(fill_g + 40, 255),
-        min(fill_b + 40, 255),
-    ) if layer <= 6 else RGBColor(0xdd, 0xee, 0xf8)
-    badge_txt = RGBColor(0xFF, 0xFF, 0xFF) if layer <= 6 else RGBColor(0x08, 0x15, 0x22)
-    badge_left = left + CARD_W - Inches(0.44)
-    badge_top  = top + Inches(0.06)
-    _add_rect(slide, badge_left, badge_top,
-              Inches(0.36), Inches(0.24),
-              fill_rgb=badge_fill, corner_radius=20000)
-    _add_textbox(slide,
-                 badge_left + Inches(0.02), badge_top,
-                 Inches(0.32), Inches(0.24),
-                 badge,
-                 font_size=7, bold=True, color=badge_txt, align=PP_ALIGN.CENTER)
-
-    return card
+                     left + pad_x, title_top,
+                     card_w - 2 * pad_x, int(Inches(0.28)),
+                     title, font_size=title_pt, color=title_color)
 
 
-def _draw_connector(slide, parent_center_x, parent_bottom_y,
-                    child_center_x, child_top_y, color: RGBColor):
-    """Draw an L-shaped connector from parent card bottom to child card top."""
-    from pptx.oxml.ns import qn
-    from lxml import etree
+def _draw_tree(slide, roots: list[TreeNode],
+               card_w: int, card_h: int, gap_y: int, scale: float) -> None:
+    """Draw connectors (back) then boxes (front) for the whole tree."""
+    for root in roots:
+        _draw_connectors(slide, root, card_h, gap_y)
 
-    mid_y = (parent_bottom_y + child_top_y) // 2
+    def _boxes(node: TreeNode) -> None:
+        _draw_box(slide, node, card_w, card_h, scale)
+        for child in node.children:
+            _boxes(child)
 
-    def _add_line(x1, y1, x2, y2):
-        """Add a thin solid line shape."""
-        # Use a very thin rectangle as a line (1 px ≈ 9525 EMU)
-        if abs(x2 - x1) < 9525:   # vertical
-            _add_rect(slide, x1, min(y1, y2), 9525, abs(y2 - y1),
-                      fill_rgb=color)
-        else:                       # horizontal
-            _add_rect(slide, min(x1, x2), y1, abs(x2 - x1), 9525,
-                      fill_rgb=color)
-
-    # Vertical stem down from parent
-    _add_line(parent_center_x, parent_bottom_y, parent_center_x, mid_y)
-    # Horizontal leg to child
-    _add_line(parent_center_x, mid_y, child_center_x, mid_y)
-    # Vertical drop to child
-    _add_line(child_center_x, mid_y, child_center_x, child_top_y)
+    for root in roots:
+        _boxes(root)
 
 
-def _make_dept_slides(prs: Presentation, company: str,
-                      dept_label: str, dept_color_hex: str,
-                      executives: list[dict]):
-    """Create one or more slides for a department."""
-    blank = prs.slide_layouts[6]
-    dept_color = _hex_to_rgb(dept_color_hex)
+# ── Department slide ──────────────────────────────────────────────────────────
 
-    # Sort executives: layer first, then name
-    execs = sorted(executives, key=lambda p: (p.get("layer", 99), p.get("label", "")))
+def _make_dept_tree_slide(
+    prs: Presentation,
+    company: str,
+    dept_label: str,
+    dept_color_hex: str,
+    executives: list[dict],
+    headcount: int,
+) -> None:
+    """Create one tree-layout org chart slide for a department."""
+    slide      = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+    dept_rgb   = _hex_to_rgb_tuple(dept_color_hex)
+    dept_color = _rgb(*dept_rgb)
 
-    # Group into layer bands
-    bands: dict[int, list[dict]] = {}
-    for p in execs:
-        L = p.get("layer", 9)
-        bands.setdefault(L, []).append(p)
+    displayed = len(executives)
+    _draw_header(
+        slide, dept_label, company, dept_color,
+        total_headcount=headcount,
+        displayed_count=(displayed if displayed < headcount else None),
+    )
 
-    # ── Pagination ────────────────────────────────────────────────────────
-    # Pre-calculate how many rows each band needs, then bin into slides
-    def _rows_for_band(count: int) -> int:
-        return math.ceil(count / MAX_CARDS_ROW)
+    if not executives:
+        return
 
-    ROWS_PER_SLIDE = 6   # conservative: leaves headroom for band labels
+    # Build implied hierarchy from layer numbers
+    roots = _build_person_tree(executives)
+    if not roots:
+        return
 
-    # Build a flat list of (layer, chunk_of_people) that fits per slide
-    slides_content: list[list[tuple[int, list[dict]]]] = []
-    current_page: list[tuple[int, list[dict]]] = []
-    current_rows = 0
+    # Colour-code branches
+    _assign_branch_colors(roots, dept_rgb)
 
-    for layer in sorted(bands.keys()):
-        people = bands[layer]
-        # Split band into per-slide chunks
-        chunk_size = MAX_CARDS_ROW * ROWS_PER_SLIDE
-        for chunk_start in range(0, len(people), chunk_size):
-            chunk = people[chunk_start:chunk_start + chunk_size]
-            rows_needed = _rows_for_band(len(chunk)) + 1  # +1 for band label
-            if current_rows + rows_needed > ROWS_PER_SLIDE and current_page:
-                slides_content.append(current_page)
-                current_page = []
-                current_rows = 0
-            current_page.append((layer, chunk))
-            current_rows += rows_needed
+    # ── Scale-to-fit ──────────────────────────────────────────────────────
+    card_w = int(_TREE_CARD_W)
+    card_h = int(_TREE_CARD_H)
+    gap_x  = int(_TREE_GAP_X)
+    gap_y  = int(_TREE_GAP_Y)
 
-    if current_page:
-        slides_content.append(current_page)
+    # Phase 1: calculate nominal tree dimensions
+    for root in roots:
+        _calc_subtree_width(root, card_w, gap_x)
 
-    total_pages = len(slides_content)
+    total_tree_w = sum(r.subtree_w for r in roots) + gap_x * (len(roots) - 1)
 
-    for page_idx, page_bands in enumerate(slides_content):
-        slide = prs.slides.add_slide(blank)
+    num_layers   = _max_depth_of(roots) + 1   # 0-indexed → +1 for actual count
+    total_tree_h = num_layers * card_h + (num_layers - 1) * gap_y
 
-        page_label = dept_label
-        if total_pages > 1:
-            page_label += f"  ({page_idx + 1}/{total_pages})"
+    avail_w = int(_TREE_AVAIL_W)
+    avail_h = int(_TREE_AVAIL_H)
 
-        _draw_header(slide, page_label, company, dept_color, len(execs))
+    scale = min(avail_w / total_tree_w, avail_h / total_tree_h, 1.0)
+    scale = max(scale, 0.25)   # floor: never below 25% (still renders, just small)
 
-        y = TOP_START
-        prev_band_cards: list[tuple[int, int, int]] = []   # (center_x, bottom_y, layer)
+    # Phase 2: apply scale if needed
+    if scale < 0.98:
+        card_w = int(card_w * scale)
+        card_h = int(card_h * scale)
+        gap_x  = int(gap_x  * scale)
+        gap_y  = int(gap_y  * scale)
+        for root in roots:
+            _calc_subtree_width(root, card_w, gap_x)
+        total_tree_w = sum(r.subtree_w for r in roots) + gap_x * (len(roots) - 1)
 
-        for (layer, people) in page_bands:
-            # Band label strip
-            band_label = LAYER_LABELS.get(layer, f"Layer {layer}")
-            label_rect = _add_rect(slide,
-                                   0, y, SLIDE_W, Inches(0.26),
-                                   fill_rgb=RGBColor(0xf0, 0xf5, 0xf9))
-            _add_textbox(slide,
-                         Inches(0.45), y + Inches(0.03),
-                         Inches(10.0), Inches(0.22),
-                         band_label.upper(),
-                         font_size=7.5, bold=True,
-                         color=RGBColor(0x0c, 0x36, 0x49))
-            # Count badge
-            count_text = str(len(people))
-            _add_textbox(slide,
-                         Inches(11.5), y + Inches(0.03),
-                         Inches(1.6), Inches(0.22),
-                         count_text,
-                         font_size=7.5, bold=True,
-                         color=RGBColor(0x34, 0x91, 0xE8),
-                         align=PP_ALIGN.RIGHT)
-            y += Inches(0.29)
+    # ── Assign positions ──────────────────────────────────────────────────
+    slide_cx  = int(SLIDE_W // 2)
+    tree_top  = int(_TREE_TOP_Y)
 
-            # Cards in rows
-            rows = math.ceil(len(people) / MAX_CARDS_ROW)
-            this_band_cards: list[tuple[int, int, int]] = []
+    if len(roots) == 1:
+        _assign_positions(roots[0], slide_cx, tree_top, card_h, gap_y, gap_x)
+    else:
+        # Multiple roots: lay them side by side, centred on the slide
+        start_cx = slide_cx - total_tree_w // 2
+        for root in roots:
+            root_cx = start_cx + root.subtree_w // 2
+            _assign_positions(root, root_cx, tree_top, card_h, gap_y, gap_x)
+            start_cx += root.subtree_w + gap_x
 
-            for row_idx in range(rows):
-                row_people = people[row_idx * MAX_CARDS_ROW:(row_idx + 1) * MAX_CARDS_ROW]
-                n = len(row_people)
-
-                # Centre the row
-                total_row_w = n * CARD_W + (n - 1) * CARD_GAP
-                row_left = (SLIDE_W - total_row_w) // 2
-
-                for col_idx, person in enumerate(row_people):
-                    card_left = row_left + col_idx * (CARD_W + CARD_GAP)
-                    _draw_person_card(slide, card_left, y, person, layer)
-                    center_x = int(card_left + CARD_W // 2)
-                    this_band_cards.append((center_x, int(y), int(y + CARD_H)))
-
-                y += CARD_H + CARD_GAP
-
-            prev_band_cards = this_band_cards
-            y += BAND_GAP
-
-        # Overflow guard
-        if y > SLIDE_H - Inches(0.2):
-            pass   # pagination handled above; shouldn't overflow
+    # ── Draw ──────────────────────────────────────────────────────────────
+    _draw_tree(slide, roots, card_w, card_h, gap_y, scale)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -444,38 +507,40 @@ def _make_dept_slides(prs: Presentation, company: str,
 def build_pptx(
     company: str,
     industry: str,
-    depts: list[dict[str, Any]],   # list of {label, color, executives: [...]}
+    depts: list[dict[str, Any]],
 ) -> bytes:
     """
     Build and return PPTX bytes.
 
-    ``depts`` is ordered: BOD first, then EM, then primary depts, then sub-depts.
-    Each entry:
+    ``depts`` entries:
       {
         "label":      str,
-        "color":      str,   # hex like "#3491E8" or "3491E8"
-        "executives": list[dict],   # raw person node dicts from the DAG
+        "color":      str,           # hex like "#3491E8"
+        "executives": list[dict],    # person node dicts (already capped by caller)
+        "headcount":  int,           # total before capping (for header display)
       }
     """
     prs = Presentation()
     prs.slide_width  = int(SLIDE_W)
     prs.slide_height = int(SLIDE_H)
 
-    total_people = sum(len(d["executives"]) for d in depts)
+    total_people = sum(d.get("headcount", len(d.get("executives", []))) for d in depts)
     dept_count   = len(depts)
 
     _make_cover(prs, company, total_people, dept_count, industry)
 
     for dept in depts:
-        execs = dept.get("executives", [])
+        execs     = dept.get("executives", [])
+        headcount = dept.get("headcount", len(execs))
         if not execs:
             continue
-        _make_dept_slides(
+        _make_dept_tree_slide(
             prs,
-            company       = company,
-            dept_label    = dept.get("label", "Department"),
-            dept_color_hex= dept.get("color", "#3491E8"),
-            executives    = execs,
+            company        = company,
+            dept_label     = dept.get("label", "Department"),
+            dept_color_hex = dept.get("color", "#3491E8"),
+            executives     = execs,
+            headcount      = headcount,
         )
 
     buf = io.BytesIO()

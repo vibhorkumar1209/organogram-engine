@@ -737,14 +737,22 @@ def export_pptx():
         people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
         return people
 
+    MAX_PPTX_PER_DEPT = 50   # top-N most senior per dept for readable tree
+
     depts: list[dict] = []
     for dept_id in dept_nodes:
-        attrs   = dag.G.nodes.get(dept_id, {})
-        label   = attrs.get("label", dept_id)
-        color   = attrs.get("color", "#3491E8")
-        people  = _collect_people(dept_id)
+        attrs     = dag.G.nodes.get(dept_id, {})
+        label     = attrs.get("label", dept_id)
+        color     = attrs.get("color", "#3491E8")
+        people    = _collect_people(dept_id)
+        headcount = len(people)
         if people:
-            depts.append({"label": label, "color": color, "executives": people})
+            depts.append({
+                "label":      label,
+                "color":      color,
+                "executives": people[:MAX_PPTX_PER_DEPT],
+                "headcount":  headcount,
+            })
 
     if not depts:
         raise HTTPException(status_code=404,
