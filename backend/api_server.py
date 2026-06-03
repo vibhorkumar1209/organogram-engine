@@ -698,8 +698,11 @@ def export_pptx():
     # ── Collect dept_primary nodes in BFS order ───────────────────────────
     from collections import deque as _deque
 
-    dept_nodes:    list[str] = []
-    visited_bfs:   set[str]  = set()
+    _SUB_TYPES    = {"dept_secondary", "dept_tertiary"}
+    _ALL_DEPT_TYPES = {"dept_primary", "dept_secondary", "dept_tertiary"}
+
+    dept_nodes:  list[str] = []
+    visited_bfs: set[str]  = set()
     q = _deque(["root_global"])
     while q:
         nid = q.popleft()
@@ -713,45 +716,79 @@ def export_pptx():
         for child in dag.G.successors(nid):
             q.append(child)
 
-    # ── For each dept, collect all people in its subtree ─────────────────
-    def _collect_people(dept_id: str) -> list[dict]:
-        people:  list[dict] = []
-        visited: set[str]   = set()
+    # If no dept_primary nodes found, fall back to using root's direct dept children
+    if not dept_nodes:
+        for child in dag.G.successors("root_global"):
+            attrs = dag.G.nodes.get(child, {})
+            if attrs.get("node_type", "") in _ALL_DEPT_TYPES:
+                dept_nodes.append(child)
 
+    # ── Helpers ───────────────────────────────────────────────────────────
+    MAX_PPTX_PER_SECTION = 15   # people shown per slide; paginate after this
+
+    def _collect_direct_people(dept_id: str) -> tuple[list[dict], int]:
+        """People directly under dept_id (not inside sub-depts). Returns (capped, total)."""
+        people: list[dict] = []
+        for child in dag.G.successors(dept_id):
+            attrs = dict(dag.G.nodes.get(child, {}))
+            if attrs.get("node_type") == "person":
+                people.append(attrs)
+        people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
+        return people[:MAX_PPTX_PER_SECTION], len(people)
+
+    def _count_subtree_people(dept_id: str) -> int:
+        """Count all people in subtree (stops at dept_primary boundaries)."""
+        count, visited = 0, set()
         def _dfs(nid: str, depth: int = 0) -> None:
+            nonlocal count
             if nid in visited:
                 return
             visited.add(nid)
-            attrs     = dict(dag.G.nodes.get(nid, {}))
-            node_type = attrs.get("node_type", "")
-            if node_type == "person":
-                people.append(attrs)
+            attrs = dag.G.nodes.get(nid, {})
+            nt    = attrs.get("node_type", "")
+            if nt == "person":
+                count += 1
                 return
-            # Mirror /executives: stop at child dept_primary boundaries
-            if depth > 0 and node_type == "dept_primary":
+            if depth > 0 and nt == "dept_primary":
                 return
             for child in dag.G.successors(nid):
                 _dfs(child, depth + 1)
-
         _dfs(dept_id)
-        people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
-        return people
+        return count
 
-    MAX_PPTX_PER_DEPT = 50   # top-N most senior per dept for readable tree
+    def _collect_subdepts(dept_id: str) -> list[dict]:
+        """Immediate dept_secondary / dept_tertiary children of dept_id."""
+        result: list[dict] = []
+        for child in dag.G.successors(dept_id):
+            attrs = dag.G.nodes.get(child, {})
+            if attrs.get("node_type") in _SUB_TYPES:
+                direct, total = _collect_direct_people(child)
+                if total == 0:
+                    total = _count_subtree_people(child)
+                if total:
+                    result.append({
+                        "label":      attrs.get("label", child),
+                        "color":      attrs.get("color", "#3491E8"),
+                        "headcount":  total,
+                        "executives": direct,
+                    })
+        return result
 
     depts: list[dict] = []
     for dept_id in dept_nodes:
         attrs     = dag.G.nodes.get(dept_id, {})
         label     = attrs.get("label", dept_id)
         color     = attrs.get("color", "#3491E8")
-        people    = _collect_people(dept_id)
-        headcount = len(people)
-        if people:
+        direct, _ = _collect_direct_people(dept_id)
+        headcount = _count_subtree_people(dept_id)
+        subdepts  = _collect_subdepts(dept_id)
+        if headcount:
             depts.append({
                 "label":      label,
                 "color":      color,
-                "executives": people[:MAX_PPTX_PER_DEPT],
                 "headcount":  headcount,
+                "executives": direct,
+                "subdepts":   subdepts,
             })
 
     if not depts:
