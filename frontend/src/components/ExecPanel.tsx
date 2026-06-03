@@ -867,10 +867,8 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, onClose, apiB
             <div style={{ fontSize: 20, marginBottom: 8, opacity: 0.3 }}>⊘</div>
             <div>No executives found for this department.</div>
             <div style={{ fontSize: 10, color: '#bad4dc', marginTop: 6, lineHeight: 1.6 }}>
-              This can happen if:
-              <br />· The department has no people in the uploaded data
-              <br />· The server restarted (Render free tier) — re-upload your CSV
-              <br />· Board / EM data is still being fetched in the background
+              Try re-uploading your CSV, or wait a moment if Board / EM data
+              is still being fetched in the background.
             </div>
           </div>
         )}

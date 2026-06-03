@@ -176,14 +176,11 @@ export default function App() {
     setPanelDept(null); setPanelExecs(null)
     setHighlight(null)
     bumpFit()
-    // Reload backend data so /executives calls succeed after restore.
-    // Demo entries always reload the demo dataset.
-    // Upload entries: wake the backend (ping) — can't restore CSV without the file.
-    fetch(entry.source === 'demo'
-      ? `${API}/load-demo`
-      : `${API}/ping`,
-      entry.source === 'demo' ? { method: 'POST' } : {}
-    ).catch(() => {/* wake-only, ignore errors */})
+    // Demo entries: reload the dataset so /executives calls succeed after restore.
+    // Upload entries: exec cache covers this; backend keeps data in memory.
+    if (entry.source === 'demo') {
+      fetch(`${API}/load-demo`, { method: 'POST' }).catch(() => {})
+    }
   }, [])
 
   const deleteSnapshot = useCallback((id: string) => {
@@ -254,9 +251,7 @@ export default function App() {
     setCompanyWebsite('')
   }
 
-  // Ping backend on load so Render wakes before first upload
   useEffect(() => {
-    fetch(`${API}/ping`).catch(() => {/* ignore — just waking Render */})
     loadDemo()
   }, [])
 
@@ -420,48 +415,10 @@ export default function App() {
         ? `${API}/upload?company_website=${encodeURIComponent(companyWebsite.trim())}`
         : `${API}/upload`
 
-      // Render free-tier spins down after inactivity (cold start ~30-60s, returns 503).
-      // On 503 or network error: poll /ping every 5s until backend responds (max 90s),
-      // then auto-retry the upload — no manual re-upload needed.
-      const waitForBackend = async (): Promise<void> => {
-        const MAX_WAIT = 90_000
-        const start = Date.now()
-        while (Date.now() - start < MAX_WAIT) {
-          const waited = Math.round((Date.now() - start) / 1000)
-          setStatusMsg(`Backend waking up… ${waited}s (Render free tier cold start)`)
-          await new Promise(r => setTimeout(r, 5_000))
-          try {
-            const p = await fetch(`${API}/ping`)
-            if (p.ok) return   // backend is up — proceed with upload
-          } catch { /* still waking */ }
-        }
-        throw new Error('Backend did not respond within 90s — please try again.')
-      }
-
-      let res: Response
-      let attempt = 0
-      while (true) {
-        attempt++
-        try {
-          res = await fetch(uploadUrl, { method: 'POST', body: form })
-        } catch (fetchErr: any) {
-          // Network error — backend cold or unreachable
-          if (attempt <= 2) {
-            await waitForBackend()
-            continue
-          }
-          throw fetchErr
-        }
-        if (res.status === 503 && attempt <= 2) {
-          // Render is cold-starting
-          await waitForBackend()
-          continue
-        }
-        break
-      }
+      const res = await fetch(uploadUrl, { method: 'POST', body: form })
       clearInterval(tick)
-      if (!res!.ok) {
-        const errText = await res!.text()
+      if (!res.ok) {
+        const errText = await res.text()
         let detail = errText
         try { detail = JSON.parse(errText).detail ?? errText } catch {}
         throw new Error(detail)
