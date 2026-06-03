@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { OrgNode } from '../types'
 
 export type ReportType =
@@ -97,7 +98,7 @@ export const FeedbackModal: React.FC<Props> = ({
   }
 
   if (submitted) {
-    return (
+    return createPortal(
       <div style={overlay} onClick={onClose}>
         <div style={{ ...card, alignItems: 'center', gap: 12, padding: 32 }}>
           <div style={{ fontSize: 32 }}>✓</div>
@@ -108,11 +109,12 @@ export const FeedbackModal: React.FC<Props> = ({
             Thank you — our team will review this correction.
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     )
   }
 
-  return (
+  return createPortal(
     <div style={overlay} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={card}>
 
@@ -245,6 +247,7 @@ export const FeedbackModal: React.FC<Props> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
