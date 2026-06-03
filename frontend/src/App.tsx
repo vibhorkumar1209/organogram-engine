@@ -4,7 +4,7 @@ import { OrgChart } from './components/OrgChart'
 import { SearchBar } from './components/SearchBar'
 import { ExecPanel } from './components/ExecPanel'
 
-const API = import.meta.env.VITE_API_URL || '/api'
+const API = (import.meta.env.VITE_API_URL || '/api').trim()
 
 // ── History ────────────────────────────────────────────────────────────
 const HISTORY_KEY  = 'orgchart_history'
