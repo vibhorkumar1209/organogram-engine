@@ -678,6 +678,93 @@ def export_org_chart(fmt: str = Query("csv", description="csv or json")):
     )
 
 
+@app.get("/export/pptx")
+def export_pptx():
+    """
+    Export the full org chart as a PowerPoint presentation.
+    One slide per top-level department; people arranged in seniority-band rows.
+    """
+    if not _dag_loaded():
+        raise HTTPException(status_code=404, detail="No data loaded. POST /upload first.")
+    dag, _ = _require_dag()
+
+    # Company metadata from root node
+    root_attrs = dag.G.nodes.get("root_global", {})
+    company    = root_attrs.get("label", "Organization")
+    root_meta  = root_attrs.get("metadata", {})
+    industry   = root_meta.get("industry", "")
+
+    # ── Collect dept_primary nodes in BFS order ───────────────────────────
+    from collections import deque as _deque
+
+    dept_nodes:    list[str] = []
+    visited_bfs:   set[str]  = set()
+    q = _deque(["root_global"])
+    while q:
+        nid = q.popleft()
+        if nid in visited_bfs:
+            continue
+        visited_bfs.add(nid)
+        attrs     = dag.G.nodes.get(nid, {})
+        node_type = attrs.get("node_type", "")
+        if node_type == "dept_primary":
+            dept_nodes.append(nid)
+        for child in dag.G.successors(nid):
+            q.append(child)
+
+    # ── For each dept, collect all people in its subtree ─────────────────
+    def _collect_people(dept_id: str) -> list[dict]:
+        people:  list[dict] = []
+        visited: set[str]   = set()
+
+        def _dfs(nid: str, depth: int = 0) -> None:
+            if nid in visited:
+                return
+            visited.add(nid)
+            attrs     = dict(dag.G.nodes.get(nid, {}))
+            node_type = attrs.get("node_type", "")
+            if node_type == "person":
+                people.append(attrs)
+                return
+            # Mirror /executives: stop at child dept_primary boundaries
+            if depth > 0 and node_type == "dept_primary":
+                return
+            for child in dag.G.successors(nid):
+                _dfs(child, depth + 1)
+
+        _dfs(dept_id)
+        people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
+        return people
+
+    depts: list[dict] = []
+    for dept_id in dept_nodes:
+        attrs   = dag.G.nodes.get(dept_id, {})
+        label   = attrs.get("label", dept_id)
+        color   = attrs.get("color", "#3491E8")
+        people  = _collect_people(dept_id)
+        if people:
+            depts.append({"label": label, "color": color, "executives": people})
+
+    if not depts:
+        raise HTTPException(status_code=404,
+                            detail="No people found. Upload a dataset first.")
+
+    from pptx_export import build_pptx as _build_pptx
+    pptx_bytes = _build_pptx(company, industry, depts)
+
+    from datetime import datetime as _dt
+    safe_name = company.replace(" ", "_").replace("/", "-")
+    filename  = f"{safe_name}_org_chart_{_dt.now().strftime('%Y%m%d')}.pptx"
+
+    return StreamingResponse(
+        iter([pptx_bytes]),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ─────────────────────────────────────────────
 # GRAPH DATA
 # ─────────────────────────────────────────────

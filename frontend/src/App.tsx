@@ -486,6 +486,24 @@ export default function App() {
     finally { setExporting(false) }
   }
 
+  // ── Export org chart as PPTX ──────────────────────────────────────
+  const [exportingPPT, setExportingPPT] = useState(false)
+  const handleExportPPT = async () => {
+    setExportingPPT(true)
+    try {
+      const res = await fetch(`${API}/export/pptx`)
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const cd   = res.headers.get('content-disposition') ?? ''
+      const name = cd.match(/filename="([^"]+)"/)?.[1] ?? 'org_chart.pptx'
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = name; a.click()
+      URL.revokeObjectURL(url)
+    } catch { /* silent */ }
+    finally { setExportingPPT(false) }
+  }
+
   const handleSearchFocus = (nodeId: string) => {
     setHighlight(nodeId)
     setTimeout(() => setHighlight(null), 2500)
@@ -637,6 +655,26 @@ export default function App() {
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             {exporting ? 'Saving…' : 'Save CSV'}
+          </button>
+        )}
+
+        {status === 'ready' && (
+          <button
+            onClick={handleExportPPT}
+            disabled={exportingPPT}
+            title="Download org chart as PowerPoint (one slide per department)"
+            style={{
+              background: 'transparent', border: '1px solid rgba(52,145,232,0.45)', borderRadius: 7,
+              padding: '5px 10px', color: '#3491E8', fontSize: 11, cursor: exportingPPT ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
+              opacity: exportingPPT ? 0.6 : 1,
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <path d="M8 21h8M12 17v4"/>
+            </svg>
+            {exportingPPT ? 'Building…' : 'Download PPT'}
           </button>
         )}
 
