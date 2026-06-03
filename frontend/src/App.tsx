@@ -421,7 +421,23 @@ export default function App() {
         : `${API}/upload`
 
       // Render free-tier spins down after inactivity (cold start ~30-60s, returns 503).
-      // Retry the upload once after a 45s wait when we get a 503 or network failure.
+      // On 503 or network error: poll /ping every 5s until backend responds (max 90s),
+      // then auto-retry the upload — no manual re-upload needed.
+      const waitForBackend = async (): Promise<void> => {
+        const MAX_WAIT = 90_000
+        const start = Date.now()
+        while (Date.now() - start < MAX_WAIT) {
+          const waited = Math.round((Date.now() - start) / 1000)
+          setStatusMsg(`Backend waking up… ${waited}s (Render free tier cold start)`)
+          await new Promise(r => setTimeout(r, 5_000))
+          try {
+            const p = await fetch(`${API}/ping`)
+            if (p.ok) return   // backend is up — proceed with upload
+          } catch { /* still waking */ }
+        }
+        throw new Error('Backend did not respond within 90s — please try again.')
+      }
+
       let res: Response
       let attempt = 0
       while (true) {
@@ -429,18 +445,16 @@ export default function App() {
         try {
           res = await fetch(uploadUrl, { method: 'POST', body: form })
         } catch (fetchErr: any) {
-          // Network error (no connection, CORS preflight fail, DNS, etc.)
-          if (attempt === 1) {
-            setStatusMsg('Backend waking up… retrying in 45s')
-            await new Promise(r => setTimeout(r, 45_000))
+          // Network error — backend cold or unreachable
+          if (attempt <= 2) {
+            await waitForBackend()
             continue
           }
           throw fetchErr
         }
-        if (res.status === 503 && attempt === 1) {
-          // Render is deploying or cold-starting — wait and retry once
-          setStatusMsg('Backend waking up… retrying in 45s')
-          await new Promise(r => setTimeout(r, 45_000))
+        if (res.status === 503 && attempt <= 2) {
+          // Render is cold-starting
+          await waitForBackend()
           continue
         }
         break
@@ -493,12 +507,7 @@ export default function App() {
       clearInterval(tick)
       setStatus('error')
       const msg: string = e?.message ?? ''
-      setStatusMsg(
-        msg.includes('fetch') || msg.includes('network') || msg.includes('Failed') ||
-        msg.includes('503') || msg.toLowerCase().includes('unavailable')
-          ? 'Backend cold-starting — upload again (Render free tier wakes in ~30s)'
-          : msg
-      )
+      setStatusMsg(msg || 'Upload failed — please try again.')
     }
   }
 
