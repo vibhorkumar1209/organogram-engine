@@ -2243,6 +2243,239 @@ def _enrich_with_llm_leadership(
     dag.repair_governance_edges()
 
 
+def promote_uploaded_to_leadership(
+    dag: "OrganogramDAG",
+    classified: list,
+    company_name: str,
+) -> int:
+    """
+    Fallback: when web scraping finds no BOD / EM data, build those panels
+    from the uploaded CSV using a clear organisational logic.
+
+    Executive Management
+    --------------------
+    1. CEO (or President / MD — the apex of the company).
+    2. CEO's direct reports = the most senior person in each primary
+       department (one representative per dept, ordered by layer).
+       If no CEO is found, fall back to the top N people by layer.
+
+    Board of Directors
+    ------------------
+    1. Chair / Chairperson — placed at layer 0 (apex of the board).
+    2. Board of Directors, Independent Directors, Non-Executive Directors
+       — placed at layer 1-2 in title-order.
+    Only people whose uploaded title actually contains board/chair/director
+    language are included.  Random functional employees are never fabricated
+    into board members.
+
+    Deduplication
+    -------------
+    Each person gets a shadow node (nlp_method="uploaded_data") so they
+    appear in the leadership panel without being removed from their
+    functional department.  Already-present web/LLM leadership is not
+    replaced.
+
+    Returns the count of newly injected nodes.
+    """
+    import uuid as _uuid
+
+    MIN_EM_WEB = 1   # supplement EM if fewer than this many web/LLM execs found
+    MAX_BOD    = 20
+
+    # ── Count existing web/LLM leadership ────────────────────────────────
+    web_em_count  = 0
+    web_bod_count = 0
+    existing_em_names:  set[str] = set()
+    existing_bod_names: set[str] = set()
+
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes.get(nid, {})
+        if attrs.get("node_type") != "person":
+            continue
+        meta   = attrs.get("metadata", {})
+        dept   = meta.get("dept_primary", "")
+        meth   = str(meta.get("nlp_method", ""))
+        lbl    = _name_key(attrs.get("label", ""))
+        is_web = "llm_leadership" in meth or meth == "uploaded_data"
+        if "Executive" in dept:
+            existing_em_names.add(lbl)
+            if is_web:
+                web_em_count += 1
+        elif "Board" in dept:
+            existing_bod_names.add(lbl)
+            if is_web:
+                web_bod_count += 1
+
+    # Skip if web scraping already provided sufficient leadership data
+    if web_em_count >= MIN_EM_WEB and web_bod_count > 0:
+        logger.debug("Uploaded-fallback skipped: EM=%d, BOD=%d (web data sufficient)",
+                     web_em_count, web_bod_count)
+        return 0
+
+    injected = 0
+
+    # ── Helper: create a shadow person node in a leadership panel ─────────
+    def _inject(rec, dept_primary: str, layer: int) -> bool:
+        nonlocal injected
+        key  = _name_key(getattr(rec, "full_name", "") or "")
+        name = (getattr(rec, "full_name", "") or "").strip()
+        if not key or not name:
+            return False
+        pool = existing_em_names if "Executive" in dept_primary else existing_bod_names
+        if key in pool:
+            return False
+        pool.add(key)
+
+        uid     = f"uploaded_{_uuid.uuid4().hex[:12]}"
+        dept_id = dag._node_id("dept", dept_primary)
+
+        if dept_id not in dag.G:
+            dag._ensure_node(
+                dept_id,
+                node_type  = NODE_DEPT_P,
+                label      = dept_primary,
+                layer      = 0,
+                sector     = getattr(rec, "sector", "Private") or "Private",
+                color      = "#3491E8",
+                is_ghost   = False,
+                has_more   = False,
+                metadata   = {"people_count": 0},
+            )
+            dag._ensure_edge("root_global", dept_id)
+
+        dag._ensure_node(uid,
+            node_id   = uid,
+            node_type = NODE_PERSON,
+            label     = name,
+            layer     = layer,
+            sector    = getattr(rec, "sector", "Private") or "Private",
+            color     = "#64748B",
+            is_ghost  = False,
+            expanded  = False,
+            metadata  = {
+                "designation":    getattr(rec, "designation", "") or "",
+                "company":        company_name,
+                "linkedin_url":   getattr(rec, "linkedin_url", "") or "",
+                "location":       getattr(rec, "location", "") or "",
+                "region":         getattr(rec, "region", "") or "",
+                "dept_primary":   dept_primary,
+                "dept_secondary": "",
+                "nlp_confidence": 0.70,
+                "nlp_industry":   "uploaded",
+                "nlp_method":     "uploaded_data",
+            },
+        )
+        dag._ensure_edge(dept_id, uid)
+        injected += 1
+        return True
+
+    # Sort uploaded records by layer ascending (most senior first), alpha secondary
+    valid_recs = [r for r in classified if (getattr(r, "full_name", "") or "").strip()]
+    sorted_recs = sorted(
+        valid_recs,
+        key=lambda r: (getattr(r, "layer", 99), getattr(r, "full_name", "") or ""),
+    )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # BOARD OF DIRECTORS
+    # Only people whose title explicitly mentions a board / chair role.
+    # Order: Chair/Chairperson first → Directors → Independent Directors
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if web_bod_count == 0:
+        _CHAIR_RE = re.compile(
+            r"\b(chairman|chairwoman|chairperson|chair\b|board\s+chair)\b",
+            re.IGNORECASE,
+        )
+        _DIRECTOR_RE = re.compile(
+            r"\b(board\s+(of\s+)?(directors?|management|trustees?|governors?)|"
+            r"board\s+member|board\s+director|"
+            r"non[\s-]?executive\s+director|non[\s-]?exec\s+director|"
+            r"independent\s+(non[\s-]?executive\s+)?director|"
+            r"outside\s+director|lead\s+independent\s+director|trustee|governor)\b",
+            re.IGNORECASE,
+        )
+
+        chairs    = []   # layer 0 — apex of the board
+        directors = []   # layer 1-2 — regular board members
+
+        for rec in sorted_recs:
+            desig = getattr(rec, "designation", "") or ""
+            dept  = getattr(rec, "dept_primary", "") or ""
+            if _CHAIR_RE.search(desig) and not re.search(r"\bcommittee\b", desig, re.I):
+                chairs.append(rec)
+            elif _DIRECTOR_RE.search(desig) or "board" in dept.lower():
+                directors.append(rec)
+
+        for rec in chairs[:1]:          # one chairman at apex
+            _inject(rec, "Board of Management", 0)
+        for rec in directors[:MAX_BOD - len(chairs[:1])]:
+            desig = getattr(rec, "designation", "") or ""
+            # Independent directors at layer 1; regular directors at layer 2
+            bod_layer = 1 if re.search(r"independent", desig, re.I) else 2
+            _inject(rec, "Board of Management", bod_layer)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # EXECUTIVE MANAGEMENT
+    # 1. CEO at layer 1 (apex)
+    # 2. CEO's direct reports = most senior person from each primary dept
+    #    (department heads); they represent who "runs" each function.
+    # If no CEO found, fall back to all layer-1 and layer-2 people.
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if web_em_count < MIN_EM_WEB:
+        # ── Find CEO ───────────────────────────────────────────────────────
+        ceo_rec = None
+        for rec in sorted_recs:
+            desig = getattr(rec, "designation", "") or ""
+            if _is_ceo(desig):
+                ceo_rec = rec
+                break
+
+        if ceo_rec:
+            _inject(ceo_rec, "Executive Management", 1)
+
+            # ── Direct reports: most senior person per primary department ──
+            # "Primary department" from the classified records (not dag dept).
+            dept_heads: dict[str, object] = {}   # dept_primary → best rec
+            for rec in sorted_recs:
+                if rec is ceo_rec:
+                    continue
+                dept_p = (getattr(rec, "dept_primary", "") or "").strip()
+                if not dept_p or dept_p.lower() in (
+                    "executive management", "board of management",
+                    "board of directors", "board",
+                ):
+                    continue
+                lyr = getattr(rec, "layer", 99)
+                if dept_p not in dept_heads:
+                    dept_heads[dept_p] = rec
+                elif lyr < getattr(dept_heads[dept_p], "layer", 99):
+                    dept_heads[dept_p] = rec
+
+            # Sort dept heads by layer then name (most senior first)
+            heads = sorted(
+                dept_heads.values(),
+                key=lambda r: (getattr(r, "layer", 99), getattr(r, "full_name", "") or ""),
+            )
+            for rec in heads:
+                lyr = max(2, min(getattr(rec, "layer", 3), 4))   # clamp to 2-4
+                _inject(rec, "Executive Management", lyr)
+
+        else:
+            # No identifiable CEO — fall back to all layer-1/2 people
+            for rec in sorted_recs:
+                lyr = getattr(rec, "layer", 99)
+                if lyr <= 2:
+                    _inject(rec, "Executive Management", lyr)
+
+    if injected:
+        dag.repair_governance_edges()
+        logger.info(
+            "Uploaded-fallback: %d people promoted to BOD/EM for '%s'",
+            injected, company_name,
+        )
+    return injected
+
+
 # ─────────────────────────────────────────────
 # CLI TEST
 # ─────────────────────────────────────────────

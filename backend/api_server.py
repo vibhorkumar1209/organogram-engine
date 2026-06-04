@@ -35,6 +35,7 @@ from structural_engine import (
     build_from_records, OrganogramDAG, OrganogramDB,
     _enrich_with_llm_leadership,
     _inject_knowledge_leadership,
+    promote_uploaded_to_leadership,
 )
 
 # ─── Flexible column name mapping ────────────
@@ -450,6 +451,16 @@ async def upload_file(file: UploadFile = File(...),
                 pass
             _log.info("Background enrichment starting for '%s' (domain=%s)", co_name, domain)
             _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
+
+            # ── Uploaded-data fallback ────────────────────────────────────────
+            # If web scraping found no (or thin) BOD/EM data, promote the most
+            # senior people from the uploaded CSV into those panels so the chart
+            # is never left with empty leadership sections.
+            promoted = promote_uploaded_to_leadership(dag, classified, co_name)
+            if promoted:
+                _log.info("Uploaded-fallback: %d people promoted to BOD/EM for '%s'",
+                          promoted, co_name)
+
             _db.upsert_dag(dag)
             _log.info("Background enrichment complete for '%s'", co_name)
         except Exception as exc:
@@ -517,7 +528,7 @@ async def leadership_ready():
         if attrs.get("node_type") != "person":
             continue
         meta = attrs.get("metadata", {})
-        if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai"):
+        if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai", "uploaded_data"):
             dept = meta.get("dept_primary", "")
             if "Board" in dept:
                 board_count += 1
