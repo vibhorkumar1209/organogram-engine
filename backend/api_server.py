@@ -626,6 +626,12 @@ def debug_classified():
 # EXPORT  (full org chart + executives as CSV)
 # ─────────────────────────────────────────────
 
+# Only people at Manager level or above are included in downloads.
+# Layer scale: 0=Board, 1=C-Suite, 2=EVP, 3=SVP, 4=VP, 5=Sr Director,
+#              6=Director, 7=Sr Manager, 8=Manager  ← cut-off (inclusive)
+#              9=Senior IC/Lead, 10=Analyst/Specialist  ← excluded
+_EXPORT_MAX_LAYER: int = 8
+
 _SENIORITY_LABELS: dict[int, str] = {
     0:  "Board of Management (G0)",
     1:  "C-Suite (G1)",
@@ -668,6 +674,12 @@ def export_org_chart(fmt: str = Query("csv", description="csv or json")):
 
         meta  = attrs.get("metadata", {})
         layer = attrs.get("layer", 9)
+
+        # Only export Manager-level and above (layers 0–8 inclusive).
+        # Layers 9 (Senior IC/Lead) and 10 (Analyst/Specialist) are excluded.
+        if layer > _EXPORT_MAX_LAYER:
+            continue
+
         dept  = meta.get("dept_primary", "")
         meth  = str(meta.get("nlp_method", ""))
 
@@ -782,7 +794,9 @@ def export_pptx():
                 _dfs(c, depth + 1)
         _dfs(nid)
         out.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
-        return out
+        # Only Manager-level and above in the PPT (layers 0–8 inclusive).
+        # Layers 9 (Senior IC/Lead) and 10 (Analyst/Specialist) are excluded.
+        return [p for p in out if p.get("layer", 99) <= _EXPORT_MAX_LAYER]
 
     def _direct_people(nid: str) -> list[dict]:
         """Only immediate person-children of a node."""
