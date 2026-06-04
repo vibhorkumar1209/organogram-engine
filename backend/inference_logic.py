@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -38,6 +39,128 @@ from typing import Optional
 from classifier import classify as _classify_title, TitleClassification
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────
+# SPANISH / PORTUGUESE → ENGLISH TITLE TRANSLATION
+# ─────────────────────────────────────────────────────────────────
+# Applied before NLP classification so that layer/dept inference
+# works correctly for non-English CSVs (e.g. Grupo Sura — Spanish;
+# Brazilian companies — Portuguese).
+
+# Ordered list of (compiled_regex, replacement_string).
+# Longer / more specific patterns appear first to prevent partial matches.
+# NOTE: patterns that include gendered suffixes use [ea] alternation or
+# explicit e?a? so they match both masculine (-e) and feminine (-a) forms
+# without relying on a single 'a?' which would miss the 'e' ending.
+_LANG_TRANSLATIONS: list[tuple[re.Pattern, str]] = [
+    # ── Spanish compound CEO titles ─────────────────────────────────────
+    (re.compile(r"\bPresidente\s+Ejecutivo\b",             re.I), "CEO"),
+    (re.compile(r"\bPresidente\s+y\s+CEO\b",               re.I), "President and CEO"),
+    (re.compile(r"\bPresidente\s+y\s+Director\s+General\b",re.I), "President and General Director"),
+    # ── Spanish VP compounds ─────────────────────────────────────────────
+    (re.compile(r"\bVicepresidente\s+Ejecutivo\b",         re.I), "Executive Vice President"),
+    (re.compile(r"\bVicepresidente\s+Senior\b",            re.I), "Senior Vice President"),
+    # gendered form: Vicepresidente (m) / Vicepresidenta (f)
+    (re.compile(r"\bVicepresident[ea]\b",                  re.I), "Vice President"),
+    # ── Spanish President ─────────────────────────────────────────────────
+    # gendered: Presidente (m) / Presidenta (f)
+    (re.compile(r"\bPresidente?a?\b",                      re.I), "President"),
+    # ── Spanish Director compounds ────────────────────────────────────────
+    (re.compile(r"\bDirectore?a?\s+General\b",             re.I), "General Director"),
+    (re.compile(r"\bDirectore?a?\s+Ejecutivo\b",           re.I), "Executive Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Finanzas\b",       re.I), "Finance Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Recursos\s+Humanos\b", re.I), "HR Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Tecnolog[íi]a\b", re.I), "Technology Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Mercadeo\b",       re.I), "Marketing Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Marketing\b",      re.I), "Marketing Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Ventas\b",         re.I), "Sales Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Operaciones\b",    re.I), "Operations Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Estrategia\b",     re.I), "Strategy Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Riesgos\b",        re.I), "Risk Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Cumplimiento\b",   re.I), "Compliance Director"),
+    (re.compile(r"\bDirectore?a?\s+de\s+Sistemas\b",       re.I), "IT Director"),
+    (re.compile(r"\bDirectore?a?\b",                       re.I), "Director"),
+    # ── Spanish Manager compounds ─────────────────────────────────────────
+    (re.compile(r"\bGerente\s+General\b",                  re.I), "General Manager"),
+    (re.compile(r"\bGerente\s+Senior\b",                   re.I), "Senior Manager"),
+    (re.compile(r"\bGerente\s+de\s+[Áá]rea\b",            re.I), "Area Manager"),
+    (re.compile(r"\bGerente\b",                            re.I), "Manager"),
+    (re.compile(r"\bSubgerente\b",                         re.I), "Deputy Manager"),
+    (re.compile(r"\bSubdirector[ea]?\b",                   re.I), "Deputy Director"),
+    # ── Spanish other senior roles ────────────────────────────────────────
+    (re.compile(r"\bJefe\s+de\s+[Áá]rea\b",               re.I), "Area Head"),
+    (re.compile(r"\bJefe[a]?\b",                           re.I), "Head"),
+    (re.compile(r"\bCoordinador[a]?\b",                    re.I), "Coordinator"),
+    (re.compile(r"\bAnalista\b",                           re.I), "Analyst"),
+    (re.compile(r"\bAsesor[a]?\b",                         re.I), "Advisor"),
+    (re.compile(r"\bDirigente\b",                          re.I), "Director"),
+    (re.compile(r"\bGerencia\b",                           re.I), "Management"),
+    (re.compile(r"\bSuperintendente\b",                    re.I), "Superintendent"),
+    (re.compile(r"\bSocio[a]?\b",                          re.I), "Partner"),
+    (re.compile(r"\bConsejero[a]?\b",                      re.I), "Board Director"),
+    (re.compile(r"\bMiembro\s+de\s+la?\s+Junta\b",         re.I), "Board Member"),
+    (re.compile(r"\bMiembro\s+del?\s+Consejo\b",           re.I), "Board Member"),
+    (re.compile(r"\bMiembro\b",                            re.I), "Member"),
+    (re.compile(r"\bAccionista\b",                         re.I), "Shareholder"),
+    # ── Portuguese-specific (differs from Spanish) ────────────────────────
+    (re.compile(r"\bDiretor[a]?\s+Geral\b",                re.I), "General Director"),
+    (re.compile(r"\bDiretor[a]?\s+Executivo\b",            re.I), "Executive Director"),
+    (re.compile(r"\bDiretor[a]?\s+de\s+Finan[çc]as\b",    re.I), "Finance Director"),
+    (re.compile(r"\bDiretor[a]?\s+de\s+Opera[çc][õo]es\b",re.I), "Operations Director"),
+    (re.compile(r"\bDiretor[a]?\b",                        re.I), "Director"),
+    (re.compile(r"\bGerente\s+Geral\b",                    re.I), "General Manager"),
+    (re.compile(r"\bVice-Presidente[a]?\b",                re.I), "Vice President"),
+    (re.compile(r"\bChefe\b",                              re.I), "Head"),
+    (re.compile(r"\bCoordenador[a]?\b",                    re.I), "Coordinator"),
+    (re.compile(r"\bS[óo]cio[a]?\b",                       re.I), "Partner"),
+    # ── Spanish/Portuguese prepositions → English ─────────────────────────
+    (re.compile(r"\s+de\s+la\s+",   re.I), " of the "),
+    (re.compile(r"\s+de\s+los\s+",  re.I), " of the "),
+    (re.compile(r"\s+de\s+las\s+",  re.I), " of the "),
+    (re.compile(r"\s+del\s+",       re.I), " of the "),
+    (re.compile(r"\s+de\s+",        re.I), " of "),
+    (re.compile(r"\s+y\s+",         re.I), " and "),
+    (re.compile(r"\s+das?\s+",      re.I), " of "),
+    (re.compile(r"\s+dos?\s+",      re.I), " of "),
+    (re.compile(r"\s+e\s+",         re.I), " and "),
+]
+
+# Quick detection: does the title look non-English?
+_NON_EN_DETECT = re.compile(
+    r"\b(gerente|presidente?a?|vicepresident[ea]|director[oa]|subdirector|subgerente|"
+    r"jefe|coordinador[a]?|analista|asesor|socio|consejero|superintendente|dirigente|"
+    r"diretor|chefe|coordenador|s[óo]cio|vice-presidente?|miembro|junta|accionista)"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+def _translate_title(title: str) -> str:
+    """
+    Translate a Spanish or Portuguese job title to its English equivalent.
+    Returns the original string unchanged when it appears to be English already.
+    Normalises any remaining accented characters to ASCII after translation.
+    """
+    if not title:
+        return title
+
+    # Check for non-English signal: accented chars OR known ES/PT keywords
+    has_accent = any(
+        ord(c) > 127 and unicodedata.category(c).startswith("L")
+        for c in title
+    )
+    if not has_accent and not _NON_EN_DETECT.search(title):
+        return title   # already English — skip translation
+
+    result = title
+    for pattern, replacement in _LANG_TRANSLATIONS:
+        result = pattern.sub(replacement, result)
+
+    # Strip remaining diacritics (é→e, á→a, ñ→n …) from any untranslated words
+    result = unicodedata.normalize("NFKD", result)
+    result = "".join(c for c in result if not unicodedata.combining(c))
+    return result.strip()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -514,6 +637,21 @@ class InferenceEngine:
                     continue
 
                 designation = _get(rec, "Designation") or _get(rec, "linkedin_headline") or ""
+
+                # ── Translate non-English titles before classification ─────
+                # Converts Spanish/Portuguese titles ("Gerente General",
+                # "Vicepresidente Ejecutivo", "Diretor Geral" …) to English
+                # equivalents so the NLP layer/dept classifier works correctly
+                # for LatAm companies (Grupo Sura, Bancolombia, etc.).
+                if designation:
+                    translated = _translate_title(designation)
+                    if translated != designation:
+                        logger.debug(
+                            "Translated title: '%s' → '%s'", designation, translated
+                        )
+                        rec = dict(rec)
+                        rec["Designation"] = translated
+                        designation = translated
 
                 # Skip titles that explicitly signal a former/retired role
                 if designation and _FORMER_TITLE_RE.search(designation):

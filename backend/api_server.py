@@ -244,6 +244,12 @@ from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Organogram Engine API", version="1.0.0")
 
+# ── Persistent SQLite path ────────────────────────────────────────────────────
+# On Render Pro, the container filesystem persists between process restarts
+# (though not across deploys).  Writing to /tmp lets us survive a uvicorn
+# reload or a watchdog restart without losing the loaded DAG.
+_DB_PATH = os.environ.get("ORGANOGRAM_DB_PATH", "/tmp/organogram_last.db")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -295,6 +301,34 @@ def _infer_org_name(records: list[dict]) -> str:
         return slug.replace("-", " ").title()
 
     return ""
+
+
+@app.on_event("startup")
+async def _auto_restore():
+    """
+    On startup, try to restore the last uploaded DAG from the persistent
+    SQLite DB (/tmp/organogram_last.db).  This survives process restarts
+    (uvicorn reload, container watchdog) so users don't need to re-upload
+    just because the server restarted.  Fresh deploys clear /tmp, so the
+    first upload after a deploy still builds fresh.
+    """
+    global _dag, _db
+    if not os.path.exists(_DB_PATH):
+        return
+    try:
+        restored_db  = OrganogramDB(db_path=_DB_PATH)
+        restored_dag = restored_db.load_dag()
+        if restored_dag and restored_dag.G.number_of_nodes() > 1:
+            _dag = restored_dag
+            _db  = restored_db
+            import logging as _lg
+            _lg.getLogger(__name__).info(
+                "Auto-restored DAG from %s (%d nodes)",
+                _DB_PATH, _dag.G.number_of_nodes(),
+            )
+    except Exception as exc:
+        import logging as _lg
+        _lg.getLogger(__name__).warning("Startup DAG restore failed: %s", exc)
 
 
 @app.get("/ping")
@@ -387,7 +421,7 @@ async def upload_file(file: UploadFile = File(...),
 
     try:
         _dag, _db, _classified, _domain, _industry = build_from_records(
-            records, company_name=company_name
+            records, company_name=company_name, db_path=_DB_PATH
         )
         _classified_records = _classified
     except Exception as e:
@@ -831,10 +865,13 @@ def export_pptx():
         columns: list[dict] = []
 
         if sub_dept_ids:
+            sd_nids: set[str] = set()   # track every node ID covered by sub-depts
             for idx, sd_id in enumerate(sub_dept_ids):
                 sd_ppl   = _all_people_in(sd_id, stop_at_primary=False)
                 if not sd_ppl:
                     continue
+                for p in sd_ppl:
+                    sd_nids.add(p.get("node_id", ""))
                 sd_color = dag.G.nodes.get(sd_id, {}).get("color", dept_color)
                 sd_rgb   = tuple(int(sd_color.lstrip("#")[i:i+2], 16) for i in (0,2,4)) \
                            if len(sd_color.lstrip("#")) == 6 else _PALETTE_P[idx % 6]
@@ -842,6 +879,17 @@ def export_pptx():
                     sd_rgb = _PALETTE_P[idx % 6]
                 # Include ALL members — overflow into continuation columns
                 columns.extend(_overflow_columns(sd_ppl[0], sd_ppl[1:], sd_rgb))
+
+            # ── Orphan people: in dept but not in any sub-dept ──────────────
+            # (They sit directly under the dept_primary or its ghost chain,
+            #  not under a dept_secondary/tertiary node.)
+            dept_head_nid = dept_head.get("node_id", "") if dept_head else ""
+            orphans = [p for p in all_ppl
+                       if p.get("node_id", "") not in sd_nids
+                       and p.get("node_id", "") != dept_head_nid]
+            if orphans:
+                acc = _PALETTE_P[len(sub_dept_ids) % 6]
+                columns.extend(_overflow_columns(orphans[0], orphans[1:], acc))
         else:
             # No sub-depts: distribute remaining people as implied columns
             rest = all_ppl[1:]  # exclude dept head

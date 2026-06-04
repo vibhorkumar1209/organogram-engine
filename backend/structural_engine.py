@@ -968,9 +968,9 @@ class OrganogramDAG:
 
         Governance chain (enforced via parent selection):
           root_global  [invisible anchor]
-            └── Board of Management   (BOD)
-                  └── Executive Management  (EM, if BOD exists)
-                        └── Finance / HR / Tech / …  (functional depts)
+            ├── Board of Management   (BOD — governance, direct child of root)
+            └── Executive Management (EM — operational apex, peer of BOD)
+                  └── Finance / HR / Tech / …  (functional depts)
 
         Region is stored only as metadata on person cards — not as a
         structural node — so regional orgs merge into one dept branch.
@@ -983,17 +983,14 @@ class OrganogramDAG:
             # BOD is a direct child of root
             parent_id = "root_global"
         elif dp_lower in self._EM_NAMES:
-            # EM sits under BOD when BOD dept already exists
-            bod_id    = self._node_id("dept", "Board of Management")
-            parent_id = bod_id if bod_id in self.G else "root_global"
+            # EM is also a direct child of root (sibling of BOD, not under it)
+            # so it visually "heads" all functional departments at the same level
+            parent_id = "root_global"
         else:
-            # All functional depts sit under EM → BOD → root (whichever exists)
-            em_id     = self._node_id("dept", "Executive Management")
-            bod_id    = self._node_id("dept", "Board of Management")
+            # All functional depts sit under EM when EM exists, else root
+            em_id = self._node_id("dept", "Executive Management")
             if em_id in self.G:
                 parent_id = em_id
-            elif bod_id in self.G:
-                parent_id = bod_id
             else:
                 parent_id = "root_global"
 
@@ -1305,13 +1302,16 @@ class OrganogramDAG:
     def repair_governance_edges(self) -> None:
         """
         Re-enforce the canonical governance hierarchy:
-            root_global → BOD → EM → functional depts
+            root_global → BOD (Board of Management — governance layer)
+            root_global → EM  (Executive Management — operational apex, peer of BOD)
+                          EM  → functional depts (Finance, HR, Tech …)
 
         This is needed because the LLM enrichment thread creates BOD/EM
         AFTER the uploaded records were already inserted.  At upload time,
         EM and functional depts fall back to root_global as their parent
         (since BOD/EM don't exist yet).  Once enrichment finishes, stale
-        root_global edges must be removed and correct parent edges added.
+        root_global edges for functional depts must be removed and moved
+        under EM.
 
         Safe to call multiple times — every operation is idempotent.
         """
@@ -1328,12 +1328,14 @@ class OrganogramDAG:
             "executive management", "c-suite", "ceo office",
         })
 
-        # ── Step 1: EM should sit under BOD when both exist ──────────────
-        if bod_exists and em_exists:
-            if G.has_edge("root_global", em_id):
-                G.remove_edge("root_global", em_id)
-            if not G.has_edge(bod_id, em_id):
-                G.add_edge(bod_id, em_id)
+        # ── Step 1: EM must be a direct child of root (sibling of BOD) ───
+        # If EM accidentally ended up under BOD (from old data or a direct
+        # edge added before this rule), move it to root_global.
+        if em_exists:
+            if bod_exists and G.has_edge(bod_id, em_id):
+                G.remove_edge(bod_id, em_id)
+            if not G.has_edge("root_global", em_id):
+                G.add_edge("root_global", em_id)
 
         # ── Step 2: Functional depts should sit under EM ─────────────────
         # Only re-parent when EM actually exists.  If only BOD is present
@@ -1344,8 +1346,8 @@ class OrganogramDAG:
 
             # Walk root_global children → move functional depts to EM
             for child_id in list(G.successors("root_global")):
-                if child_id == bod_id:
-                    continue   # BOD stays directly under root_global
+                if child_id in (bod_id, em_id):
+                    continue   # BOD and EM stay directly under root_global
                 attrs = G.nodes.get(child_id, {})
                 label = str(attrs.get("label", "")).lower()
                 if (attrs.get("node_type") == NODE_DEPT_P
@@ -1359,7 +1361,7 @@ class OrganogramDAG:
             if bod_exists:
                 for child_id in list(G.successors(bod_id)):
                     if child_id == em_id:
-                        continue   # EM stays under BOD
+                        continue   # EM is no longer under BOD; remove if found
                     attrs = G.nodes.get(child_id, {})
                     label = str(attrs.get("label", "")).lower()
                     if (attrs.get("node_type") == NODE_DEPT_P
@@ -1510,6 +1512,71 @@ class OrganogramDB:
         CREATE INDEX IF NOT EXISTS idx_nodes_layer  ON nodes(layer);
         """)
         self.conn.commit()
+
+    def load_dag(self) -> "OrganogramDAG | None":
+        """
+        Restore an OrganogramDAG from the SQLite DB.
+        Returns None if the DB is empty or restoration fails.
+        Used on server startup to recover from process restarts without
+        requiring a re-upload.
+        """
+        try:
+            # Get root label for company name
+            root_row = self.conn.execute(
+                "SELECT label FROM nodes WHERE node_id = 'root_global'"
+            ).fetchone()
+            if not root_row:
+                return None
+            company_name = root_row[0] or "Organization"
+
+            dag = OrganogramDAG(company_name=company_name)
+
+            # Insert all nodes (skip root_global — _ensure_root() already created it)
+            rows = self.conn.execute(
+                "SELECT node_id, node_type, label, layer, sector, color, "
+                "is_ghost, metadata FROM nodes"
+            ).fetchall()
+            if not rows:
+                return None
+
+            for node_id, nt, label, layer, sector, color, is_ghost, meta_str in rows:
+                attrs = {
+                    "node_id":   node_id,
+                    "node_type": nt or "person",
+                    "label":     label or "",
+                    "layer":     layer if layer is not None else 9,
+                    "sector":    sector or "All",
+                    "color":     color or "#64748B",
+                    "is_ghost":  bool(is_ghost),
+                    "expanded":  False,
+                    "metadata":  json.loads(meta_str or "{}"),
+                }
+                if node_id == "root_global":
+                    # Update the root node's label/metadata in place
+                    dag.G.nodes["root_global"].update(attrs)
+                else:
+                    dag._ensure_node(node_id, **attrs)
+
+            # Insert all edges
+            edge_rows = self.conn.execute(
+                "SELECT parent_id, child_id FROM edges"
+            ).fetchall()
+            for parent_id, child_id in edge_rows:
+                if parent_id in dag.G and child_id in dag.G:
+                    dag._ensure_edge(parent_id, child_id)
+
+            n_people = sum(
+                1 for _, a in dag.G.nodes(data=True)
+                if a.get("node_type") == "person"
+            )
+            logger.info(
+                "Restored DAG for '%s' from DB: %d nodes, %d people",
+                company_name, dag.G.number_of_nodes(), n_people,
+            )
+            return dag
+        except Exception as exc:
+            logger.warning("load_dag failed: %s", exc)
+            return None
 
     def upsert_dag(self, dag: OrganogramDAG):
         for node_id, attrs in dag.G.nodes(data=True):

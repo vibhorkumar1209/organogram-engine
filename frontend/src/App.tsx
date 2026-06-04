@@ -525,7 +525,10 @@ export default function App() {
       const name = cd.match(/filename="([^"]+)"/)?.[1] ?? 'org_chart.csv'
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
-      a.href = url; a.download = name; a.click()
+      a.href = url; a.download = name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e: any) {
       const msg: string = e?.message ?? ''
@@ -586,7 +589,10 @@ export default function App() {
       const name = cd.match(/filename="([^"]+)"/)?.[1] ?? 'org_chart.pptx'
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
-      a.href = url; a.download = name; a.click()
+      a.href = url; a.download = name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e: any) {
       const msg: string = e?.message ?? ''
