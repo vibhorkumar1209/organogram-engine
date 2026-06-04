@@ -129,6 +129,9 @@ export default function App() {
   const [fitGeneration, setFitGeneration] = useState(0)
   const bumpFit = () => setFitGeneration(g => g + 1)
 
+  // BOD/EM enrichment status shown below the chart
+  const [leadershipNote, setLeadershipNote] = useState<string>('')
+
   // ExecPanel state
   const [panelDept, setPanelDept]   = useState<OrgNode | null>(null)
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
@@ -462,11 +465,16 @@ export default function App() {
       // Parallel.AI research runs in the background. Poll every 10s up to
       // 3 minutes; when data arrives, silently reload the dept tree so
       // Board of Directors and Executive Management panels populate.
+      setLeadershipNote('🔍 Searching for Board & Executive leadership online…')
       let pollCount = 0
       const MAX_POLLS = 30  // 30 × 10s = 5 minutes (Parallel.AI needs up to 160s)
       const pollTimer = setInterval(async () => {
         pollCount++
-        if (pollCount > MAX_POLLS) { clearInterval(pollTimer); return }
+        if (pollCount > MAX_POLLS) {
+          clearInterval(pollTimer)
+          setLeadershipNote('⚠ Leadership search timed out — add a company website URL and re-upload to retry.')
+          return
+        }
         try {
           const pr = await fetch(`${API}/leadership-ready`)
           if (!pr.ok) { clearInterval(pollTimer); return }
@@ -477,8 +485,12 @@ export default function App() {
           }
           if (pd.ready) {
             clearInterval(pollTimer)
+            setLeadershipNote(`✅ Found ${pd.board_count} board members · ${pd.exec_count} executives`)
             // Quietly reload the tree — BOD/EM nodes now exist in the DAG
             await loadDeptStructure(data.stats, pd.industry || data.industry || '', 'upload')
+          } else if (pd.enrichment_done) {
+            clearInterval(pollTimer)
+            setLeadershipNote('ℹ No public leadership data found — add company website URL and re-upload to retry')
           }
         } catch { clearInterval(pollTimer) }
       }, 10_000)
@@ -497,12 +509,17 @@ export default function App() {
   }
 
   // ── Export org chart as CSV ───────────────────────────────────────
-  const [exporting, setExporting] = useState(false)
+  const [exporting,    setExporting]    = useState(false)
+  const [exportError,  setExportError]  = useState('')
   const handleExport = async () => {
     setExporting(true)
+    setExportError('')
     try {
       const res = await fetch(`${API}/export?fmt=csv`)
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const txt = await res.text().catch(() => `HTTP ${res.status}`)
+        throw new Error(txt || `Server error ${res.status}`)
+      }
       const blob = await res.blob()
       const cd   = res.headers.get('content-disposition') ?? ''
       const name = cd.match(/filename="([^"]+)"/)?.[1] ?? 'org_chart.csv'
@@ -510,7 +527,14 @@ export default function App() {
       const a    = document.createElement('a')
       a.href = url; a.download = name; a.click()
       URL.revokeObjectURL(url)
-    } catch { /* silent — no data loaded */ }
+    } catch (e: any) {
+      const msg: string = e?.message ?? ''
+      setExportError(
+        msg.includes('No data') ? 'Re-upload your CSV — backend was restarted'
+        : msg.includes('fetch')  ? 'Backend offline — try again in ~30s'
+        : msg.slice(0, 120) || 'CSV export failed'
+      )
+    }
     finally { setExporting(false) }
   }
 
@@ -726,6 +750,11 @@ export default function App() {
             </svg>
             {exporting ? 'Saving…' : 'Save CSV'}
           </button>
+        )}
+        {exportError && status === 'ready' && (
+          <div style={{ fontSize: 9, color: '#E63946', maxWidth: 160, textAlign: 'right', lineHeight: 1.3 }}>
+            ⚠ {exportError}
+          </div>
         )}
 
         {status === 'ready' && (
@@ -965,6 +994,22 @@ export default function App() {
               borderRadius: 8, padding: '6px 14px', fontSize: 11, color: '#0c3649',
             }}>
               ⟳ Loading…
+            </div>
+          )}
+
+          {/* BOD/EM enrichment status notice */}
+          {leadershipNote && status === 'ready' && (
+            <div style={{
+              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 49, background: '#0c2233', border: '1px solid rgba(52,145,232,0.4)',
+              borderRadius: 8, padding: '8px 14px', fontSize: 10, color: '#7ec8f8',
+              maxWidth: 560, display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap',
+            }}>
+              <span style={{ flexGrow: 1 }}>{leadershipNote}</span>
+              <button
+                onClick={() => setLeadershipNote('')}
+                style={{ background: 'none', border: 'none', color: '#7ec8f8', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+              >×</button>
             </div>
           )}
 

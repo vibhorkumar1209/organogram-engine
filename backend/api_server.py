@@ -248,6 +248,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],   # lets JS read filename from response
 )
 
 
@@ -304,6 +305,7 @@ def ping():
 _dag: OrganogramDAG | None = None
 _db:  OrganogramDB  | None = None
 _classified_records: list = []
+_enrichment_done: bool = False   # set True when background BOD/EM enrichment finishes
 
 
 _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
@@ -410,7 +412,11 @@ async def upload_file(file: UploadFile = File(...),
     # the upload response and time out on Render's free tier.  Instead we return
     # the org chart immediately and let the enrichment run in a background thread.
     # The frontend can re-fetch /chart after a few seconds to pick up BOD/EM data.
+    global _enrichment_done
+    _enrichment_done = False   # reset for new upload
+
     def _run_enrichment(dag, classified, co_name, domain):
+        global _enrichment_done
         import logging, traceback
         _log = logging.getLogger(__name__)
         try:
@@ -449,6 +455,8 @@ async def upload_file(file: UploadFile = File(...),
         except Exception as exc:
             _log.warning("Leadership enrichment failed for '%s': %s\n%s",
                          co_name, exc, traceback.format_exc())
+        finally:
+            _enrichment_done = True   # always mark done, even on error / empty result
 
     if background_tasks is not None:
         background_tasks.add_task(_run_enrichment, _dag, _classified, company_name, _domain)
@@ -519,8 +527,13 @@ async def leadership_ready():
     # Return latest industry from root node (may have been updated by background task)
     root_meta = _dag.G.nodes.get("root_global", {}).get("metadata", {})
     industry  = root_meta.get("industry", "")
-    return {"ready": ready, "board_count": board_count, "exec_count": exec_count,
-            "industry": industry}
+    return {
+        "ready":            ready,
+        "board_count":      board_count,
+        "exec_count":       exec_count,
+        "industry":         industry,
+        "enrichment_done":  _enrichment_done,  # True once background task finished
+    }
 
 
 @app.post("/load-demo")
@@ -758,12 +771,36 @@ def export_pptx():
                 dept_nodes.append(c)
 
     # ── Build column structure for each dept ──────────────────────────────
-    MAX_MEMBERS = 8   # max stacked members per column
+    # MAX_PER_COL matches the new compact CARD_H=0.82" layout:
+    #   available height below col-head ≈ 4.07"
+    #   members per col = floor(4.07 / (0.82+0.06)) = 4
+    # Sub-depts with more than MAX_PER_COL members get overflow columns
+    # (head=None, members=remainder) so ALL people are included.
+    MAX_PER_COL = 4
+
+    def _overflow_columns(head, all_members, accent_rgb):
+        """Split members into MAX_PER_COL-sized columns; first has head."""
+        cols = []
+        # First column: the named head + first MAX_PER_COL members
+        cols.append({
+            "head":       head,
+            "members":    all_members[:MAX_PER_COL],
+            "accent_rgb": accent_rgb,
+        })
+        # Overflow columns: no head (continuation), rest of members
+        for start in range(MAX_PER_COL, len(all_members), MAX_PER_COL):
+            cols.append({
+                "head":       None,   # continuation — pptx_export skips head card
+                "members":    all_members[start : start + MAX_PER_COL],
+                "accent_rgb": accent_rgb,
+            })
+        return cols
 
     def _build_columns_for_dept(dept_id: str) -> tuple[dict | None, list[dict], int]:
         """
         Returns (dept_head, columns, headcount).
         Each column: {head, members, accent_rgb}
+        head=None means continuation column (no column-head card drawn).
         """
         dept_color = dag.G.nodes.get(dept_id, {}).get("color", "#3491E8")
         dept_rgb   = tuple(int(dept_color.lstrip("#")[i:i+2], 16) for i in (0,2,4)) \
@@ -774,7 +811,7 @@ def export_pptx():
         if not all_ppl:
             return None, [], 0
 
-        dept_head  = all_ppl[0] if all_ppl else None
+        dept_head  = all_ppl[0]
 
         # Try sub-dept nodes first (natural columns)
         sub_dept_ids = [c for c in dag.G.successors(dept_id)
@@ -792,14 +829,10 @@ def export_pptx():
                            if len(sd_color.lstrip("#")) == 6 else _PALETTE_P[idx % 6]
                 if sd_rgb == dept_rgb:
                     sd_rgb = _PALETTE_P[idx % 6]
-                columns.append({
-                    "head":       sd_ppl[0],
-                    "members":    sd_ppl[1:MAX_MEMBERS+1],
-                    "accent_rgb": sd_rgb,
-                })
+                # Include ALL members — overflow into continuation columns
+                columns.extend(_overflow_columns(sd_ppl[0], sd_ppl[1:], sd_rgb))
         else:
             # No sub-depts: distribute remaining people as implied columns
-            # Dept head is the most senior; everyone else splits into columns by layer
             rest = all_ppl[1:]  # exclude dept head
             if not rest:
                 return dept_head, [], headcount
@@ -818,17 +851,13 @@ def export_pptx():
                     deeper.extend(layer_groups[L])
                 n_heads = len(col_heads)
                 for i, ch in enumerate(col_heads):
-                    start  = (i * len(deeper)) // n_heads
-                    end    = ((i+1) * len(deeper)) // n_heads
-                    acc    = _PALETTE_P[i % 6]
-                    columns.append({
-                        "head":       ch,
-                        "members":    deeper[start:min(start+MAX_MEMBERS, end)],
-                        "accent_rgb": acc,
-                    })
+                    start = (i * len(deeper)) // n_heads
+                    end   = ((i+1) * len(deeper)) // n_heads
+                    acc   = _PALETTE_P[i % 6]
+                    columns.extend(_overflow_columns(ch, deeper[start:end], acc))
             else:
-                # All same layer → one-person columns
-                for i, p in enumerate(rest[:MAX_MEMBERS * 4]):
+                # All same layer → one-person columns (all included)
+                for i, p in enumerate(rest):
                     columns.append({
                         "head":       p,
                         "members":    [],
