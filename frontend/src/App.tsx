@@ -515,12 +515,43 @@ export default function App() {
   }
 
   // ── Export org chart as PPTX ──────────────────────────────────────
-  const [exportingPPT, setExportingPPT] = useState(false)
-  const [pptError,     setPptError]     = useState('')
+  const [exportingPPT,   setExportingPPT]   = useState(false)
+  const [pptError,       setPptError]       = useState('')
+  const [backendCompany, setBackendCompany] = useState<string | null>(null)
+  // Fetch backend company on mount and after each upload (when status becomes 'ready')
+  useEffect(() => {
+    if (status !== 'ready') return
+    fetch(`${API}/company`).then(r => r.ok ? r.json() : null).then(d => {
+      setBackendCompany(d?.loaded ? (d.company ?? null) : null)
+    }).catch(() => setBackendCompany(null))
+  }, [status])
   const handleExportPPT = async () => {
     setExportingPPT(true)
     setPptError('')
     try {
+      // ── Sanity-check: backend must have the same company as what's displayed ──
+      const companyRes = await fetch(`${API}/company`).catch(() => null)
+      if (companyRes && companyRes.ok) {
+        const { loaded, company: backendCo } = await companyRes.json()
+        if (!loaded) {
+          throw new Error('No data loaded on backend — re-upload your CSV first.')
+        }
+        const frontendCo = (deptTree?.label ?? '').trim()
+        // Fuzzy match: backend label must appear in or equal the frontend label
+        const normalise = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+        if (
+          frontendCo &&
+          backendCo &&
+          !normalise(backendCo).includes(normalise(frontendCo).slice(0, 6)) &&
+          !normalise(frontendCo).includes(normalise(backendCo).slice(0, 6))
+        ) {
+          throw new Error(
+            `Backend has "${backendCo}" loaded, but you're viewing "${frontendCo}". ` +
+            `Re-upload the correct CSV to export this company.`
+          )
+        }
+      }
+
       const res = await fetch(`${API}/export/pptx`)
       if (!res.ok) {
         const txt = await res.text().catch(() => `HTTP ${res.status}`)
@@ -537,7 +568,7 @@ export default function App() {
       const msg: string = e?.message ?? ''
       setPptError(
         msg.includes('fetch') ? 'Backend restarting — try again in ~30s'
-        : msg.slice(0, 120) || 'PPT export failed'
+        : msg.slice(0, 200) || 'PPT export failed'
       )
     }
     finally { setExportingPPT(false) }
@@ -717,18 +748,23 @@ export default function App() {
               {exportingPPT ? 'Building…' : 'Download PPT'}
             </button>
             {/* Show which company the backend will export — alerts user if stale */}
-            {deptTree?.label && !exportingPPT && (
-              <div style={{ fontSize: 9, color: '#4a7a9b', maxWidth: 180, textAlign: 'right', lineHeight: 1.3 }}>
-                For: {deptTree.label}
-                {' · '}
-                <span
-                  style={{ cursor: 'pointer', textDecoration: 'underline', color: '#3491E8' }}
-                  title="Re-upload your CSV if the company shown is incorrect"
-                >
-                  wrong co.?
-                </span>
-              </div>
-            )}
+            {!exportingPPT && (backendCompany || deptTree?.label) && (() => {
+              const bco = backendCompany ?? ''
+              const fco = deptTree?.label ?? ''
+              const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+              const mismatch = bco && fco &&
+                !norm(bco).includes(norm(fco).slice(0, 6)) &&
+                !norm(fco).includes(norm(bco).slice(0, 6))
+              return (
+                <div style={{ fontSize: 9, maxWidth: 180, textAlign: 'right', lineHeight: 1.3,
+                              color: mismatch ? '#E63946' : '#4a7a9b' }}>
+                  {mismatch
+                    ? `⚠ Backend: "${bco}" — re-upload to export "${fco}"`
+                    : `For: ${bco || fco}`
+                  }
+                </div>
+              )
+            })()}
             {pptError && (
               <div style={{ fontSize: 9, color: '#E63946', maxWidth: 180, textAlign: 'right', lineHeight: 1.3 }}>
                 ⚠ {pptError}

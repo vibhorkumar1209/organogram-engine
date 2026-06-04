@@ -2269,6 +2269,22 @@ async def get_change_reports():
     return {"count": len(_CHANGE_REPORTS), "reports": _CHANGE_REPORTS}
 
 
+@app.get("/company")
+async def get_loaded_company():
+    """Return the company currently loaded in the backend's in-memory state.
+
+    Frontend calls this before PPTX export to confirm the backend holds the
+    same dataset as what the user is viewing (prevents exporting stale/wrong data).
+    """
+    if not _dag_loaded():
+        return {"loaded": False, "company": None, "people": 0}
+    dag, _ = _require_dag()
+    root   = dag.G.nodes.get("root_global", {})
+    company = root.get("label") or "Unknown"
+    people  = sum(1 for _, a in dag.G.nodes(data=True) if a.get("node_type") == "person")
+    return {"loaded": True, "company": company, "people": people}
+
+
 # ─────────────────────────────────────────────
 # FRONTEND STATIC FILES
 # Mount the built React app so the backend serves everything from one port.

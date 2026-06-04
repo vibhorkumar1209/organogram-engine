@@ -1,20 +1,14 @@
 """
-PPTX export — org-chart style matching the reference screenshot.
+PPTX export — org-chart style.
 
-Per dept-primary slide:
-  • Full-width coloured header bar
-  • Dept-head card centred at top (CEO / Head of dept)
-  • Sub-department columns below, connected by L-shaped lines
-  • Each column: sub-dept head card + member cards stacked below
-  • If no sub-depts: direct members arranged in implied columns
-  • Paginate when more than MAX_COLS columns
-  • Card style: dark rounded header (name + title + photo circle) + white body
-    (email / phone / location / LinkedIn)
+Card design: light-gray rounded box, coloured left-accent bar, dark text.
+  Name (bold) / Designation / ─── / email / phone / location / LinkedIn
+Layout: dept-head centred at top → column heads below → members stacked.
+Connector style: vertical stem → horizontal bar → drops (T-bar).
 """
 from __future__ import annotations
 
 import io
-import math
 from datetime import datetime
 from typing import Any
 
@@ -31,92 +25,90 @@ HEADER_H = Inches(1.05)
 
 # ── Card geometry ─────────────────────────────────────────────────────────────
 
-CARD_W    = Inches(1.88)    # column-card width
-CARD_HDR  = Inches(0.54)    # dark header height
-CARD_BODY = Inches(0.74)    # white body height
-CARD_H    = CARD_HDR + CARD_BODY
+CARD_W     = Inches(1.92)
+CARD_H     = Inches(1.32)
+HEAD_W     = Inches(2.30)    # dept-head card is a bit wider
+COL_GAP    = Inches(0.28)    # horizontal gap between columns
+CARD_V_GAP = Inches(0.10)    # vertical gap between stacked cards
+CONN_H     = Inches(0.28)    # height reserved for connector lines
+SIDE_PAD   = Inches(0.45)
+TREE_TOP   = int(HEADER_H) + int(Inches(0.20))
+MAX_COLS   = 6               # max columns per slide before paginating
 
-HEAD_W    = Inches(2.30)    # dept-head card slightly wider
-PHOTO_D   = Inches(0.40)    # photo-circle diameter
-COL_GAP   = Inches(0.30)    # horizontal gap between columns
-CARD_V_GAP= Inches(0.10)    # vertical gap between stacked cards
-CONN_H    = Inches(0.30)    # vertical space reserved for connector lines
+# Accent-bar width (left strip with dept / branch colour)
+ACCENT_W = int(Inches(0.07))
 
-SIDE_PAD  = Inches(0.45)
-TREE_TOP  = int(HEADER_H) + int(Inches(0.22))   # y where dept-head card starts
-MAX_COLS  = 6               # columns per slide before paginating
+# ── Card colours (readable at all sizes) ─────────────────────────────────────
+
+_CARD_BG   = RGBColor(0xed, 0xf1, 0xf6)   # light blue-gray fill
+_CARD_BG_H = RGBColor(0xe1, 0xe8, 0xf2)   # slightly darker for dept-head card
+_CARD_BDR  = RGBColor(0x90, 0xa8, 0xc2)   # visible gray border
+_TXT_NAME  = RGBColor(0x0f, 0x1d, 0x2c)   # near-black bold
+_TXT_TITLE = RGBColor(0x2e, 0x48, 0x62)   # dark slate-blue
+_TXT_BODY  = RGBColor(0x3a, 0x54, 0x6e)   # dark medium-gray
+_TXT_LINK  = RGBColor(0x1a, 0x6b, 0xc4)   # blue hyperlink
+_DIVIDER   = RGBColor(0xb0, 0xc4, 0xd8)
+
+# Cycling accent palette for sub-depts
+_PALETTE: list[tuple[int, int, int]] = [
+    (0x1e, 0x6e, 0xb8),
+    (0x16, 0x7a, 0x56),
+    (0x7a, 0x1c, 0x94),
+    (0xb0, 0x24, 0x24),
+    (0xc8, 0x6c, 0x1a),
+    (0x0e, 0x68, 0x82),
+]
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 
 def _luminance(r: int, g: int, b: int) -> float:
-    return 0.299 * r + 0.587 * g + 0.114 * b
+    return 0.299*r + 0.587*g + 0.114*b
 
-def _lighten(rgb: tuple[int, int, int], amt: float) -> tuple[int, int, int]:
-    r, g, b = rgb
-    return (min(255, r + int((255-r)*amt)),
-            min(255, g + int((255-g)*amt)),
-            min(255, b + int((255-b)*amt)))
-
-def _darken(rgb: tuple[int, int, int], amt: float) -> tuple[int, int, int]:
-    r, g, b = rgb
-    return (max(0, int(r*(1-amt))), max(0, int(g*(1-amt))), max(0, int(b*(1-amt))))
-
-def _on_dark(r: int, g: int, b: int) -> RGBColor:
-    return RGBColor(0xff, 0xff, 0xff) if _luminance(r,g,b) < 140 else RGBColor(0x0c,0x16,0x22)
+def _on_bg(r: int, g: int, b: int) -> RGBColor:
+    return RGBColor(0xff,0xff,0xff) if _luminance(r,g,b) < 130 else RGBColor(0x0f,0x1d,0x2c)
 
 def _hex_to_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     if len(h) != 6:
-        return (0x3d, 0x51, 0x68)
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        return (0x1e, 0x6e, 0xb8)
+    return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
 
 def _rgb(r: int, g: int, b: int) -> RGBColor:
     return RGBColor(r, g, b)
 
-# Cycling accent palette (used when sub-dept has same colour as parent)
-_PALETTE: list[tuple[int, int, int]] = [
-    (0x2c, 0x5f, 0x8a),
-    (0x1b, 0x7a, 0x53),
-    (0x7a, 0x1f, 0x96),
-    (0xb0, 0x26, 0x26),
-    (0xc9, 0x70, 0x1e),
-    (0x10, 0x6b, 0x84),
-]
 
-# ── Low-level drawing ─────────────────────────────────────────────────────────
+# ── Low-level drawing helpers ─────────────────────────────────────────────────
 
 def _add_rect(slide, left, top, width, height,
-              fill_rgb: RGBColor | None = None,
+              fill_rgb: RGBColor,
               line_rgb: RGBColor | None = None,
               line_width: float = 0,
               corner_radius: int = 0):
+    """Always requires fill_rgb — use _CARD_BG etc. so no shape is ever transparent."""
     from pptx.oxml.ns import qn
     from lxml import etree
 
     shape = slide.shapes.add_shape(1, int(left), int(top), int(width), int(height))
+
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill_rgb
+
     shape.line.width = int(Pt(line_width)) if line_width else 0
-
-    if fill_rgb:
-        shape.fill.solid()
-        shape.fill.fore_color.rgb = fill_rgb
-    else:
-        shape.fill.background()
-
     if line_rgb:
         shape.line.color.rgb = line_rgb
     else:
-        shape.line.fill.background()
+        shape.line.fill.background()   # no border line
 
     if corner_radius:
-        sp    = shape._element
-        spPr  = sp.find(qn("p:spPr"))
-        prstG = spPr.find(qn("a:prstGeom"))
-        if prstG is not None:
-            spPr.remove(prstG)
-        ng = etree.SubElement(spPr, qn("a:prstGeom"), attrib={"prst": "roundRect"})
-        av = etree.SubElement(ng, qn("a:avLst"))
+        sp   = shape._element
+        spPr = sp.find(qn("p:spPr"))
+        pg   = spPr.find(qn("a:prstGeom"))
+        if pg is not None:
+            spPr.remove(pg)
+        ng  = etree.SubElement(spPr, qn("a:prstGeom"), attrib={"prst": "roundRect"})
+        av  = etree.SubElement(ng, qn("a:avLst"))
         adj = min(50000, int(corner_radius * 100000 // min(width, height)))
-        etree.SubElement(av, qn("a:gd"), attrib={"name": "adj", "fmla": f"val {adj}"})
+        etree.SubElement(av, qn("a:gd"), attrib={"name":"adj","fmla":f"val {adj}"})
     return shape
 
 
@@ -142,14 +134,14 @@ def _add_hyperlink_box(slide, left, top, width, height,
                        display: str, url: str, font_size: float):
     from pptx.oxml.ns import qn
     from lxml import etree
-    tb = slide.shapes.add_textbox(int(left), int(top), int(width), int(height))
-    tf = tb.text_frame
+    tb  = slide.shapes.add_textbox(int(left), int(top), int(width), int(height))
+    tf  = tb.text_frame
     tf.word_wrap = False
-    p  = tf.paragraphs[0]
+    p   = tf.paragraphs[0]
     run = p.add_run()
     run.text = display
     run.font.size = Pt(font_size)
-    run.font.color.rgb = RGBColor(0x26, 0x7b, 0xd6)
+    run.font.color.rgb = _TXT_LINK
     try:
         rId = slide.part.relate_to(
             url,
@@ -162,13 +154,13 @@ def _add_hyperlink_box(slide, left, top, width, height,
         pass
 
 
-_LP = 9525   # 1-pt line width in EMU
+_LP = 9525   # ~0.75 pt in EMU
 
 def _add_line(slide, x1, y1, x2, y2, color: RGBColor):
-    if abs(x2 - x1) < _LP:   # vertical
-        _add_rect(slide, x1 - _LP//2, min(y1,y2), _LP, max(abs(y2-y1), _LP), fill_rgb=color)
-    else:                      # horizontal
-        _add_rect(slide, min(x1,x2), y1 - _LP//2, abs(x2-x1), max(abs(y2-y1), _LP), fill_rgb=color)
+    if abs(x2 - x1) < _LP:
+        _add_rect(slide, x1-_LP//2, min(y1,y2), _LP, max(abs(y2-y1),_LP), fill_rgb=color)
+    else:
+        _add_rect(slide, min(x1,x2), y1-_LP//2, abs(x2-x1), max(abs(y2-y1),_LP), fill_rgb=color)
 
 
 # ── Cover slide ───────────────────────────────────────────────────────────────
@@ -189,126 +181,125 @@ def _make_cover(prs, company, total_people, dept_count, industry):
                  font_size=9, color=RGBColor(0x44,0x6e,0x88))
 
 
-# ── Slide header ──────────────────────────────────────────────────────────────
+# ── Slide header bar ──────────────────────────────────────────────────────────
 
 def _draw_header(slide, dept_label, company, dept_rgb, total_hc, page_sfx=""):
     r, g, b = dept_rgb
     fill = _rgb(r, g, b)
-    txt  = _on_dark(r, g, b)
+    txt  = _on_bg(r, g, b)
     _add_rect(slide, 0, 0, SLIDE_W, HEADER_H, fill_rgb=fill)
+    # thin white accent at bottom of header
     _add_rect(slide, 0, HEADER_H - int(Inches(0.04)), SLIDE_W, int(Inches(0.04)),
               fill_rgb=RGBColor(0xff,0xff,0xff))
     label = dept_label.upper() + (f"  {page_sfx}" if page_sfx else "")
-    _add_textbox(slide, Inches(0.45), Inches(0.14), Inches(9.0), Inches(0.65),
+    _add_textbox(slide, Inches(0.45), Inches(0.14), Inches(9.0), Inches(0.70),
                  label, font_size=22, bold=True, color=txt)
     _add_textbox(slide, Inches(10.0), Inches(0.20), Inches(3.1), Inches(0.55),
-                 f"{company}\n{total_hc:,} people",
-                 font_size=9, color=txt, align=PP_ALIGN.RIGHT)
+                 f"{company}\n{total_hc:,} people", font_size=9, color=txt,
+                 align=PP_ALIGN.RIGHT)
 
 
-# ── Org-chart card ────────────────────────────────────────────────────────────
+# ── Org-chart person card ─────────────────────────────────────────────────────
 #
-#  ┌──────────────────────────────────┐
-#  │ ● Name (bold, white)             │  ← dark rounded header
-#  │   Title (light white, smaller)   │
-#  ├──────────────────────────────────┤
-#  │ email@company.com                │  ← white body
-#  │ Work Phone: xxx-xxx-xxxx         │
-#  │ Location: Florida                │
-#  │ linkedin.com/in/...              │
-#  └──────────────────────────────────┘
+#  ┌▌────────────────────────────────────┐   ← light gray bg, coloured left bar
+#  │ Alex Vance            (bold, dark)  │
+#  │ Co-Founder & CEO      (slate)       │
+#  │ ─────────────────────────────────   │
+#  │ alex@company.com      (dark gray)   │
+#  │ Work Phone: 947-397-5535            │
+#  │ Location: Florida                   │
+#  │ linkedin.com/in/alexvance  (blue)   │
+#  └─────────────────────────────────────┘
 #
-def _draw_card(slide, left: int, top: int, person: dict,
-               hdr_rgb: tuple[int, int, int],
-               card_w: int | None = None) -> None:
+def _draw_card(slide, left: int, top: int,
+               person: dict,
+               accent_rgb: tuple[int, int, int],
+               card_w: int | None = None,
+               is_head: bool = False) -> None:
 
     cw = card_w or int(CARD_W)
     ch = int(CARD_H)
-    hh = int(CARD_HDR)
-    bh = int(CARD_BODY)
-    cr = 5000  # corner_radius
 
-    r, g, b = hdr_rgb
-    hdr_fill = _rgb(r, g, b)
+    bg = _CARD_BG_H if is_head else _CARD_BG
 
-    # 1 — Full card as dark rounded rect (gives rounded top corners)
-    _add_rect(slide, left, top, cw, ch, fill_rgb=hdr_fill, corner_radius=cr)
-
-    # 2 — White body painted over the bottom part (square top, rounded bottom illusion via border)
-    _add_rect(slide, left, top + hh, cw, bh + 1, fill_rgb=RGBColor(0xff,0xff,0xff))
-
-    # 3 — Card border on top of everything (transparent fill, rounded)
+    # ── Card background ───────────────────────────────────────────────────
     _add_rect(slide, left, top, cw, ch,
-              line_rgb=RGBColor(0xb8,0xca,0xdc), line_width=0.8, corner_radius=cr)
+              fill_rgb=bg,
+              line_rgb=_CARD_BDR,
+              line_width=0.9,
+              corner_radius=5000)
 
-    # 4 — Photo circle (centred vertically in header)
-    pd = int(PHOTO_D)
-    ph_left = left + int(Inches(0.10))
-    ph_top  = top + (hh - pd) // 2
-    dr, dg, db = _darken(hdr_rgb, 0.18)
-    _add_rect(slide, ph_left, ph_top, pd, pd,
-              fill_rgb=RGBColor(dr, dg, db), corner_radius=50000)
-    _add_rect(slide, ph_left, ph_top, pd, pd,
-              line_rgb=RGBColor(0xff,0xff,0xff), line_width=1.5, corner_radius=50000)
+    # ── Left accent bar ───────────────────────────────────────────────────
+    r, g, b = accent_rgb
+    _add_rect(slide, left, top, ACCENT_W, ch,
+              fill_rgb=_rgb(r, g, b),
+              corner_radius=5000)
 
-    # 5 — Name + title in header
-    tx = ph_left + pd + int(Inches(0.07))
-    tw = left + cw - tx - int(Inches(0.06))
+    # ── Text content ──────────────────────────────────────────────────────
+    ix  = left + ACCENT_W + int(Inches(0.09))
+    iw  = cw - ACCENT_W - int(Inches(0.12))
+    cy  = top + int(Inches(0.09))
 
-    name  = str(person.get("label") or "").strip()[:28]
-    title = str((person.get("metadata") or {}).get("designation") or "").strip()[:34]
+    name  = str(person.get("label") or "").strip()
+    title = str((person.get("metadata") or {}).get("designation") or "").strip()
+    meta  = person.get("metadata") or {}
 
-    _add_textbox(slide, tx, top + int(Inches(0.07)), tw, int(Inches(0.20)),
-                 name, font_size=8.5, bold=True, color=RGBColor(0xff,0xff,0xff), wrap=False)
+    # Name
+    if name:
+        _add_textbox(slide, ix, cy, iw, int(Inches(0.22)),
+                     name[:32], font_size=9.0, bold=True, color=_TXT_NAME, wrap=False)
+        cy += int(Inches(0.22))
+
+    # Designation
     if title:
-        _add_textbox(slide, tx, top + int(Inches(0.28)), tw, int(Inches(0.18)),
-                     title, font_size=7.0, color=RGBColor(0xcc,0xd8,0xe5), wrap=False)
+        _add_textbox(slide, ix, cy, iw, int(Inches(0.19)),
+                     title[:40], font_size=7.5, color=_TXT_TITLE, wrap=False)
+        cy += int(Inches(0.19))
 
-    # 6 — Contact details in white body
-    meta   = person.get("metadata") or {}
-    bx     = left + int(Inches(0.10))
-    bw     = cw - int(Inches(0.15))
-    by     = top + hh + int(Inches(0.06))
-    line_h = int(Inches(0.175))
-    lgap   = int(Inches(0.175))
-    dark_c = RGBColor(0x3a, 0x52, 0x66)
+    # Thin divider
+    cy += int(Inches(0.04))
+    _add_rect(slide, ix, cy, iw, max(1, int(Inches(0.015))), fill_rgb=_DIVIDER)
+    cy += int(Inches(0.06))
 
-    def _body_line(text: str, y: int, url: str | None = None) -> None:
+    # Contact detail lines
+    line_h = int(Inches(0.18))
+    gap    = int(Inches(0.175))
+    max_y  = top + ch - int(Inches(0.06))
+
+    def _line(text: str, url: str | None = None) -> bool:
+        nonlocal cy
+        if cy + line_h > max_y:
+            return False
         if url:
-            _add_hyperlink_box(slide, bx, y, bw, line_h, text, url, 6.5)
+            _add_hyperlink_box(slide, ix, cy, iw, line_h, text, url, 6.5)
         else:
-            _add_textbox(slide, bx, y, bw, line_h, text, 6.5, color=dark_c, wrap=False)
+            _add_textbox(slide, ix, cy, iw, line_h, text, 6.5, color=_TXT_BODY, wrap=False)
+        cy += gap
+        return True
 
-    cy = by
     email = str(meta.get("email") or "").strip()
-    if email:
-        _body_line(email, cy)
-        cy += lgap
-
     phone = str(meta.get("phone") or meta.get("work_phone") or "").strip()
-    if phone:
-        _body_line(f"Work Phone: {phone}", cy)
-        cy += lgap
+    loc   = str(meta.get("city") or meta.get("region") or meta.get("location") or "").strip()[:30]
+    li    = str(meta.get("linkedin_url") or meta.get("linkedin") or
+                meta.get("LinkedInURL") or "").strip()
 
-    loc = str(meta.get("city") or meta.get("region") or meta.get("location") or "").strip()[:28]
-    if loc:
-        _body_line(f"Location: {loc}", cy)
-        cy += lgap
+    if email and not _line(email):
+        return
+    if phone and not _line(f"Work Phone: {phone}"):
+        return
+    if loc and not _line(f"Location: {loc}"):
+        return
+    if li:
+        disp = li.replace("https://www.","").replace("https://","").replace("http://","")[:38]
+        _line(disp, url=li)
 
-    li = str(meta.get("linkedin_url") or meta.get("linkedin") or
-             meta.get("LinkedInURL") or "").strip()
-    if li and cy + line_h < top + ch:
-        disp = li.replace("https://www.", "").replace("https://", "").replace("http://","")[:36]
-        _body_line(disp, cy, url=li)
 
+# ── Connector lines ───────────────────────────────────────────────────────────
 
-# ── Connectors ────────────────────────────────────────────────────────────────
+_CONN_CLR = RGBColor(0x8a, 0xa2, 0xba)
 
-_CONN_CLR = RGBColor(0x8e, 0xa3, 0xb8)   # mid-gray connector lines
-
-def _draw_connectors(slide, parent_cx: int, parent_bottom: int,
-                     child_cxs: list[int], child_top: int) -> None:
-    """T-bar connectors: vertical stem → horizontal bar → drops to each child."""
+def _draw_connectors(slide, parent_cx, parent_bottom,
+                     child_cxs: list[int], child_top) -> None:
     if not child_cxs:
         return
     mid_y = parent_bottom + (child_top - parent_bottom) // 2
@@ -328,92 +319,75 @@ def _make_dept_slides(prs: Presentation, company: str,
                       total_hc: int,
                       dept_head: dict | None,
                       columns: list[dict]) -> None:
-    """
-    Renders one or more slides for a department.
-
-    ``columns`` is a list of dicts:
-        { "head": person | None,
-          "members": [person, …],
-          "accent_rgb": (r,g,b) }
-
-    The dept_head is shown at the top-center; columns are arranged
-    horizontally below it, each with its own head + stacked members.
-    """
     dept_rgb = _hex_to_rgb(dept_color_hex)
     blank    = prs.slide_layouts[6]
 
-    # ── Scale column width to fit slide ──────────────────────────────────
     avail_w = int(SLIDE_W) - 2 * int(SIDE_PAD)
 
-    def _col_w_for_n(n: int) -> int:
-        if n == 0:
+    def _col_width(n: int) -> int:
+        nominal_total = n * int(CARD_W) + (n-1) * int(COL_GAP)
+        if nominal_total <= avail_w:
             return int(CARD_W)
-        total = n * int(CARD_W) + (n - 1) * int(COL_GAP)
-        if total <= avail_w:
-            return int(CARD_W)
-        # scale down
-        return max(int(Inches(1.2)), (avail_w - (n-1) * int(COL_GAP)) // n)
+        return max(int(Inches(1.3)), (avail_w - (n-1)*int(COL_GAP)) // n)
 
-    # ── Split columns across slides ───────────────────────────────────────
-    def _make_one_slide(slide_cols: list[dict], page_sfx: str) -> None:
+    def _one_slide(slide_cols: list[dict], sfx: str) -> None:
         slide = prs.slides.add_slide(blank)
-        _draw_header(slide, dept_label, company, dept_rgb, total_hc, page_sfx)
+        _draw_header(slide, dept_label, company, dept_rgb, total_hc, sfx)
 
-        n  = len(slide_cols)
-        cw = _col_w_for_n(n)
-        ch = int(CARD_H)
-        gap = int(COL_GAP) if cw == int(CARD_W) else int(Inches(0.20))
+        n   = len(slide_cols)
+        cw  = _col_width(n)
+        gap = int(COL_GAP) if cw == int(CARD_W) else int(Inches(0.18))
+        ch  = int(CARD_H)
 
-        total_w    = n * cw + (n-1) * gap
-        col_start  = (int(SLIDE_W) - total_w) // 2
-        col_xs     = [col_start + i * (cw + gap) for i in range(n)]
-        col_cxs    = [x + cw // 2 for x in col_xs]
+        total_w   = n * cw + (n-1) * gap
+        col_start = (int(SLIDE_W) - total_w) // 2
+        col_xs    = [col_start + i*(cw+gap) for i in range(n)]
+        col_cxs   = [x + cw//2 for x in col_xs]
 
-        # Dept-head card — centred, slightly wider
-        head_y     = TREE_TOP
-        head_cw    = min(int(HEAD_W), cw)
-        head_x     = int(SLIDE_W // 2) - head_cw // 2
-        head_btm   = head_y + ch
+        # Dept-head card
+        head_y   = TREE_TOP
+        head_cw  = min(int(HEAD_W), cw)
+        head_x   = int(SLIDE_W//2) - head_cw//2
+        head_btm = head_y + ch
 
         if dept_head:
-            _draw_card(slide, head_x, head_y, dept_head, dept_rgb, card_w=head_cw)
+            _draw_card(slide, head_x, head_y, dept_head, dept_rgb,
+                       card_w=head_cw, is_head=True)
 
-        # Connector gap below head
-        conn_top  = head_btm + int(CONN_H)
-        conn_btm  = conn_top + int(CONN_H)   # col-head card top
+        # Gap for connector lines
+        col_head_y = head_btm + int(CONN_H)*2
 
-        # Connectors: dept_head → column heads
+        # T-bar connectors: dept head → column heads
         if dept_head and slide_cols:
-            head_cx = int(SLIDE_W // 2)
-            _draw_connectors(slide, head_cx, head_btm, col_cxs, conn_btm)
+            _draw_connectors(slide, int(SLIDE_W//2), head_btm, col_cxs, col_head_y)
 
-        # Columns
+        # Draw columns
         for i, col in enumerate(slide_cols):
-            cx   = col_xs[i]
-            ccx  = col_cxs[i]
-            acc  = col["accent_rgb"]
+            cx  = col_xs[i]
+            acc = col["accent_rgb"]
 
-            # Sub-dept head card
-            col_head_y = conn_btm
             if col.get("head"):
                 _draw_card(slide, cx, col_head_y, col["head"], acc, card_w=cw)
-            member_start = col_head_y + ch + int(CARD_V_GAP)
 
-            # Stacked member cards
-            for j, member in enumerate(col.get("members") or []):
-                my = member_start + j * (ch + int(CARD_V_GAP))
-                if my + ch > int(SLIDE_H) - int(Inches(0.12)):
+            member_y = col_head_y + ch + int(CARD_V_GAP)
+
+            for member in col.get("members") or []:
+                if member_y + ch > int(SLIDE_H) - int(Inches(0.12)):
                     break
-                _draw_card(slide, cx, my, member, _lighten(acc, 0.25), card_w=cw)
+                from pptx.dml.color import RGBColor as _RC
+                r, g, b = acc
+                lighter = (min(255,r+35), min(255,g+35), min(255,b+35))
+                _draw_card(slide, cx, member_y, member, lighter, card_w=cw)
+                member_y += ch + int(CARD_V_GAP)
 
     # Chunk columns across slides
-    chunks = [columns[i:i+MAX_COLS] for i in range(0, max(len(columns), 1), MAX_COLS)]
+    chunks = [columns[i:i+MAX_COLS] for i in range(0, max(len(columns),1), MAX_COLS)]
     if not chunks:
         chunks = [[]]
-    total_pages = len(chunks)
+    total = len(chunks)
     for idx, chunk in enumerate(chunks):
-        sfx = f"({idx+1}/{total_pages})" if total_pages > 1 else ""
-        _make_one_slide(chunk, sfx)
+        sfx = f"({idx+1}/{total})" if total > 1 else ""
+        _one_slide(chunk, sfx)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -421,42 +395,29 @@ def _make_dept_slides(prs: Presentation, company: str,
 def build_pptx(company: str, industry: str,
                depts: list[dict[str, Any]]) -> bytes:
     """
-    Build and return PPTX bytes.
-
-    Each entry in ``depts``:
-      {
-        "label":     str,
-        "color":     str,          # hex
-        "headcount": int,
-        "head":      dict | None,  # dept-head person node
-        "columns": [               # each = one vertical column on the slide
-          { "head":       dict | None,
-            "members":    [dict, …],
-            "accent_rgb": (r,g,b) },
-          …
-        ],
-      }
+    depts entries:
+      { label, color, headcount, head: person|None,
+        columns: [{head, members, accent_rgb}, …] }
     """
     prs = Presentation()
     prs.slide_width  = int(SLIDE_W)
     prs.slide_height = int(SLIDE_H)
 
-    total_people = sum(d.get("headcount", 0) for d in depts)
-    _make_cover(prs, company, total_people, len(depts), industry)
+    total = sum(d.get("headcount", 0) for d in depts)
+    _make_cover(prs, company, total, len(depts), industry)
 
     for dept in depts:
-        cols = dept.get("columns") or []
-        hc   = dept.get("headcount", 0)
-        if hc == 0 and not dept.get("head") and not cols:
+        hc = dept.get("headcount", 0)
+        if hc == 0 and not dept.get("head"):
             continue
         _make_dept_slides(
             prs,
             company        = company,
             dept_label     = dept.get("label", "Department"),
-            dept_color_hex = dept.get("color", "#3491E8"),
+            dept_color_hex = dept.get("color", "#1e6eb8"),
             total_hc       = hc,
             dept_head      = dept.get("head"),
-            columns        = cols,
+            columns        = dept.get("columns") or [],
         )
 
     buf = io.BytesIO()
