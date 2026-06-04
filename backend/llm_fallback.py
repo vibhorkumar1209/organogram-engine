@@ -1273,10 +1273,71 @@ def _apify_fetch_leadership(company_name: str, domain: str,
             logger.info("Apify: kept %s (%d chars)", url, len(text))
         return "\n\n---\n\n".join(collected)[:_APIFY_MAX_CHARS]
 
+    # URL-path keywords that strongly indicate a leadership / governance page.
+    # Used to filter Google search result URLs before crawling.
+    _URL_SIGNAL_KW = {
+        "board", "governance", "leadership", "director", "executive",
+        "management", "investor", "officers", "oversight", "about",
+    }
+
+    # ── Helper: extract result URLs from rag-web-browser items ───────────────
+    # rag-web-browser returns searchResult.url (the Google result URL) and
+    # item.url (the page actually crawled).  We collect both so we can feed
+    # them to website-content-crawler for full JS rendering when the rag
+    # browser returned thin/empty content.
+    def _extract_result_urls(items: list[dict]) -> list[str]:
+        """Pull leadership-signal URLs out of rag-web-browser search results."""
+        urls: list[str] = []
+        for item in items:
+            sr = item.get("searchResult") or {}
+            for candidate in (sr.get("url", ""), item.get("url", "")):
+                if candidate and candidate not in seen_urls:
+                    low = candidate.lower()
+                    if any(kw in low for kw in _URL_SIGNAL_KW):
+                        urls.append(candidate)
+        return list(dict.fromkeys(urls))  # deduplicate, preserve order
+
+    # ── Phase 0: Targeted Google search → extract URLs → direct crawl ─────────
+    # Two queries specifically named after what Google already returns at the top:
+    #   "{company}" board of directors  →  investor.{domain}/governance/board-of-directors/...
+    #   "{company}" executive leadership  →  {domain}/about/leadership
+    # We collect the RAW SEARCH RESULT URLs (searchResult.url), filter for
+    # leadership-signal path segments, and feed them to website-content-crawler
+    # with full Playwright/Chrome rendering.  This catches investor subdomains
+    # (investor.onemainfinancial.com, ir.wellsfargo.com, etc.) and non-standard
+    # path structures (.aspx, /default.aspx, /en/governance, etc.) that the
+    # curated _APIFY_LEADERSHIP_PATHS list would never reach.
+    q0a = f'"{company_name}" board of directors'
+    q0b = f'"{company_name}" executive leadership management team'
+    logger.info("Apify Phase 0 — Google URL discovery for '%s'", company_name)
+    items_0a = _apify_rag_search(q0a, api_token, max_results=5)
+    items_0b = _apify_rag_search(q0b, api_token, max_results=4)
+
+    # Try content returned directly by rag-web-browser first (cheapest path)
+    result = _filter_items(items_0a + items_0b)
+    if result:
+        logger.info("Apify Phase 0 (rag content) succeeded for '%s': %d chars",
+                    company_name, len(result))
+        return result
+
+    # Content was thin — extract the raw Google result URLs and crawl them directly
+    phase0_urls = _extract_result_urls(items_0a + items_0b)
+    if phase0_urls:
+        logger.info("Apify Phase 0 — crawling %d Google-discovered URLs for '%s'",
+                    len(phase0_urls), company_name)
+        crawl_items_0 = _apify_run(phase0_urls[:_APIFY_MAX_PAGES], api_token)
+        result = _filter_items(crawl_items_0)
+        if result:
+            logger.info("Apify Phase 0 (direct crawl) succeeded for '%s': %d chars",
+                        company_name, len(result))
+            return result
+
+    logger.info("Apify Phase 0 empty for '%s', trying site-targeted search", company_name)
+
     # ── Phase 1a: Site-targeted, language-agnostic ────────────────────────────
     # Single keywords (not phrases) so Google matches regardless of whether the
     # page uses English or Spanish terminology.  No company name needed —
-    # site: already restricts to the right domain.
+    # site: already restricts to the right domain AND its subdomains.
     q1 = f"site:{domain} directors OR governance OR leadership OR board OR executives"
     logger.info("Apify Phase 1a — site-targeted search for '%s'", company_name)
     items_1a = _apify_rag_search(q1, api_token, max_results=5)
@@ -1285,19 +1346,32 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         logger.info("Apify Phase 1a succeeded for '%s': %d chars", company_name, len(result))
         return result
 
+    # Phase 1a returned no content — still try direct-crawling any URLs it found
+    phase1a_urls = _extract_result_urls(items_1a)
+    if phase1a_urls:
+        logger.info("Apify Phase 1a — crawling %d site-search URLs for '%s'",
+                    len(phase1a_urls), company_name)
+        crawl_items_1a = _apify_run(phase1a_urls[:_APIFY_MAX_PAGES], api_token)
+        result = _filter_items(crawl_items_1a)
+        if result:
+            logger.info("Apify Phase 1a (direct crawl) succeeded for '%s': %d chars",
+                        company_name, len(result))
+            return result
+
     # ── Phase 1b: Broad search — no site restriction ──────────────────────────
     # Finds Wikipedia, Bloomberg, annual reports, press releases.
     # Used when the corporate site has no indexed governance page or when 1a
     # returns only irrelevant pages.
     q2 = f'"{company_name}" board directors executives OR leadership'
-    logger.info("Apify Phase 1b — broad search for '%s' (1a returned nothing useful)", company_name)
+    logger.info("Apify Phase 1b — broad search for '%s' (earlier phases returned nothing useful)",
+                company_name)
     items_1b = _apify_rag_search(q2, api_token, max_results=4)
     result = _filter_items(items_1b)
     if result:
         logger.info("Apify Phase 1b succeeded for '%s': %d chars", company_name, len(result))
         return result
 
-    logger.info("Apify search phases empty for '%s', falling back to URL crawl", company_name)
+    logger.info("Apify all search phases empty for '%s', falling back to URL crawl", company_name)
 
     # ── Phase 2: nav-discovery + curated URL patterns ─────────────────────────
     import time
@@ -1308,18 +1382,35 @@ def _apify_fetch_leadership(company_name: str, domain: str,
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    seen_urls: set[str] = set()
+    seen_urls2: set[str] = set()
     start_urls: list[str] = []
 
     def _add(url: str) -> None:
-        if url not in seen_urls:
-            seen_urls.add(url)
+        if url not in seen_urls2 and url not in seen_urls:
+            seen_urls2.add(url)
             start_urls.append(url)
 
     nav_urls = _discover_via_nav(domain, headers, deadline)
     for url in nav_urls:
         if any(kw in url.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
             _add(url)
+
+    # Governance/BOD pages are frequently hosted on investor-relations subdomains
+    # (e.g. investor.onemainfinancial.com, ir.wellsfargo.com, investors.jpmorganchase.com).
+    # Try the most common IR subdomain + governance paths before falling through to www.
+    _IR_SUBDOMAINS = ["investor", "ir", "investors"]
+    _IR_GOVERNANCE_PATHS = [
+        "/governance/board-of-directors",
+        "/governance/board-of-directors/default.aspx",
+        "/governance",
+        "/corporate-governance",
+        "/corporate-governance/board-of-directors",
+        "/corporate-governance/board",
+        "/en/governance/board-of-directors",
+    ]
+    for sub in _IR_SUBDOMAINS:
+        for path in _IR_GOVERNANCE_PATHS:
+            _add(f"https://{sub}.{domain}{path}")
 
     for path in _APIFY_LEADERSHIP_PATHS:
         _add(f"https://www.{domain}{path}")
