@@ -36,6 +36,7 @@ from structural_engine import (
     _enrich_with_llm_leadership,
     _inject_knowledge_leadership,
     promote_uploaded_to_leadership,
+    purge_csv_from_enriched_panels,
 )
 
 # ─── Flexible column name mapping ────────────
@@ -485,6 +486,16 @@ async def upload_file(file: UploadFile = File(...),
                 pass
             _log.info("Background enrichment starting for '%s' (domain=%s)", co_name, domain)
             _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
+
+            # ── Purge CSV people from panels that web scraping already filled ──
+            # After web enrichment, EM/BOD may contain both web-scraped executives
+            # and uploaded CSV executives (CEO, CFO, etc. allowed through during
+            # initial build).  Remove the CSV ones from any panel that has real
+            # web data so uploaded data never pollutes enriched leadership panels.
+            purged = purge_csv_from_enriched_panels(dag)
+            if purged:
+                _log.info("Purged %d CSV-uploaded nodes from web-enriched EM/BOD for '%s'",
+                          purged, co_name)
 
             # ── Uploaded-data fallback ────────────────────────────────────────
             # If web scraping found no (or thin) BOD/EM data, promote the most

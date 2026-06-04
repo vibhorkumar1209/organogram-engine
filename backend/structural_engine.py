@@ -2310,6 +2310,78 @@ def _enrich_with_llm_leadership(
     dag.repair_governance_edges()
 
 
+def purge_csv_from_enriched_panels(dag: "OrganogramDAG") -> int:
+    """
+    After web enrichment runs, remove any CSV-classified person nodes from
+    Executive Management and Board of Management if those panels already
+    contain web-scraped executives.
+
+    CSV people are identified by nlp_method NOT containing "llm_leadership"
+    and NOT being "uploaded_data" (which is the fallback shadow label).
+
+    Returns the count of nodes removed.
+    """
+    _WEB_METHODS = ("llm_leadership_web", "llm_leadership_ai",
+                    "llm_leadership_apify", "llm_leadership_knowledge")
+
+    # ── Locate EM and BOD dept nodes ────────────────────────────────────────
+    em_id  = dag._node_id("dept", "Executive Management")
+    bod_id = dag._node_id("dept", "Board of Management")
+
+    removed = 0
+
+    for panel_id in (em_id, bod_id):
+        if panel_id not in dag.G:
+            continue
+
+        # Count web-enriched people in this panel (any level in subtree)
+        web_count = 0
+        for nid in dag.G.nodes:
+            a = dag.G.nodes.get(nid, {})
+            if a.get("node_type") != "person":
+                continue
+            meta = a.get("metadata", {})
+            if meta.get("dept_primary", "") not in (
+                "Executive Management", "Board of Management"
+            ):
+                continue
+            meth = str(meta.get("nlp_method", ""))
+            if any(meth == wm for wm in _WEB_METHODS):
+                web_count += 1
+
+        if web_count == 0:
+            continue  # No web data yet — leave CSV people in place as fallback
+
+        # Panel is web-enriched: collect CSV person children to remove
+        to_remove: list[str] = []
+        for child_id in list(dag.G.successors(panel_id)):
+            ca = dag.G.nodes.get(child_id, {})
+            if ca.get("node_type") != "person":
+                continue
+            meth = str(ca.get("metadata", {}).get("nlp_method", ""))
+            if meth not in _WEB_METHODS and meth != "uploaded_data":
+                # CSV-classified node — remove it from this panel
+                to_remove.append(child_id)
+
+        for nid in to_remove:
+            # Remove the edge from the panel to the person
+            if dag.G.has_edge(panel_id, nid):
+                dag.G.remove_edge(panel_id, nid)
+            # If the person now has no incoming edges (orphan), remove the node
+            if dag.G.in_degree(nid) == 0:
+                dag.G.remove_node(nid)
+                removed += 1
+            else:
+                removed += 1  # edge removed even if node kept under another parent
+
+    if removed:
+        logger.info(
+            "purge_csv_from_enriched_panels: removed %d CSV-uploaded nodes "
+            "from web-enriched EM/BOD panels", removed
+        )
+    return removed
+
+
 def promote_uploaded_to_leadership(
     dag: "OrganogramDAG",
     classified: list,
