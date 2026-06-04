@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { OrgNode, Stats } from './types'
 import { OrgChart } from './components/OrgChart'
 import { SearchBar } from './components/SearchBar'
@@ -508,14 +509,18 @@ export default function App() {
     }
   }
 
+  // ── Export layer-selection dialog ─────────────────────────────────
+  // null = closed; 'csv' | 'pptx' = which export type is pending
+  const [exportDialog, setExportDialog] = useState<'csv' | 'pptx' | null>(null)
+
   // ── Export org chart as CSV ───────────────────────────────────────
   const [exporting,    setExporting]    = useState(false)
   const [exportError,  setExportError]  = useState('')
-  const handleExport = async () => {
+  const handleExport = async (maxLayer: number) => {
     setExporting(true)
     setExportError('')
     try {
-      const res = await fetch(`${API}/export?fmt=csv`)
+      const res = await fetch(`${API}/export?fmt=csv&max_layer=${maxLayer}`)
       if (!res.ok) {
         const txt = await res.text().catch(() => `HTTP ${res.status}`)
         throw new Error(txt || `Server error ${res.status}`)
@@ -552,7 +557,7 @@ export default function App() {
       setBackendCompany(d?.loaded ? (d.company ?? null) : null)
     }).catch(() => setBackendCompany(null))
   }, [status])
-  const handleExportPPT = async () => {
+  const handleExportPPT = async (maxLayer: number) => {
     setExportingPPT(true)
     setPptError('')
     try {
@@ -579,7 +584,7 @@ export default function App() {
         }
       }
 
-      const res = await fetch(`${API}/export/pptx`)
+      const res = await fetch(`${API}/export/pptx?max_layer=${maxLayer}`)
       if (!res.ok) {
         const txt = await res.text().catch(() => `HTTP ${res.status}`)
         throw new Error(txt || `Server error ${res.status}`)
@@ -668,6 +673,7 @@ export default function App() {
   const isBackendDown = status === 'error'
 
   return (
+    <>
     <div
       style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#ffffff' }}
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -739,7 +745,7 @@ export default function App() {
 
         {status === 'ready' && (
           <button
-            onClick={handleExport}
+            onClick={() => setExportDialog('csv')}
             disabled={exporting}
             title="Download org chart + executives as CSV"
             style={{
@@ -766,7 +772,7 @@ export default function App() {
         {status === 'ready' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
             <button
-              onClick={handleExportPPT}
+              onClick={() => setExportDialog('pptx')}
               disabled={exportingPPT}
               title={`Download org chart as PowerPoint for ${deptTree?.label ?? 'current company'} — one slide per department`}
               style={{
@@ -1113,5 +1119,90 @@ export default function App() {
         </div>
       </div>
     </div>
+
+    {/* ── Export layer-selection dialog ───────────────────────────────── */}
+    {exportDialog !== null && createPortal(
+      <div
+        onClick={() => setExportDialog(null)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(4,12,20,0.72)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: '#0c1c2c', border: '1px solid rgba(52,145,232,0.35)',
+            borderRadius: 12, padding: '28px 32px', minWidth: 320,
+            boxShadow: '0 12px 48px rgba(0,0,0,0.6)',
+            display: 'flex', flexDirection: 'column', gap: 18,
+          }}
+        >
+          <div style={{ color: '#e0eaf4', fontSize: 14, fontWeight: 600, lineHeight: 1.4 }}>
+            {exportDialog === 'csv' ? 'Download CSV' : 'Download PowerPoint'}
+          </div>
+          <div style={{ color: '#7ca0bb', fontSize: 12, lineHeight: 1.5 }}>
+            Choose the seniority cut-off for this export:
+          </div>
+
+          {/* Director option */}
+          <button
+            onClick={() => {
+              setExportDialog(null)
+              if (exportDialog === 'csv') handleExport(6)
+              else handleExportPPT(6)
+            }}
+            style={{
+              background: 'rgba(52,145,232,0.10)', border: '1px solid rgba(52,145,232,0.45)',
+              borderRadius: 8, padding: '14px 18px', cursor: 'pointer', textAlign: 'left',
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}
+          >
+            <span style={{ color: '#3491E8', fontSize: 13, fontWeight: 600 }}>
+              Director &amp; above
+            </span>
+            <span style={{ color: '#7ca0bb', fontSize: 11 }}>
+              Board · C-Suite · EVP · SVP · VP · Sr Director · Director
+            </span>
+            <span style={{ color: '#4a7a9b', fontSize: 10 }}>Layers 0 – 6</span>
+          </button>
+
+          {/* Manager option */}
+          <button
+            onClick={() => {
+              setExportDialog(null)
+              if (exportDialog === 'csv') handleExport(8)
+              else handleExportPPT(8)
+            }}
+            style={{
+              background: 'rgba(52,145,232,0.10)', border: '1px solid rgba(52,145,232,0.45)',
+              borderRadius: 8, padding: '14px 18px', cursor: 'pointer', textAlign: 'left',
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}
+          >
+            <span style={{ color: '#3491E8', fontSize: 13, fontWeight: 600 }}>
+              Manager &amp; above
+            </span>
+            <span style={{ color: '#7ca0bb', fontSize: 11 }}>
+              Board · C-Suite · EVP · SVP · VP · Sr Director · Director · Sr Manager · Manager
+            </span>
+            <span style={{ color: '#4a7a9b', fontSize: 10 }}>Layers 0 – 8</span>
+          </button>
+
+          <button
+            onClick={() => setExportDialog(null)}
+            style={{
+              background: 'transparent', border: 'none', color: '#4a7a9b',
+              fontSize: 11, cursor: 'pointer', padding: '4px 0', alignSelf: 'center',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   )
 }

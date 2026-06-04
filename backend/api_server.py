@@ -648,7 +648,10 @@ _SENIORITY_LABELS: dict[int, str] = {
 
 
 @app.get("/export")
-def export_org_chart(fmt: str = Query("csv", description="csv or json")):
+def export_org_chart(
+    fmt:       str = Query("csv", description="csv or json"),
+    max_layer: int = Query(8,     description="Highest layer to include (6=Director, 8=Manager)"),
+):
     """
     Export the full org chart — all person nodes with their details — as CSV or JSON.
 
@@ -675,9 +678,9 @@ def export_org_chart(fmt: str = Query("csv", description="csv or json")):
         meta  = attrs.get("metadata", {})
         layer = attrs.get("layer", 9)
 
-        # Only export Manager-level and above (layers 0–8 inclusive).
-        # Layers 9 (Senior IC/Lead) and 10 (Analyst/Specialist) are excluded.
-        if layer > _EXPORT_MAX_LAYER:
+        # Only export up to the requested seniority level (caller-supplied max_layer).
+        # Default max_layer=8 (Manager); caller may pass 6 for Director and above only.
+        if layer > max_layer:
             continue
 
         dept  = meta.get("dept_primary", "")
@@ -750,7 +753,9 @@ def export_org_chart(fmt: str = Query("csv", description="csv or json")):
 
 
 @app.get("/export/pptx")
-def export_pptx():
+def export_pptx(
+    max_layer: int = Query(8, description="Highest layer to include (6=Director, 8=Manager)"),
+):
     """
     Export the full org chart as a PowerPoint presentation.
     One slide per top-level department; people arranged in seniority-band rows.
@@ -794,9 +799,9 @@ def export_pptx():
                 _dfs(c, depth + 1)
         _dfs(nid)
         out.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
-        # Only Manager-level and above in the PPT (layers 0–8 inclusive).
-        # Layers 9 (Senior IC/Lead) and 10 (Analyst/Specialist) are excluded.
-        return [p for p in out if p.get("layer", 99) <= _EXPORT_MAX_LAYER]
+        # Only include up to the requested seniority level (caller-supplied max_layer).
+        # Default max_layer=8 (Manager); caller may pass 6 for Director and above only.
+        return [p for p in out if p.get("layer", 99) <= max_layer]
 
     def _direct_people(nid: str) -> list[dict]:
         """Only immediate person-children of a node."""
