@@ -984,6 +984,92 @@ _APIFY_TIMEOUT       = 180   # seconds to wait for actor run
 _APIFY_MAX_PAGES     = 6     # max pages per run (BOD + exec + sub-pages)
 _APIFY_MAX_CHARS     = 60_000
 
+# ── Gemini Google Search grounding ──────────────────────────────────────────
+_GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+_GEMINI_MODEL    = "gemini-2.0-flash"   # supports google_search grounding tool
+# URL-path keywords that identify leadership / governance pages in search results
+_GEMINI_URL_SIGNAL = {
+    "board", "governance", "leadership", "director", "executive",
+    "management", "investor", "officers", "oversight", "about",
+}
+
+
+def _gemini_discover_leadership_urls(
+    company_name: str,
+    api_key: str,
+) -> tuple[list[str], str]:
+    """
+    Use Gemini 2.0 Flash with Google Search grounding to find Board of Directors
+    and executive leadership page URLs for a company.
+
+    Two targeted queries are submitted:
+      1. Board of Directors — finds investor/governance subdomain pages, e.g.
+         investor.onemainfinancial.com/governance/board-of-directors/default.aspx
+      2. Executive leadership — finds about/leadership pages on the main domain
+
+    Returns (urls, content):
+      urls    — deduplicated list of grounding-source URLs with leadership signal
+      content — Gemini's grounded text answer (may already name executives/titles)
+    """
+    try:
+        import httpx
+    except ImportError:
+        return [], ""
+
+    if not api_key or not company_name:
+        return [], ""
+
+    queries = [
+        (f"Who are the current Board of Directors of {company_name}? "
+         f"List each member's full name and title from the official corporate website."),
+        (f"Who are the executive leadership team members of {company_name}? "
+         f"List each executive's full name and title from the official company website."),
+    ]
+
+    all_urls:  list[str] = []
+    all_texts: list[str] = []
+    seen: set[str] = set()
+
+    for query in queries:
+        try:
+            resp = httpx.post(
+                f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
+                params={"key": api_key},
+                json={
+                    "contents": [{"parts": [{"text": query}]}],
+                    "tools":    [{"google_search": {}}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
+                },
+                timeout=45,
+            )
+            if not resp.is_success:
+                logger.warning("Gemini search %d for '%s': %s",
+                               resp.status_code, company_name, resp.text[:200])
+                continue
+
+            data = resp.json()
+            for candidate in data.get("candidates", []):
+                # Collect generated text (may already list names + titles)
+                parts = candidate.get("content", {}).get("parts", [])
+                text = " ".join(p.get("text", "") for p in parts if "text" in p).strip()
+                if text:
+                    all_texts.append(text)
+
+                # Collect grounding source URLs
+                grounding = candidate.get("groundingMetadata", {})
+                for chunk in grounding.get("groundingChunks", []):
+                    url = chunk.get("web", {}).get("uri", "")
+                    if url and url not in seen:
+                        if any(kw in url.lower() for kw in _GEMINI_URL_SIGNAL):
+                            seen.add(url)
+                            all_urls.append(url)
+                            logger.info("Gemini grounding URL for '%s': %s", company_name, url)
+
+        except Exception as exc:
+            logger.warning("Gemini query error for '%s': %s", company_name, exc)
+
+    return all_urls, "\n\n---\n\n".join(all_texts)
+
 
 def _apify_run(start_urls: list[str], api_token: str,
                timeout: int = _APIFY_TIMEOUT) -> list[dict]:
@@ -1297,42 +1383,43 @@ def _apify_fetch_leadership(company_name: str, domain: str,
                         urls.append(candidate)
         return list(dict.fromkeys(urls))  # deduplicate, preserve order
 
-    # ── Phase 0: Targeted Google search → extract URLs → direct crawl ─────────
-    # Two queries specifically named after what Google already returns at the top:
-    #   "{company}" board of directors  →  investor.{domain}/governance/board-of-directors/...
-    #   "{company}" executive leadership  →  {domain}/about/leadership
-    # We collect the RAW SEARCH RESULT URLs (searchResult.url), filter for
-    # leadership-signal path segments, and feed them to website-content-crawler
-    # with full Playwright/Chrome rendering.  This catches investor subdomains
-    # (investor.onemainfinancial.com, ir.wellsfargo.com, etc.) and non-standard
-    # path structures (.aspx, /default.aspx, /en/governance, etc.) that the
-    # curated _APIFY_LEADERSHIP_PATHS list would never reach.
-    q0a = f'"{company_name}" board of directors'
-    q0b = f'"{company_name}" executive leadership management team'
-    logger.info("Apify Phase 0 — Google URL discovery for '%s'", company_name)
-    items_0a = _apify_rag_search(q0a, api_token, max_results=5)
-    items_0b = _apify_rag_search(q0b, api_token, max_results=4)
+    # ── Phase 0: Gemini Google Search — URL discovery + content extraction ──────
+    # Gemini 2.0 Flash with google_search grounding runs two targeted queries:
+    #   "Who are the Board of Directors of {company}?" →
+    #       grounding chunks include investor.{domain}/governance/board-of-directors/...
+    #   "Who are the executive leadership team of {company}?" →
+    #       grounding chunks include {domain}/about/leadership
+    # This reliably discovers investor-subdomain and non-standard-path URLs that
+    # site:-restricted searches and www-prefixed curated lists would miss.
+    # If GEMINI_API_KEY is not set, this phase is skipped silently.
+    _gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if _gemini_key:
+        logger.info("Phase 0 — Gemini search for '%s'", company_name)
+        g_urls, g_text = _gemini_discover_leadership_urls(company_name, _gemini_key)
 
-    # Try content returned directly by rag-web-browser first (cheapest path)
-    result = _filter_items(items_0a + items_0b)
-    if result:
-        logger.info("Apify Phase 0 (rag content) succeeded for '%s': %d chars",
-                    company_name, len(result))
-        return result
+        # If Gemini's grounded text already contains exec names/titles, use it directly
+        if g_text and any(kw in g_text.lower() for kw in _LEADERSHIP_SIGNAL):
+            wrapped = f"[Gemini grounded search: {company_name}]\n{g_text[:_APIFY_MAX_CHARS]}"
+            logger.info("Phase 0 Gemini text succeeded for '%s': %d chars",
+                        company_name, len(wrapped))
+            return wrapped
 
-    # Content was thin — extract the raw Google result URLs and crawl them directly
-    phase0_urls = _extract_result_urls(items_0a + items_0b)
-    if phase0_urls:
-        logger.info("Apify Phase 0 — crawling %d Google-discovered URLs for '%s'",
-                    len(phase0_urls), company_name)
-        crawl_items_0 = _apify_run(phase0_urls[:_APIFY_MAX_PAGES], api_token)
-        result = _filter_items(crawl_items_0)
-        if result:
-            logger.info("Apify Phase 0 (direct crawl) succeeded for '%s': %d chars",
-                        company_name, len(result))
-            return result
+        # Crawl the Gemini-discovered URLs with Apify website-content-crawler
+        # for full JS-rendering (handles .aspx pages, SPAs, investor portals)
+        if g_urls:
+            fresh_g_urls = [u for u in g_urls if u not in seen_urls]
+            for u in fresh_g_urls:
+                seen_urls.add(u)
+            logger.info("Phase 0 — crawling %d Gemini-discovered URLs for '%s'",
+                        len(fresh_g_urls), company_name)
+            crawl_items_0 = _apify_run(fresh_g_urls[:_APIFY_MAX_PAGES], api_token)
+            result = _filter_items(crawl_items_0)
+            if result:
+                logger.info("Phase 0 (Gemini→Apify crawl) succeeded for '%s': %d chars",
+                            company_name, len(result))
+                return result
 
-    logger.info("Apify Phase 0 empty for '%s', trying site-targeted search", company_name)
+    logger.info("Phase 0 empty for '%s', trying site-targeted Apify search", company_name)
 
     # ── Phase 1a: Site-targeted, language-agnostic ────────────────────────────
     # Single keywords (not phrases) so Google matches regardless of whether the
