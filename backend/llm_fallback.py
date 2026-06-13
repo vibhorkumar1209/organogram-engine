@@ -618,7 +618,7 @@ def _gemini_discover_leadership_urls(
                 "tools":    [{key: {}}],
                 "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
             },
-            timeout=45,
+            timeout=90,
         )
 
     for query in queries:
@@ -854,11 +854,11 @@ def _gemini_fetch_leadership(
                 "contents": [{"parts": [{"text": synthesis_prompt}]}],
                 "generationConfig": {
                     "temperature": 0,
-                    "maxOutputTokens": 4096,
+                    "maxOutputTokens": 2048,
                     "responseMimeType": "application/json",
                 },
             },
-            timeout=60,
+            timeout=120,
         )
         if not resp.is_success:
             logger.warning(
