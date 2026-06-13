@@ -2163,6 +2163,14 @@ def _enrich_with_llm_leadership(
         companies[company_name]["region"] = region_counts.most_common(1)[0][0]
         companies[company_name]["sector"] = sector_counts.most_common(1)[0][0]
 
+    # ── Build LinkedIn index from uploaded CSV records ────────────────
+    # Used as first fallback when Gemini doesn't return a LinkedIn URL.
+    uploaded_linkedin: dict[str, str] = {}
+    for r in classified:
+        url = (getattr(r, "linkedin_url", "") or "").strip()
+        if url:
+            uploaded_linkedin[_name_key(getattr(r, "full_name", "") or "")] = url
+
     # ── Build existing-name index for deduplication ───────────────────
     existing_keys: set[str] = set()
     for nid in dag.G.nodes:
@@ -2193,8 +2201,8 @@ def _enrich_with_llm_leadership(
         # layer 2: Regular NEDs / INEDs
         # ── EM: global C-Suite at layer 1 (CEO promoted by frontend);
         #        regional/country heads at layer 2, own region sub-card ──────
-        # injections: (layer, name, title, dept_primary, sub_role, person_region)
-        injections: list[tuple[int, str, str, str, str, str]] = []
+        # injections: (layer, name, title, dept_primary, sub_role, person_region, linkedin_url)
+        injections: list[tuple[int, str, str, str, str, str, str]] = []
         for person in leadership.get("board", []):
             title = person["title"]
             if _is_board_chairman(title):
@@ -2204,13 +2212,14 @@ def _enrich_with_llm_leadership(
             else:
                 bod_layer = 2   # Regular NED / INED
             sub_role = _board_sub_role(title)
-            # BOD members always at HQ — board governs the whole company
-            injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region))
+            li = (person.get("linkedin_url", "") or "").strip()
+            injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region, li))
         for person in leadership.get("executives", []):
             title = person["title"]
             em_layer    = 2 if _is_regional_exec(title) else 1
             exec_region = _infer_exec_region(title, region)
-            injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region))
+            li = (person.get("linkedin_url", "") or "").strip()
+            injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region, li))
 
         # Build set of name-keys that appear in BOTH board and executives lists.
         # These "dual-role" individuals (e.g. Executive Chairman who is also CEO)
@@ -2224,8 +2233,10 @@ def _enrich_with_llm_leadership(
         # injected_dept_keys tracks (name_key, dept) to prevent true duplicates
         # while allowing the same person to appear in both BOD and EM.
         injected_dept_keys: set[tuple[str, str]] = set()
+        # Track newly injected nodes that still need a LinkedIn URL after upload + Gemini response
+        missing_linkedin: list[dict] = []
 
-        for layer, name, title, dept_primary, sub_role, person_region in injections:
+        for layer, name, title, dept_primary, sub_role, person_region, li_from_gemini in injections:
             key = _name_key(name)
             dept_key = (key, dept_primary)
 
@@ -2244,6 +2255,12 @@ def _enrich_with_llm_leadership(
                         meta["nlp_method"] = "llm_leadership_web"
                         if sub_role:
                             meta["board_sub_role"] = sub_role
+                        # Upgrade LinkedIn URL if we now have one and the node didn't
+                        resolved_li = (li_from_gemini
+                                       or uploaded_linkedin.get(key, "")
+                                       or meta.get("linkedin_url", ""))
+                        if resolved_li:
+                            meta["linkedin_url"] = resolved_li
                         dag.G.nodes[nid]["metadata"] = meta
                         ai_only_keys.discard(key)
                         break
@@ -2258,6 +2275,10 @@ def _enrich_with_llm_leadership(
 
             injected_dept_keys.add(dept_key)
 
+            # ── Resolve LinkedIn URL ──────────────────────────────────────────
+            # Priority: Gemini response → uploaded CSV data → batch search (below)
+            linkedin = li_from_gemini or uploaded_linkedin.get(key, "")
+
             person_uid = f"llm_{uuid.uuid4().hex[:12]}"
             try:
                 rec = ClassifiedRecord(
@@ -2265,7 +2286,7 @@ def _enrich_with_llm_leadership(
                     full_name=name,
                     designation=title,
                     company=co,
-                    linkedin_url="",
+                    linkedin_url=linkedin,
                     location="",
                     country="",
                     sector=sector,
@@ -2282,8 +2303,33 @@ def _enrich_with_llm_leadership(
                 # Attach board sub-role for ExecPanel committee badge display
                 if sub_role and person_uid in dag.G:
                     dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
+                # Queue for batch LinkedIn search if still no URL
+                if not linkedin:
+                    missing_linkedin.append({"name": name, "title": title, "node_id": person_uid})
             except Exception as _exc:
                 logger.warning("Failed to inject leadership person %s: %s", name, _exc)
+
+        # ── Batch LinkedIn search for injected people still missing a URL ─────
+        # One Gemini call covers all people at this company simultaneously.
+        gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        if gemini_key and missing_linkedin:
+            try:
+                from llm_fallback import _gemini_search_linkedin_batch
+                found_li = _gemini_search_linkedin_batch(missing_linkedin, co, gemini_key)
+                if found_li:
+                    for item in missing_linkedin:
+                        li_key = _name_key(item["name"])
+                        url = found_li.get(li_key, "")
+                        if url and item["node_id"] in dag.G:
+                            meta = dict(dag.G.nodes[item["node_id"]].get("metadata", {}))
+                            meta["linkedin_url"] = url
+                            dag.G.nodes[item["node_id"]]["metadata"] = meta
+                    logger.info(
+                        "LinkedIn batch resolved %d / %d missing profiles for '%s'",
+                        len(found_li), len(missing_linkedin), co,
+                    )
+            except Exception as _le:
+                logger.warning("LinkedIn batch search failed for '%s': %s", co, _le)
 
     # ── Guarantee BOD node always exists ─────────────────────────────────
     # BOD is only created when board members are found.  If web + LLM returned

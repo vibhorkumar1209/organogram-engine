@@ -512,6 +512,115 @@ def _gemini_discover_leadership_urls(
     return all_urls, "\n\n---\n\n".join(all_texts)
 
 
+_LINKEDIN_URL_RE = re.compile(
+    r'https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9_%-]+(?:/[A-Za-z0-9_%-]*)?',
+    re.IGNORECASE,
+)
+
+
+def _gemini_search_linkedin_batch(
+    people: list[dict],
+    company_name: str,
+    api_key: str,
+) -> dict[str, str]:
+    """
+    One Gemini google_search call to find LinkedIn profile URLs for a group of
+    executives/directors at a company.
+
+    people: [{"name": str, "title": str}, ...]
+    Returns: {name_key: "https://www.linkedin.com/in/..."} for those found.
+    name_key = first two words of name, lowercase letters only (matches _name_key).
+    """
+    try:
+        import httpx
+    except ImportError:
+        return {}
+
+    if not people or not api_key:
+        return {}
+
+    people_list = "\n".join(
+        f"- {p['name']}{' (' + p['title'] + ')' if p.get('title') else ''}"
+        for p in people[:25]
+    )
+    query = (
+        f"Find LinkedIn profile URLs for these {company_name} executives and board members. "
+        f"For each person listed below, provide their exact LinkedIn profile URL "
+        f"(linkedin.com/in/...):\n{people_list}"
+    )
+
+    def _norm_key(name: str) -> str:
+        words = re.sub(r"[^a-z ]", "", name.lower()).split()
+        return " ".join(words[:2])
+
+    try:
+        resp = httpx.post(
+            f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
+            params={"key": api_key},
+            json={
+                "contents": [{"parts": [{"text": query}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
+            },
+            timeout=45,
+        )
+        if not resp.is_success:
+            logger.warning(
+                "Gemini LinkedIn batch for '%s': HTTP %s", company_name, resp.status_code
+            )
+            return {}
+
+        data = resp.json()
+        result: dict[str, str] = {}
+
+        for candidate in data.get("candidates", []):
+            # ── Source 1: grounding chunk URIs (most reliable — direct LinkedIn URLs) ──
+            grounding = candidate.get("groundingMetadata", {})
+            for chunk in grounding.get("groundingChunks", []):
+                url = chunk.get("web", {}).get("uri", "")
+                if not url or "linkedin.com/in/" not in url.lower():
+                    continue
+                url_slug = url.split("/in/")[-1].split("/")[0].lower()
+                for p in people:
+                    key = _norm_key(p["name"])
+                    if key in result:
+                        continue
+                    name_parts = key.split()
+                    if (len(name_parts) >= 2
+                            and name_parts[0] in url_slug
+                            and name_parts[-1] in url_slug):
+                        result[key] = url
+                        logger.info("LinkedIn grounding chunk %s → %s", p["name"], url)
+                    elif len(name_parts) >= 1 and name_parts[-1] in url_slug:
+                        result[key] = url
+                        logger.info("LinkedIn slug surname match %s → %s", p["name"], url)
+
+            # ── Source 2: LinkedIn URLs embedded in generated text ─────────────────
+            parts = candidate.get("content", {}).get("parts", [])
+            text = " ".join(pt.get("text", "") for pt in parts if "text" in pt)
+            for m in _LINKEDIN_URL_RE.finditer(text):
+                url = m.group(0)
+                context = text[max(0, m.start() - 200): m.start() + 200].lower()
+                for p in people:
+                    key = _norm_key(p["name"])
+                    if key in result:
+                        continue
+                    name_parts = key.split()
+                    if all(part in context for part in name_parts):
+                        result[key] = url
+                        logger.info("LinkedIn text context %s → %s", p["name"], url)
+
+        logger.info(
+            "Gemini LinkedIn batch for '%s': found %d / %d profiles",
+            company_name, len(result), len(people),
+        )
+        return result
+
+    except Exception as exc:
+        logger.warning("Gemini LinkedIn batch failed for '%s': %s", company_name, exc)
+        return {}
+
+
 def _gemini_fetch_leadership(
     company_name: str,
     domain: str,
