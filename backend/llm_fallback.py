@@ -604,21 +604,53 @@ def _gemini_discover_leadership_urls(
     all_texts: list[str] = []
     seen: set[str] = set()
 
+    # Try both REST tool name variants — stable models use camelCase "googleSearch",
+    # earlier experimental models used snake_case "google_search".
+    # We detect which works on the first call and reuse it for subsequent queries.
+    _tool_key: str | None = None  # "google_search" | "googleSearch" — discovered at runtime
+
+    def _try_tool(key: str, query: str):
+        return httpx.post(
+            f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
+            params={"key": api_key},
+            json={
+                "contents": [{"parts": [{"text": query}]}],
+                "tools":    [{key: {}}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
+            },
+            timeout=45,
+        )
+
     for query in queries:
         try:
-            resp = httpx.post(
-                f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
-                params={"key": api_key},
-                json={
-                    "contents": [{"parts": [{"text": query}]}],
-                    "tools":    [{"google_search": {}}],
-                    "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
-                },
-                timeout=45,
-            )
+            resp = None
+            if _tool_key:
+                resp = _try_tool(_tool_key, query)
+            else:
+                # Auto-detect: try camelCase first (stable API), fall back to snake_case
+                for candidate_key in ("googleSearch", "google_search"):
+                    r = _try_tool(candidate_key, query)
+                    if r.is_success:
+                        _tool_key = candidate_key
+                        logger.info("Gemini search tool key detected: '%s'", _tool_key)
+                        resp = r
+                        break
+                    elif r.status_code not in (400, 422):
+                        # Non-validation error (quota, auth) — no point trying other key
+                        logger.warning("Gemini search %s=%d for '%s': %s",
+                                       candidate_key, r.status_code,
+                                       company_name, r.text[:300])
+                        resp = r
+                        break
+                    else:
+                        logger.debug("Gemini tool key '%s' rejected (%d): %s",
+                                     candidate_key, r.status_code, r.text[:200])
+                if resp is None:
+                    continue
+
             if not resp.is_success:
                 logger.warning("Gemini search %d for '%s': %s",
-                               resp.status_code, company_name, resp.text[:200])
+                               resp.status_code, company_name, resp.text[:300])
                 continue
 
             data = resp.json()

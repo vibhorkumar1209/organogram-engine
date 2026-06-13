@@ -2127,19 +2127,41 @@ async def test_knowledge(company: str = "Wells Fargo"):
 async def test_gemini(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
     """
     Test Gemini leadership pipeline end-to-end.
-    Phase A: google_search grounding research (~10-20s per query, 2 queries).
-    Phase B: JSON synthesis from grounded text.
-    Example: /test-gemini?company=Wells+Fargo&domain=wellsfargo.com
+    Also probes the raw API with both tool-key variants to expose errors.
+    Example: /test-gemini?company=Grupo+SURA&domain=gruposura.com
     """
     import os, time
-    from llm_fallback import _gemini_fetch_leadership, _gemini_discover_leadership_urls
+    import httpx as _httpx
+    from llm_fallback import (
+        _gemini_fetch_leadership, _gemini_discover_leadership_urls,
+        _GEMINI_API_BASE, _GEMINI_MODEL,
+    )
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
         return {"error": "GEMINI_API_KEY not set"}
 
+    # Raw probe: try both tool key variants on a single query
+    probe_query = f"Who are the current Board of Directors of {company}?"
+    raw_probes: dict = {}
+    for tk in ("googleSearch", "google_search"):
+        try:
+            r = _httpx.post(
+                f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
+                params={"key": gemini_key},
+                json={
+                    "contents": [{"parts": [{"text": probe_query}]}],
+                    "tools":    [{tk: {}}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 256},
+                },
+                timeout=30,
+            )
+            raw_probes[tk] = {"status": r.status_code, "body": r.text[:400]}
+        except Exception as exc:
+            raw_probes[tk] = {"error": str(exc)}
+
     t0 = time.monotonic()
-    urls, grounded_text = _gemini_discover_leadership_urls(company, gemini_key)
+    urls, grounded_text = _gemini_discover_leadership_urls(company, gemini_key, domain=domain)
     t1 = time.monotonic()
     result = _gemini_fetch_leadership(company, domain, gemini_key)
     t2 = time.monotonic()
@@ -2147,6 +2169,7 @@ async def test_gemini(company: str = "Wells Fargo", domain: str = "wellsfargo.co
     return {
         "company": company,
         "domain":  domain,
+        "raw_tool_probe": raw_probes,
         "phase_a": {
             "grounding_urls": urls,
             "grounded_chars": len(grounded_text),
