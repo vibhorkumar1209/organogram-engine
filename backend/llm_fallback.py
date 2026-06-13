@@ -435,18 +435,135 @@ _GEMINI_URL_SIGNAL = {
 }
 
 
+# Common leadership/governance URL paths tried when a domain is known.
+# Covers English, Spanish, and major regional URL conventions.
+_LEADERSHIP_FETCH_PATHS = [
+    # ── Generic English paths ──────────────────────────────────────────────────
+    "/leadership",
+    "/about/leadership",
+    "/about-us/leadership",
+    "/about/board-of-directors",
+    "/governance/board-of-directors",
+    "/governance",
+    "/corporate-governance/board-of-directors",
+    "/corporate-governance",
+    "/about-us/governance",
+    "/about/corporate/governance",
+    "/board-of-directors",
+    "/investors/governance/board-of-directors",
+    "/investor-relations/governance/board-of-directors",
+    "/about/management",
+    "/executive-team",
+    # ── en/ locale prefix (Latin American, European companies) ─────────────────
+    "/en/our-company/ethics-and-corporate-governance/",
+    "/en/our-company/governance/",
+    "/en/our-company/board-of-directors/",
+    "/en/our-company/leadership/",
+    "/en/sustainability/stakeholders/board-of-directors/",
+    "/en/about/leadership",
+    "/en/about-us/leadership",
+    "/en/about/governance",
+    "/en/governance/board-of-directors",
+    "/en/corporate-governance",
+    # ── IR subdomains are tried separately (see _ir_leadership_urls) ───────────
+]
+
+_IR_SUBDOMAINS   = ["investor", "ir", "investors"]
+_IR_GOV_PATHS    = [
+    "/governance/board-of-directors",
+    "/governance/board-of-directors/default.aspx",
+    "/governance",
+    "/corporate-governance/board-of-directors",
+    "/corporate-governance",
+    "/en/governance/board-of-directors",
+]
+
+
+def _fetch_static_leadership(domain: str) -> str:
+    """
+    Lightweight httpx GET on common leadership/governance URL paths.
+
+    Tries paths on www.{domain} and {domain} (plain), plus IR subdomains.
+    Stops after accumulating 25 KB of useful text or hitting 4 successes.
+    Returns combined stripped text (≤ 25 KB) or "".
+
+    No JS rendering — reads static HTML only. Fast (6 s per request).
+    """
+    try:
+        import httpx
+    except ImportError:
+        return ""
+
+    if not domain:
+        return ""
+
+    headers = {
+        "User-Agent": _SEARCH_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+        "Accept-Language": "en,es;q=0.8",
+    }
+
+    collected: list[str] = []
+
+    def _try(url: str) -> bool:
+        if sum(len(t) for t in collected) >= 25_000 or len(collected) >= 4:
+            return False
+        try:
+            resp = httpx.get(url, headers=headers, timeout=6, follow_redirects=True)
+            if resp.status_code != 200:
+                return False
+            html = resp.text
+            if _is_js_shell(html):
+                return False
+            text = _strip_html(html)
+            js_data  = _extract_js_data(html)
+            json_ld  = _extract_json_ld(html)
+            parts: list[str] = []
+            if json_ld:
+                parts.append(f"[Structured Data from {url}]\n{json_ld}")
+            if js_data:
+                parts.append(f"[JS Data from {url}]\n{js_data}")
+            if text and len(text) > 200:
+                parts.append(f"[Page: {url}]\n{text[:8_000]}")
+            if parts:
+                collected.append("\n".join(parts))
+                logger.info("Direct fetch success: %s (%d chars)", url, len(text))
+                return True
+        except Exception as exc:
+            logger.debug("Direct fetch %s: %s", url, exc)
+        return False
+
+    # 1. Known leadership paths on www and plain domain
+    for path in _LEADERSHIP_FETCH_PATHS:
+        if _try(f"https://www.{domain}{path}"):
+            continue  # found content — try next path
+        _try(f"https://{domain}{path}")
+
+    # 2. IR subdomains (investor.company.com etc.)
+    for sub in _IR_SUBDOMAINS:
+        for path in _IR_GOV_PATHS:
+            _try(f"https://{sub}.{domain}{path}")
+
+    result = "\n\n".join(collected)
+    if result:
+        logger.info("Direct fetch for '%s': %d chars across %d pages",
+                    domain, len(result), len(collected))
+    return result
+
+
 def _gemini_discover_leadership_urls(
     company_name: str,
     api_key: str,
+    domain: str = "",
 ) -> tuple[list[str], str]:
     """
     Use Gemini 2.0 Flash with Google Search grounding to find Board of Directors
     and executive leadership page URLs for a company.
 
-    Two targeted queries are submitted:
-      1. Board of Directors — finds investor/governance subdomain pages, e.g.
-         investor.onemainfinancial.com/governance/board-of-directors/default.aspx
-      2. Executive leadership — finds about/leadership pages on the main domain
+    Three targeted queries are submitted:
+      1. Board of Directors (site-constrained when domain is known)
+      2. Executive leadership team
+      3. Governance page search (when domain is known, constrained to site)
 
     Returns (urls, content):
       urls    — deduplicated list of grounding-source URLs with leadership signal
@@ -460,12 +577,22 @@ def _gemini_discover_leadership_urls(
     if not api_key or not company_name:
         return [], ""
 
+    # When the domain is known, include it as a search hint so Gemini
+    # grounding prioritises the company's own governance pages.
+    site_hint = f" site:{domain}" if domain else ""
+    domain_hint = f" (official website: {domain})" if domain else ""
+
     queries = [
-        (f"Who are the current Board of Directors of {company_name}? "
-         f"List each member's full name and title from the official corporate website."),
-        (f"Who are the executive leadership team members of {company_name}? "
-         f"List each executive's full name and title from the official company website."),
+        (f"Who are the current Board of Directors of {company_name}{domain_hint}? "
+         f"List each member's full name and title from the official corporate website.{site_hint}"),
+        (f"Who are the executive leadership team members of {company_name}{domain_hint}? "
+         f"List each executive's full name and title from the official company website.{site_hint}"),
     ]
+    # Add a governance-specific query when we have a domain
+    if domain:
+        queries.append(
+            f"{company_name} board of directors governance executive management{site_hint}"
+        )
 
     all_urls:  list[str] = []
     all_texts: list[str] = []
@@ -649,13 +776,23 @@ def _gemini_fetch_leadership(
         return {}
 
     # ── Phase A: Research via Google Search grounding ─────────────────────────
-    _urls, grounded_text = _gemini_discover_leadership_urls(company_name, api_key)
+    _urls, grounded_text = _gemini_discover_leadership_urls(company_name, api_key, domain=domain)
 
-    if not grounded_text:
+    # ── Phase A supplemental: direct httpx fetch of known leadership paths ────
+    static_text = _fetch_static_leadership(domain) if domain else ""
+    if static_text:
+        logger.info("Static fetch for '%s' (%s): %d chars", company_name, domain, len(static_text))
+
+    combined_text = "\n\n[Direct website content]\n".join(
+        t for t in (grounded_text, static_text) if t
+    )
+
+    if not combined_text:
         logger.warning("Gemini Phase A returned no content for '%s'", company_name)
         return {}
 
-    logger.info("Gemini Phase A for '%s': %d chars", company_name, len(grounded_text))
+    logger.info("Gemini Phase A for '%s': %d chars (grounded) + %d chars (static)",
+                company_name, len(grounded_text), len(static_text))
 
     # ── Phase B: Structured JSON synthesis ────────────────────────────────────
     domain_hint = f" (domain: {domain})" if domain else ""
@@ -664,7 +801,7 @@ def _gemini_fetch_leadership(
         f"text below about {company_name}{domain_hint}.\n\n"
         f"IMPORTANT: Only include people explicitly named in the research text — "
         f"do NOT use training knowledge to add names not found in the text.\n\n"
-        f"[Research text — sourced from Google Search]\n{grounded_text[:14_000]}"
+        f"[Research text — sourced from Google Search and company website]\n{combined_text[:14_000]}"
     )
 
     try:
