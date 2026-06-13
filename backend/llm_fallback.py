@@ -587,8 +587,14 @@ def _gemini_discover_leadership_urls(
          f"List each member's full name and title from the official corporate website.{site_hint}"),
         (f"Who are the executive leadership team members of {company_name}{domain_hint}? "
          f"List each executive's full name and title from the official company website.{site_hint}"),
+        # Native-language fallback: many non-English companies have their governance
+        # pages only in their local language (Spanish, French, German, etc.).
+        # A bilingual query widens Gemini's grounding coverage.
+        (f"{company_name} junta directiva directores ejecutivos OR "
+         f"{company_name} conseil d'administration dirigeants OR "
+         f"{company_name} Vorstand Aufsichtsrat{site_hint}"),
     ]
-    # Add a governance-specific query when we have a domain
+    # Add a governance-specific English query when we have a domain
     if domain:
         queries.append(
             f"{company_name} board of directors governance executive management{site_hint}"
@@ -844,8 +850,10 @@ def _gemini_fetch_leadership(
         parsed = json.loads(raw)
 
         # Handle rich schema (board_of_directors / executive_management keys)
+        # Use combined_text (grounded + static) so names from the direct page
+        # fetch survive the hallucination check.
         if "board_of_directors" in parsed or "executive_management" in parsed:
-            result = _rich_to_flat(parsed, grounded_text)
+            result = _rich_to_flat(parsed, combined_text)
         else:
             board  = _clean_list(parsed.get("board",            []), is_board=True)
             execs  = _clean_list(parsed.get("executives",        []))
@@ -855,7 +863,7 @@ def _gemini_fetch_leadership(
                 "executives":        execs + senior,
                 "senior_leadership": senior,
             }
-            result = _strip_hallucinations(result, grounded_text)
+            result = _strip_hallucinations(result, combined_text)
 
         logger.info(
             "Gemini Phase B for '%s': %d board, %d execs (%d senior)",
@@ -960,31 +968,41 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
 
 _HALLUCINATION_CHECK_MIN_CHARS = 200  # apply name verification even for short sources
 
+def _ascii_fold(s: str) -> str:
+    """Normalise accented chars to ASCII for fuzzy name matching."""
+    import unicodedata
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+
 def _name_in_source(name: str, source_lower: str) -> bool:
     """
     Return True if the person's name is evidenced in the source text.
 
-    Matching strategy (first match wins):
-    1. Full name exact match: "charles scharf" in source → True
-    2. All significant name parts appear individually: "charles" in source
-       AND "scharf" in source → True (handles middle initials, order differences)
-    3. Surname alone appears AND is ≥4 chars to reduce false positives
+    Matching strategy (first match wins, both with and without accent folding):
+    1. Full name exact match
+    2. All significant name parts appear individually (handles middle initials)
+    3. Surname alone (≥4 chars) — fallback for initials like "C. Scharf"
+    Each strategy is tried with the original form then with ASCII-folded form
+    so accented names (González / Gonzalez) match across encoding variants.
     """
     if not name or not source_lower:
         return False
     name_lower = name.lower()
-    # 1. Exact full-name match
-    if name_lower in source_lower:
-        return True
-    # 2. All significant parts (≥2 chars) present anywhere in source
-    parts = [p for p in name_lower.split() if len(p) >= 2]
-    if len(parts) >= 2 and all(p in source_lower for p in parts):
-        return True
-    # 3. Surname alone (≥4 chars) — fallback for initials like "C. Scharf"
-    surname = name_lower.split()[-1] if name_lower.split() else ""
-    if len(surname) >= 4 and surname in source_lower:
-        return True
-    return False
+    source_ascii = _ascii_fold(source_lower)
+    name_ascii   = _ascii_fold(name_lower)
+
+    def _check(n: str, src: str) -> bool:
+        if n in src:
+            return True
+        parts = [p for p in n.split() if len(p) >= 2]
+        if len(parts) >= 2 and all(p in src for p in parts):
+            return True
+        surname = n.split()[-1] if n.split() else ""
+        if len(surname) >= 4 and surname in src:
+            return True
+        return False
+
+    return _check(name_lower, source_lower) or _check(name_ascii, source_ascii)
 
 
 def _strip_hallucinations(result: dict, source_text: str) -> dict:
