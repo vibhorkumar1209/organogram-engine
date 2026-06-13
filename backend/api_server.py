@@ -2144,7 +2144,7 @@ async def test_gemini(company: str = "Wells Fargo", domain: str = "wellsfargo.co
     # Raw probe: try both tool key variants on a single query
     probe_query = f"Who are the current Board of Directors of {company}?"
     raw_probes: dict = {}
-    for tk in ("googleSearch", "google_search"):
+    for tk in ("googleSearch", "google_search", "google_search_retrieval"):
         try:
             r = _httpx.post(
                 f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",

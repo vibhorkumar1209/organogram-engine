@@ -427,7 +427,7 @@ Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 # ─────────────────────────────────────────────────────────────────────────────
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-_GEMINI_MODEL    = "gemini-2.0-flash"   # supports google_search grounding tool
+_GEMINI_MODEL    = "gemini-2.5-flash"   # grounding via googleSearch tool
 # URL-path keywords that identify leadership / governance pages in search results
 _GEMINI_URL_SIGNAL = {
     "board", "governance", "leadership", "director", "executive",
@@ -627,8 +627,11 @@ def _gemini_discover_leadership_urls(
             if _tool_key:
                 resp = _try_tool(_tool_key, query)
             else:
-                # Auto-detect: try camelCase first (stable API), fall back to snake_case
-                for candidate_key in ("googleSearch", "google_search"):
+                # Auto-detect tool key across Gemini model families:
+                # gemini-2.5+: "googleSearch" (camelCase)
+                # gemini-2.0:  "google_search" (snake_case, now deprecated)
+                # gemini-1.5:  "google_search_retrieval"
+                for candidate_key in ("googleSearch", "google_search", "google_search_retrieval"):
                     r = _try_tool(candidate_key, query)
                     if r.is_success:
                         _tool_key = candidate_key
