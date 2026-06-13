@@ -2049,10 +2049,6 @@ async def ping_llm():
     """Fast diagnostic: env vars + minimal Claude API call + Apify token check. Returns in <15s."""
     import os, time
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    parallel_key    = os.environ.get("PARALLEL_API_KEY", "")
-    jina_key        = os.environ.get("JINA_API_KEY", "")
-    apify_key       = os.environ.get("APIFY_API_TOKEN", "")
-    scraper_api_url = os.environ.get("SCRAPER_API_URL", "")
 
     claude_result = {"ok": False, "error": "", "model": "", "response": ""}
     if anthropic_key:
@@ -2060,7 +2056,6 @@ async def ping_llm():
             import anthropic as _ant
             t0 = time.monotonic()
             _client = _ant.Anthropic(api_key=anthropic_key)
-            # Try the primary model first, fallback to known-good
             for model_id in ["claude-haiku-4-5-20251001", "claude-3-5-haiku-20241022"]:
                 try:
                     _resp = _client.messages.create(
@@ -2083,7 +2078,7 @@ async def ping_llm():
     else:
         claude_result["error"] = "ANTHROPIC_API_KEY not set"
 
-    # Quick Wikipedia check (no Parallel.AI — fast)
+    # Quick Wikipedia check
     wiki_chars = 0
     try:
         from llm_fallback import _scrape_wikipedia
@@ -2092,38 +2087,17 @@ async def ping_llm():
     except Exception as _we:
         wiki_chars = -1
 
-    # Apify token validation — GET /v2/users/me (no actor run, instant)
-    apify_result = {"token_set": bool(apify_key), "ok": False, "user": "", "error": ""}
-    if apify_key:
-        try:
-            import httpx as _hx
-            _ar = _hx.get(
-                "https://api.apify.com/v2/users/me",
-                params={"token": apify_key},
-                timeout=8,
-            )
-            if _ar.status_code == 200:
-                _ud = _ar.json().get("data", {})
-                apify_result["ok"]   = True
-                apify_result["user"] = _ud.get("username", _ud.get("id", ""))
-                apify_result["plan"] = _ud.get("plan", {}).get("id", "")
-            else:
-                apify_result["error"] = f"HTTP {_ar.status_code}: {_ar.text[:120]}"
-        except Exception as _ae:
-            apify_result["error"] = str(_ae)
-    else:
-        apify_result["error"] = "APIFY_API_TOKEN not set"
+    # Gemini API key check
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    gemini_result = {"key_set": bool(gemini_key)}
 
     return {
         "env": {
             "ANTHROPIC_API_KEY": bool(anthropic_key),
-            "PARALLEL_API_KEY":  bool(parallel_key),
-            "JINA_API_KEY":      bool(jina_key),
-            "APIFY_API_TOKEN":   bool(apify_key),
-            "SCRAPER_API_URL":   bool(scraper_api_url),
+            "GEMINI_API_KEY":    bool(gemini_key),
         },
         "claude":   claude_result,
-        "apify":    apify_result,
+        "gemini":   gemini_result,
         "wikipedia_chars_wells_fargo": wiki_chars,
     }
 
@@ -2149,167 +2123,43 @@ async def test_knowledge(company: str = "Wells Fargo"):
     }
 
 
-@app.get("/test-apify")
-async def test_apify(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
+@app.get("/test-gemini")
+async def test_gemini(company: str = "Wells Fargo", domain: str = "wellsfargo.com"):
     """
-    Test Apify scraper end-to-end with full diagnostics.
-    Takes 60-120s. Use /ping-llm first to confirm token is valid.
-    Example: /test-apify?company=Wells+Fargo&domain=wellsfargo.com
-             /test-apify?company=Apple&domain=apple.com
+    Test Gemini leadership pipeline end-to-end.
+    Phase A: google_search grounding research (~10-20s per query, 2 queries).
+    Phase B: JSON synthesis from grounded text.
+    Example: /test-gemini?company=Wells+Fargo&domain=wellsfargo.com
     """
     import os, time
-    import httpx
-    from llm_fallback import (
-        _apify_run, _discover_via_nav,
-        _APIFY_LEADERSHIP_PATHS, _STRONG_LEADERSHIP_PATH_KW,
-        _APIFY_ACTOR, _APIFY_BASE, _APIFY_MAX_PAGES,
-    )
+    from llm_fallback import _gemini_fetch_leadership, _gemini_discover_leadership_urls
 
-    apify_key = os.environ.get("APIFY_API_TOKEN", "")
-    if not apify_key:
-        return {"error": "APIFY_API_TOKEN not set"}
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return {"error": "GEMINI_API_KEY not set"}
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    deadline = time.monotonic() + 12
-
-    # ── URL discovery (mirrors _apify_fetch_leadership logic exactly) ──────────
     t0 = time.monotonic()
-    nav_urls = _discover_via_nav(domain, headers, time.monotonic() + 8)
-    discovery_s = round(time.monotonic() - t0, 2)
-
-    seen: set[str] = set()
-    start_urls: list[str] = []
-    # Priority 1: nav URLs with strong leadership path signal
-    for u in nav_urls:
-        if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW):
-            if u not in seen:
-                seen.add(u); start_urls.append(u)
-    # Priority 2: curated specific paths (www-only to maximise unique paths)
-    for path in _APIFY_LEADERSHIP_PATHS:
-        u = f"https://www.{domain}{path}"
-        if u not in seen:
-            seen.add(u); start_urls.append(u)
-    start_urls = start_urls[:_APIFY_MAX_PAGES]
-
-    # ── Apify: submit once, poll inline, fetch dataset ───────────────────────
+    urls, grounded_text = _gemini_discover_leadership_urls(company, gemini_key)
     t1 = time.monotonic()
-    _APIFY_B  = "https://api.apify.com/v2"
-    _ACTOR    = "apify~website-content-crawler"
-    _POLL_INT = 8          # seconds between status polls
-    _TIMEOUT  = 180        # max seconds to wait for run
-    _SIGNAL   = {"director","chairman","chief","ceo","president","officer",
-                 "executive","board","governance","management","leadership","trustee"}
-
-    apify_diag: dict = {"phase": "submit"}
-    run_id = dataset_id = None
-    raw_items: list[dict] = []
-
-    try:
-        _input = {
-            "startUrls":   [{"url": u} for u in start_urls[:6]],
-            "crawlerType": "playwright:chrome",
-            "maxCrawlDepth":  0,
-            "maxCrawlPages":  6,
-            "outputFormats":  ["markdown"],
-            "htmlTransformer": "readableText",
-        }
-        _sr = httpx.post(
-            f"{_APIFY_B}/acts/{_ACTOR}/runs",
-            params={"token": apify_key},
-            json=_input,
-            timeout=20,
-        )
-        apify_diag["submit_status"] = _sr.status_code
-        apify_diag["submit_preview"] = _sr.text[:500]
-        if not _sr.is_success:
-            apify_diag["phase"] = "submit_failed"
-        else:
-            _rd = _sr.json()["data"]
-            run_id     = _rd["id"]
-            dataset_id = _rd["defaultDatasetId"]
-            apify_diag["run_id"]     = run_id
-            apify_diag["dataset_id"] = dataset_id
-            apify_diag["phase"]      = "polling"
-
-            # ── Poll until SUCCEEDED / failed / timeout ───────────────────────
-            _deadline = time.monotonic() + _TIMEOUT
-            _poll_log: list[dict] = []
-            while time.monotonic() < _deadline:
-                time.sleep(_POLL_INT)
-                _ps = httpx.get(
-                    f"{_APIFY_B}/acts/{_ACTOR}/runs/{run_id}",
-                    params={"token": apify_key}, timeout=15,
-                )
-                _status = _ps.json()["data"]["status"] if _ps.is_success else "POLL_ERR"
-                _poll_log.append({"elapsed_s": round(time.monotonic()-t1,1), "status": _status})
-                if _status == "SUCCEEDED":
-                    apify_diag["phase"] = "fetching"
-                    break
-                if _status in ("FAILED","ABORTED","TIMED-OUT","POLL_ERR"):
-                    apify_diag["phase"] = f"run_{_status.lower()}"
-                    apify_diag["poll_log"] = _poll_log
-                    break
-            else:
-                apify_diag["phase"] = "timeout"
-
-            apify_diag["poll_log"] = _poll_log
-
-            # ── Fetch dataset items ───────────────────────────────────────────
-            if apify_diag["phase"] == "fetching":
-                _di = httpx.get(
-                    f"{_APIFY_B}/datasets/{dataset_id}/items",
-                    params={"token": apify_key, "format": "json",
-                            "limit": 10, "fields": "url,markdown,text"},
-                    timeout=30,
-                )
-                apify_diag["dataset_status"] = _di.status_code
-                if _di.is_success:
-                    raw_items = _di.json()
-                    apify_diag["phase"] = "done"
-                else:
-                    apify_diag["dataset_preview"] = _di.text[:300]
-                    apify_diag["phase"] = "fetch_failed"
-
-    except Exception as _e:
-        apify_diag["error"] = str(_e)
-
-    apify_s = round(time.monotonic() - t1, 2)
-
-    # Per-item summary
-    item_summary = []
-    for item in raw_items:
-        text = (item.get("markdown") or item.get("text") or "").strip()
-        has_signal = any(kw in text.lower() for kw in _SIGNAL)
-        item_summary.append({
-            "url":         item.get("url", ""),
-            "chars":       len(text),
-            "has_leadership_signal": has_signal,
-            "preview":     text[:300] if text else "",
-        })
-
-    kept = [i for i in item_summary if i["has_leadership_signal"] and i["chars"] >= 200]
+    result = _gemini_fetch_leadership(company, domain, gemini_key)
+    t2 = time.monotonic()
 
     return {
-        "company":   company,
-        "domain":    domain,
-        "discovery": {
-            "nav_urls_all":           nav_urls[:10],
-            "nav_urls_with_signal":   [u for u in nav_urls if any(kw in u.lower() for kw in _STRONG_LEADERSHIP_PATH_KW)],
-            "start_urls_submitted":   start_urls,
-            "elapsed_s":              discovery_s,
+        "company": company,
+        "domain":  domain,
+        "phase_a": {
+            "grounding_urls": urls,
+            "grounded_chars": len(grounded_text),
+            "grounded_preview": grounded_text[:500] if grounded_text else "",
+            "elapsed_s": round(t1 - t0, 2),
         },
-        "apify": {
-            "raw_items_returned":         len(raw_items),
-            "items_with_leadership_signal": len(kept),
-            "elapsed_s":                  apify_s,
-            "diag":                       apify_diag,
-            "items":                      item_summary,
+        "phase_b": {
+            "board_count": len(result.get("board", [])),
+            "exec_count":  len(result.get("executives", [])),
+            "elapsed_s":   round(t2 - t1, 2),
         },
+        "result":       result,
+        "total_elapsed_s": round(t2 - t0, 2),
     }
 
 
@@ -2318,13 +2168,12 @@ async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfar
     """
     Directly test llm_fetch_leadership and return raw result + diagnostics.
     Use: /debug-leadership?company=Wells+Fargo&domain=wellsfargo.com
-    NOTE: takes 90-120 s due to Parallel.AI — use /ping-llm for fast env check.
+    Uses Gemini if GEMINI_API_KEY is set, otherwise Wikipedia+Claude fallback.
     """
     import os, time
-    from llm_fallback import llm_fetch_leadership, _scrape_wikipedia, _ddg_leadership_snippets
+    from llm_fallback import llm_fetch_leadership, _scrape_wikipedia
     t0 = time.monotonic()
     wiki = _scrape_wikipedia(company)
-    ddg  = _ddg_leadership_snippets(company)
     t1 = time.monotonic()
     result = llm_fetch_leadership(company, domain=domain)
     t2 = time.monotonic()
@@ -2333,17 +2182,15 @@ async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfar
         "domain": domain,
         "env": {
             "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY")),
-            "PARALLEL_API_KEY":  bool(os.environ.get("PARALLEL_API_KEY")),
-            "JINA_API_KEY":      bool(os.environ.get("JINA_API_KEY")),
+            "GEMINI_API_KEY":    bool(os.environ.get("GEMINI_API_KEY")),
         },
         "source_chars": {
             "wikipedia": len(wiki),
-            "ddg":       len(ddg),
         },
         "wiki_preview": wiki[:300] if wiki else "",
         "timing_seconds": {
-            "sources": round(t1 - t0, 1),
-            "total":   round(t2 - t0, 1),
+            "wiki_fetch": round(t1 - t0, 1),
+            "total":      round(t2 - t0, 1),
         },
         "result": result,
     }
