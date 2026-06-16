@@ -1,7 +1,7 @@
 """
 LLM Extractor.
 
-Uses Claude API (claude-sonnet-4-20250514) to extract Board of Directors
+Uses Claude API (claude-sonnet-4-6) to extract Board of Directors
 and Executive Management from cleaned text (firm website, SEC filing,
 annual report). Applies fuzzy string matching to verify every extracted
 name appears in the source text (anti-hallucination guard).
@@ -19,7 +19,7 @@ import httpx
 
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 2000
 
 # Fuzzy match thresholds — a name is "verified" if at least 75% of its tokens
