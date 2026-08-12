@@ -577,28 +577,31 @@ def _gemini_discover_leadership_urls(
     if not api_key or not company_name:
         return [], ""
 
-    # When the domain is known, include it as a search hint so Gemini
-    # grounding prioritises the company's own governance pages.
-    site_hint = f" site:{domain}" if domain else ""
-    domain_hint = f" (official website: {domain})" if domain else ""
-
-    queries = [
-        (f"Who are the current Board of Directors of {company_name}{domain_hint}? "
-         f"List each member's full name and title from the official corporate website.{site_hint}"),
-        (f"Who are the executive leadership team members of {company_name}{domain_hint}? "
-         f"List each executive's full name and title from the official company website.{site_hint}"),
-        # Native-language fallback: many non-English companies have their governance
-        # pages only in their local language (Spanish, French, German, etc.).
-        # A bilingual query widens Gemini's grounding coverage.
-        (f"{company_name} junta directiva directores ejecutivos OR "
-         f"{company_name} conseil d'administration dirigeants OR "
-         f"{company_name} Vorstand Aufsichtsrat{site_hint}"),
-    ]
-    # Add a governance-specific English query when we have a domain
     if domain:
-        queries.append(
-            f"{company_name} board of directors governance executive management{site_hint}"
-        )
+        # STRICT SITE-ONLY strategy: four targeted queries locked to the company domain.
+        # Gemini grounding will only surface pages from site:{domain} and its subdomains.
+        queries = [
+            # Query 1: leadership / executive / officers pages
+            f'site:{domain} "leadership" OR "executive" OR "officers"',
+            # Query 2: board / governance pages
+            f'site:{domain} "board of directors" OR "governance" OR "directors"',
+            # Query 3: about-us / management / team pages (catches smaller company sites)
+            f'site:{domain} "about us" OR "management" OR "team"',
+            # Query 4: investor-relations subdomains (ir.domain, investors.domain)
+            f'site:investors.{domain} OR site:ir.{domain}',
+        ]
+    else:
+        # No domain — fall back to open-web queries with native-language variants
+        queries = [
+            (f"Who are the current Board of Directors of {company_name}? "
+             f"List each member's full name and title from the official corporate website."),
+            (f"Who are the executive leadership team members of {company_name}? "
+             f"List each executive's full name and title from the official company website."),
+            # Spanish / French / German fallback for non-English companies
+            (f"{company_name} junta directiva directores ejecutivos OR "
+             f"{company_name} conseil d'administration dirigeants OR "
+             f"{company_name} Vorstand Aufsichtsrat"),
+        ]
 
     all_urls:  list[str] = []
     all_texts: list[str] = []
@@ -817,32 +820,84 @@ def _gemini_fetch_leadership(
         return {}
 
     # ── Phase A: Research via Google Search grounding ─────────────────────────
-    _urls, grounded_text = _gemini_discover_leadership_urls(company_name, api_key, domain=domain)
+    discovered_urls, grounded_text = _gemini_discover_leadership_urls(
+        company_name, api_key, domain=domain
+    )
 
-    # ── Phase A supplemental: direct httpx fetch of known leadership paths ────
-    static_text = _fetch_static_leadership(domain) if domain else ""
-    if static_text:
-        logger.info("Static fetch for '%s' (%s): %d chars", company_name, domain, len(static_text))
+    # ── Phase A supplemental: fetch discovered URLs + known static paths ──────
+    # Step 2 of the site-scan strategy: navigate to the top pages Gemini found
+    # and extract any leadership content not captured in the grounded text.
+    try:
+        import httpx as _hx
+        _headers = {
+            "User-Agent": _SEARCH_UA,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en,es;q=0.8",
+        }
+        _scraped: list[str] = []
+        _seen_fetch: set[str] = set()
+
+        def _quick_fetch(url: str) -> None:
+            if url in _seen_fetch or sum(len(t) for t in _scraped) >= 20_000:
+                return
+            _seen_fetch.add(url)
+            try:
+                r = _hx.get(url, headers=_headers, timeout=6, follow_redirects=True)
+                if r.status_code == 200 and not _is_js_shell(r.text):
+                    txt = _strip_html(r.text)
+                    jld = _extract_json_ld(r.text)
+                    jsd = _extract_js_data(r.text)
+                    parts = []
+                    if jld:  parts.append(f"[Structured Data from {url}]\n{jld}")
+                    if jsd:  parts.append(f"[JS Data from {url}]\n{jsd}")
+                    if txt and len(txt) > 200:
+                        parts.append(f"[Page: {url}]\n{txt[:6_000]}")
+                    if parts:
+                        _scraped.append("\n".join(parts))
+                        logger.info("Fetched grounding URL for '%s': %s", company_name, url)
+            except Exception:
+                pass
+
+        # Fetch the URLs Gemini grounding discovered (capped at 5)
+        for u in discovered_urls[:5]:
+            _quick_fetch(u)
+
+        # Also try the known static paths on the domain
+        scraped_static = _fetch_static_leadership(domain) if domain else ""
+        if scraped_static:
+            _scraped.append(scraped_static)
+
+        discovered_page_text = "\n\n".join(_scraped)
+    except Exception:
+        discovered_page_text = _fetch_static_leadership(domain) if domain else ""
 
     combined_text = "\n\n[Direct website content]\n".join(
-        t for t in (grounded_text, static_text) if t
+        t for t in (grounded_text, discovered_page_text) if t
     )
 
     if not combined_text:
         logger.warning("Gemini Phase A returned no content for '%s'", company_name)
         return {}
 
-    logger.info("Gemini Phase A for '%s': %d chars (grounded) + %d chars (static)",
-                company_name, len(grounded_text), len(static_text))
+    logger.info(
+        "Gemini Phase A for '%s': %d chars grounded + %d chars scraped",
+        company_name, len(grounded_text), len(discovered_page_text),
+    )
 
-    # ── Phase B: Structured JSON synthesis ────────────────────────────────────
-    domain_hint = f" (domain: {domain})" if domain else ""
+    # ── Phase B: Structured JSON synthesis with domain-lock guardrails ────────
+    domain_lock = (
+        f"DOMAIN LOCK: Only include people whose names appear in the research text "
+        f"sourced from {domain}. " if domain else ""
+    )
     synthesis_prompt = (
-        f"Extract the Board of Directors and Executive Management from the research "
-        f"text below about {company_name}{domain_hint}.\n\n"
-        f"IMPORTANT: Only include people explicitly named in the research text — "
-        f"do NOT use training knowledge to add names not found in the text.\n\n"
-        f"[Research text — sourced from Google Search and company website]\n{combined_text[:14_000]}"
+        f"Extract the Board of Directors and Executive Management for {company_name}.\n\n"
+        f"{domain_lock}"
+        f"NO HALLUCINATIONS: Only include people explicitly named in the text below — "
+        f"do NOT invent names or use training knowledge.\n"
+        f"DUPLICATION: If one person holds both a board title AND an executive title, "
+        f"list them in BOTH the board array and the executives array.\n\n"
+        f"[Research text — sourced from {domain or 'Google Search'} and company website]\n"
+        f"{combined_text[:14_000]}"
     )
 
     try:
