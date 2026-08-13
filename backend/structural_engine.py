@@ -983,9 +983,12 @@ class OrganogramDAG:
             # BOD is a direct child of root
             parent_id = "root_global"
         elif dp_lower in self._EM_NAMES:
-            # EM is also a direct child of root (sibling of BOD, not under it)
-            # so it visually "heads" all functional departments at the same level
-            parent_id = "root_global"
+            # EM sits under BOD when BOD exists → BOD → EM → Depts hierarchy
+            bod_id = self._node_id("dept", "Board of Management")
+            if bod_id in self.G:
+                parent_id = bod_id
+            else:
+                parent_id = "root_global"
         else:
             # All functional depts sit under EM when EM exists, else root
             em_id = self._node_id("dept", "Executive Management")
@@ -1303,8 +1306,8 @@ class OrganogramDAG:
         """
         Re-enforce the canonical governance hierarchy:
             root_global → BOD (Board of Management — governance layer)
-            root_global → EM  (Executive Management — operational apex, peer of BOD)
-                          EM  → functional depts (Finance, HR, Tech …)
+                          BOD → EM  (Executive Management — operational apex, under BOD)
+                                EM  → functional depts (Finance, HR, Tech …)
 
         This is needed because the LLM enrichment thread creates BOD/EM
         AFTER the uploaded records were already inserted.  At upload time,
@@ -1328,14 +1331,19 @@ class OrganogramDAG:
             "executive management", "c-suite", "ceo office",
         })
 
-        # ── Step 1: EM must be a direct child of root (sibling of BOD) ───
-        # If EM accidentally ended up under BOD (from old data or a direct
-        # edge added before this rule), move it to root_global.
+        # ── Step 1: EM must sit under BOD when BOD exists ────────────────
+        # If EM ended up directly under root (stale data from before BOD was
+        # enriched), move it under BOD so the hierarchy is BOD → EM → Depts.
         if em_exists:
-            if bod_exists and G.has_edge(bod_id, em_id):
-                G.remove_edge(bod_id, em_id)
-            if not G.has_edge("root_global", em_id):
-                G.add_edge("root_global", em_id)
+            if bod_exists:
+                if G.has_edge("root_global", em_id):
+                    G.remove_edge("root_global", em_id)
+                if not G.has_edge(bod_id, em_id):
+                    G.add_edge(bod_id, em_id)
+            else:
+                # No BOD yet — EM falls back to root_global as temporary apex
+                if not G.has_edge("root_global", em_id):
+                    G.add_edge("root_global", em_id)
 
         # ── Step 2: Functional depts should sit under EM ─────────────────
         # Only re-parent when EM actually exists.  If only BOD is present
@@ -1346,8 +1354,8 @@ class OrganogramDAG:
 
             # Walk root_global children → move functional depts to EM
             for child_id in list(G.successors("root_global")):
-                if child_id in (bod_id, em_id):
-                    continue   # BOD and EM stay directly under root_global
+                if child_id == bod_id:
+                    continue   # BOD stays directly under root_global
                 attrs = G.nodes.get(child_id, {})
                 label = str(attrs.get("label", "")).lower()
                 if (attrs.get("node_type") == NODE_DEPT_P
@@ -1361,7 +1369,7 @@ class OrganogramDAG:
             if bod_exists:
                 for child_id in list(G.successors(bod_id)):
                     if child_id == em_id:
-                        continue   # EM is no longer under BOD; remove if found
+                        continue   # EM intentionally stays under BOD
                     attrs = G.nodes.get(child_id, {})
                     label = str(attrs.get("label", "")).lower()
                     if (attrs.get("node_type") == NODE_DEPT_P

@@ -245,6 +245,10 @@ _LAYER_RULES: list[tuple[int, list[str]]] = [
         # ── Group President at divisional level ──────────────────────────────
         r"divisional\s+president",
         r"group\s+coo\b",                       # Group COO below Group CEO
+        # ── Chief Auditor variants (head of internal audit below CAE) ────────
+        # "Chief Internal Auditor" / "Chief Auditor" — heads the audit function
+        # but is not a C-suite officer (that's "Chief Audit Executive" at G1).
+        r"\bchief\s+(?:internal\s+)?auditor\b",
     ]),
 
     # G4 — VP / Head of Function / General Manager / Senior AVP
@@ -1319,12 +1323,14 @@ def _classify_dept(
         for dept, rules in _DEPT_SCORE_RULES
     }
 
-    # Apply industry-specific boosts (only when title scores are ambiguous
-    # or the boosted dept is already competitive — prevents overriding
-    # clear title signals)
+    # Apply industry-specific boosts only when: (a) the dept already has a
+    # title-based score > 0, OR (b) no clear title winner yet (max < 30).
+    # This prevents, e.g., Financial Markets +60 IB boost from overriding
+    # a clear HR or Compliance title signal.
     if industry:
+        _title_max = max(scores.values(), default=0)
         for boost, dept in _INDUSTRY_DEPT_BOOSTS.get(industry, []):
-            if dept in scores:
+            if dept in scores and (scores[dept] > 0 or _title_max < 30):
                 scores[dept] = scores[dept] + boost
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -1414,6 +1420,12 @@ def classify(
 
     # ── Layer classification (industry-aware) ────────────────────────────
     layer = _classify_layer(effective_title, jl, ind)
+    # If title alone yields a weak grade (G9/G10) but the headline contains
+    # a more senior signal, use the headline grade as an upgrade.
+    if layer >= 9 and headline and headline != effective_title:
+        headline_layer = _classify_layer(headline, jl, ind)
+        if headline_layer < layer:
+            layer = headline_layer
 
     # Board members → always DEPT_BOARD regardless of industry
     if layer == 0:

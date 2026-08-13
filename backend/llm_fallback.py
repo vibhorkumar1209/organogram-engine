@@ -484,7 +484,7 @@ def _fetch_static_leadership(domain: str) -> str:
     Lightweight httpx GET on common leadership/governance URL paths.
 
     Tries paths on www.{domain} and {domain} (plain), plus IR subdomains.
-    Stops after accumulating 25 KB of useful text or hitting 4 successes.
+    Stops after accumulating 30 KB of useful text or hitting 6 successes.
     Returns combined stripped text (≤ 25 KB) or "".
 
     No JS rendering — reads static HTML only. Fast (6 s per request).
@@ -506,7 +506,7 @@ def _fetch_static_leadership(domain: str) -> str:
     collected: list[str] = []
 
     def _try(url: str) -> bool:
-        if sum(len(t) for t in collected) >= 25_000 or len(collected) >= 4:
+        if sum(len(t) for t in collected) >= 30_000 or len(collected) >= 6:
             return False
         try:
             resp = httpx.get(url, headers=headers, timeout=6, follow_redirects=True)
@@ -851,15 +851,15 @@ def _gemini_fetch_leadership(
                     if jld:  parts.append(f"[Structured Data from {url}]\n{jld}")
                     if jsd:  parts.append(f"[JS Data from {url}]\n{jsd}")
                     if txt and len(txt) > 200:
-                        parts.append(f"[Page: {url}]\n{txt[:6_000]}")
+                        parts.append(f"[Page: {url}]\n{txt[:8_000]}")
                     if parts:
                         _scraped.append("\n".join(parts))
                         logger.info("Fetched grounding URL for '%s': %s", company_name, url)
             except Exception:
                 pass
 
-        # Fetch the URLs Gemini grounding discovered (capped at 5)
-        for u in discovered_urls[:5]:
+        # Fetch the URLs Gemini grounding discovered (capped at 8)
+        for u in discovered_urls[:8]:
             _quick_fetch(u)
 
         # Also try the known static paths on the domain
@@ -897,7 +897,7 @@ def _gemini_fetch_leadership(
         f"DUPLICATION: If one person holds both a board title AND an executive title, "
         f"list them in BOTH the board array and the executives array.\n\n"
         f"[Research text — sourced from {domain or 'Google Search'} and company website]\n"
-        f"{combined_text[:14_000]}"
+        f"{combined_text[:22_000]}"
     )
 
     try:
@@ -909,7 +909,7 @@ def _gemini_fetch_leadership(
                 "contents": [{"parts": [{"text": synthesis_prompt}]}],
                 "generationConfig": {
                     "temperature": 0,
-                    "maxOutputTokens": 2048,
+                    "maxOutputTokens": 4096,
                     "responseMimeType": "application/json",
                 },
             },
