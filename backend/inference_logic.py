@@ -415,7 +415,7 @@ _FIELD_ALIASES: dict[str, str] = {
     "linkedin headline": "linkedin_headline",
     # job_function (soft tiebreaker — guidance only, never authoritative)
     "job_function": "job_function", "job function": "job_function",
-    "function": "job_function",
+    "function": "job_function", "jobfunction": "job_function",
     # job_level (LinkedIn level string — layer fallback)
     "job_level": "job_level", "job level": "job_level",
     "seniority": "job_level", "vendor_level": "job_level",
@@ -433,6 +433,7 @@ _FIELD_ALIASES: dict[str, str] = {
     "job_org_linkedin_url": "job_org_linkedin_url",
     # location fields
     "city": "city", "country_name": "country_name", "country": "country_name",
+    "countryname": "country_name",
     "location": "Location", "country_code": "country_code",
     "job_country": "country_name", "job_city": "city",
     "job_location_country": "country_name",

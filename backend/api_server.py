@@ -26,7 +26,8 @@ except ImportError:
     pass  # python-dotenv not installed — rely on shell env
 
 import pandas as pd
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import (BackgroundTasks, Body, FastAPI, File, HTTPException, Query,
+                     Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -94,6 +95,18 @@ COLUMN_ALIASES: dict[str, str] = {
 
     # ── Department ───────────────────────────────────────────────────────
     "department": "Department", "dept": "Department",
+
+    # ── camelCase vendor payloads (fullName / jobTitle / countryName …) ──
+    # normalize_columns() lower-cases before lookup, so "countryName" arrives
+    # here as "countryname".  The snake_case spellings live further down.
+    "countryname":  "country_name", "country":    "country_name",
+    "countrycode":  "country_code",
+    "statename":    "state_name",   "state":      "state_name",
+    "statecode":    "state_code",
+    "jobfunction":  "job_function", "job function": "job_function",
+    "function":     "job_function",
+    "joblevel":     "job_level",    "job level":  "job_level",
+    "seniority":    "job_level",    "vendor_level": "job_level",
 
     # ── Vendor job-location fields (primary region-routing signals) ──────
     # JOB_LOCATION_COUNTRY_CODE is the most authoritative region signal.
@@ -219,15 +232,25 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                 lambda d: str(d or "").split(".")[0].title() if d else ""
             )
 
-    # ── Location synthesis: prefer job_country > city, country_name ──
+    # ── Location synthesis: city first, falling back to country ──────
+    # Coalesce rather than pick a single column: vendor exports routinely
+    # carry a country with a null city, and picking "city" wholesale would
+    # leave those rows with no location at all.
     if "Location" not in df.columns:
-        loc_parts = []
         for col in ["job_city", "city", "job_country", "country_name"]:
-            if col in df.columns:
-                loc_parts.append(col)
-                break  # use first available as the Location string
-        if loc_parts:
-            df["Location"] = df[loc_parts[0]].astype(str).str.strip()
+            if col not in df.columns:
+                continue
+            # fillna() before astype(str): on pandas' string dtype a missing
+            # value survives astype() as NaN rather than the literal "nan",
+            # so it would never match the blank checks below.
+            vals = df[col].fillna("").astype(str).str.strip().replace(
+                {"nan": "", "None": "", "none": "", "null": "", "NaT": ""}
+            )
+            if "Location" not in df.columns:
+                df["Location"] = vals
+            else:
+                blank = df["Location"] == ""
+                df.loc[blank, "Location"] = vals[blank]
 
     # ── Industry fallback: LINKEDIN_INDUSTRY when Industry_Hint is blank ─
     if "linkedin_industry" in df.columns:
@@ -258,6 +281,74 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],   # lets JS read filename from response
 )
+
+
+_ROSTER_KEYS = ("records", "items", "data", "results",
+                "people", "rows", "profiles", "contacts", "employees")
+
+
+def json_records(payload, _depth: int = 0) -> list[dict]:
+    """
+    Unwrap a JSON upload into a flat list of person dicts.
+
+    Accepts a bare array, an object wrapping the array under a key — vendors
+    use "items", "records", "data", "results" and friends interchangeably —
+    or a nested wrapper such as {"data": {"items": [...]}}.  Any single
+    list-of-objects value is taken as the roster.
+    """
+    if isinstance(payload, list):
+        return [r for r in payload if isinstance(r, dict)]
+
+    if isinstance(payload, dict) and _depth < 4:
+        # 1. Known roster key holding a list.
+        for key in _ROSTER_KEYS:
+            val = payload.get(key)
+            if isinstance(val, list):
+                return [r for r in val if isinstance(r, dict)]
+        # 2. Any value that already looks like a roster.
+        for val in payload.values():
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                return [r for r in val if isinstance(r, dict)]
+        # 3. Nested wrapper — {"data": {"items": [...]}} and friends.
+        for val in payload.values():
+            if isinstance(val, dict):
+                nested = json_records(val, _depth + 1)
+                if nested:
+                    return nested
+    return []
+
+
+def _describe_payload(payload) -> str:
+    """Human-readable shape of a rejected payload, for the 422 message."""
+    if isinstance(payload, dict):
+        keys = list(payload.keys())[:8]
+        return f"object with keys: {', '.join(map(str, keys)) or '(none)'}"
+    if isinstance(payload, list):
+        return f"array of {len(payload)} items (expected objects)"
+    return f"{type(payload).__name__}"
+
+
+def _parse_json_upload(content: bytes):
+    """
+    Parse an uploaded .json file — standard JSON, or NDJSON (one object
+    per line), which several export tools emit with a .json extension.
+    """
+    text = content.decode("utf-8-sig", errors="replace").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        rows = []
+        for line in text.splitlines():
+            line = line.strip().rstrip(",")
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                return None          # not NDJSON either — report original error
+            if isinstance(obj, dict):
+                rows.append(obj)
+        return rows or None
 
 
 def _infer_org_name(records: list[dict]) -> str:
@@ -364,6 +455,23 @@ def _dag_loaded() -> bool:
 # UPLOAD
 # ─────────────────────────────────────────────
 
+def canonicalise_records(records: list[dict]) -> tuple[list[dict], list[str], list[str]]:
+    """
+    Run a list of raw person dicts through the shared column canonicaliser.
+
+    Returns (records, detected_columns, mapped_columns).  Used for JSON from
+    either entry point — file upload or a POSTed request body — so vendor key
+    spellings (fullName, jobTitle, countryName …) map to the schema the
+    pipeline expects instead of being silently dropped.
+    """
+    if not records:
+        return [], [], []
+    detected_cols = list(records[0].keys())
+    df = normalize_columns(pd.DataFrame(records))
+    mapped_cols = list(df.columns)
+    return df.where(pd.notna(df), "").to_dict(orient="records"), detected_cols, mapped_cols
+
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...),
                       company_name: str = Query("Organization"),
@@ -374,18 +482,29 @@ async def upload_file(file: UploadFile = File(...),
     Optional: company_website=https://morganstanley.com
     When provided, the backend scrapes that domain for BOD/EM leadership data.
     """
-    global _dag, _db, _classified_records
-
     content = await file.read()
     fname   = file.filename or ""
 
     try:
         if fname.endswith(".json"):
-            records = json.loads(content)
-            if isinstance(records, dict):
-                records = records.get("records", [])
-            detected_cols = list(records[0].keys()) if records else []
-            mapped_cols   = detected_cols
+            payload = _parse_json_upload(content)
+            if payload is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Could not parse the file as JSON. Check for a "
+                           "trailing comma, a truncated download, or wrap "
+                           "multiple objects in an array.",
+                )
+            found = json_records(payload)
+            if not found:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"No person records found — parsed a "
+                           f"{_describe_payload(payload)}. Send an array of "
+                           f"objects, or an object wrapping one under a key "
+                           f"such as 'items' or 'records'.",
+                )
+            records, detected_cols, mapped_cols = canonicalise_records(found)
         elif fname.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
             detected_cols = list(df.columns)
@@ -408,6 +527,54 @@ async def upload_file(file: UploadFile = File(...),
 
     if not records:
         raise HTTPException(status_code=422, detail="File appears empty.")
+
+    return await _ingest_records(records, detected_cols, mapped_cols,
+                                 company_name, company_website, background_tasks)
+
+
+@app.post("/upload-json")
+async def upload_json(payload: dict | list = Body(...),
+                      company_name: str = Query("Organization"),
+                      company_website: str = Query(""),
+                      background_tasks: BackgroundTasks = None):
+    """
+    Ingest a person roster as a JSON request body — no multipart file needed.
+
+    Accepts either a bare array or an object wrapping it, e.g.:
+
+        {"items": [{"fullName": "...", "jobTitle": "...", "companyName": "..."}]}
+
+    Key spellings are canonicalised exactly as for an uploaded .json file, so
+    camelCase vendor exports work as-is.  Response matches POST /upload.
+    """
+    records = json_records(payload)
+    if not records:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No person records found — received a "
+                   f"{_describe_payload(payload)}. Send an array of objects, "
+                   f"or an object wrapping one under a key such as 'items' "
+                   f"or 'records'.",
+        )
+
+    records, detected_cols, mapped_cols = canonicalise_records(records)
+    return await _ingest_records(records, detected_cols, mapped_cols,
+                                 company_name, company_website, background_tasks)
+
+
+async def _ingest_records(records: list[dict],
+                          detected_cols: list[str],
+                          mapped_cols: list[str],
+                          company_name: str,
+                          company_website: str,
+                          background_tasks: BackgroundTasks | None):
+    """
+    Shared ingestion path for every entry point (file upload and JSON body).
+
+    Builds the DAG, kicks off background BOD/EM enrichment, and returns the
+    stats payload the frontend expects.
+    """
+    global _dag, _db, _classified_records
 
     MAX_ROWS = 200_000
     if len(records) > MAX_ROWS:

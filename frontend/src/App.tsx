@@ -417,13 +417,14 @@ export default function App() {
     }
   }, [updateExecCache])
 
-  // ── File upload ────────────────────────────────────────────────────
-  const handleUpload = async (file: File) => {
+  // ── Ingest ─────────────────────────────────────────────────────────
+  // Shared by both inputs: an uploaded file (CSV/JSON/Excel → POST /upload)
+  // and pasted JSON (→ POST /upload-json).  `post` receives the query string
+  // so each caller can pick its own endpoint.
+  const runIngest = async (label: string, post: (qs: string) => Promise<Response>) => {
     setStatus('loading')
     setColWarning(null)
     setPanelDept(null); setPanelExecs(null)
-    const form = new FormData()
-    form.append('file', file)
 
     // Tick elapsed seconds — full pipeline (NLP + web BOD/EM enrichment) takes ~60s
     let elapsed = 0
@@ -435,14 +436,14 @@ export default function App() {
         'Fetching Board & Executive leadership from web…'
       setStatusMsg(`${phase}  (${elapsed}s)`)
     }, 1000)
-    setStatusMsg(`Processing ${file.name}…`)
+    setStatusMsg(`Processing ${label}…`)
 
     try {
-      const uploadUrl = companyWebsite.trim()
-        ? `${API}/upload?company_website=${encodeURIComponent(companyWebsite.trim())}`
-        : `${API}/upload`
+      const qs = companyWebsite.trim()
+        ? `?company_website=${encodeURIComponent(companyWebsite.trim())}`
+        : ''
 
-      const res = await fetch(uploadUrl, { method: 'POST', body: form })
+      const res = await post(qs)
       clearInterval(tick)
       if (!res.ok) {
         const errText = await res.text()
@@ -507,6 +508,41 @@ export default function App() {
           : msg || 'Upload failed — please try again.'
       )
     }
+  }
+
+  // ── File upload (CSV · JSON · Excel) ───────────────────────────────
+  const handleUpload = (file: File) =>
+    runIngest(file.name, qs => {
+      const form = new FormData()
+      form.append('file', file)
+      return fetch(`${API}/upload${qs}`, { method: 'POST', body: form })
+    })
+
+  // ── Paste JSON ─────────────────────────────────────────────────────
+  // Accepts a bare array or an object wrapping it — {"items": [...]},
+  // {"records": [...]} etc.  Parsed here only to fail fast with a clear
+  // message; the backend does the real canonicalisation.
+  const [jsonDialog, setJsonDialog] = useState(false)
+  const [jsonText,   setJsonText]   = useState('')
+  const [jsonError,  setJsonError]  = useState('')
+
+  const handlePasteJson = () => {
+    const text = jsonText.trim()
+    if (!text) { setJsonError('Paste some JSON first.'); return }
+    try {
+      JSON.parse(text)
+    } catch (e: any) {
+      setJsonError(`Not valid JSON — ${e?.message ?? 'parse failed'}`)
+      return
+    }
+    setJsonError('')
+    setJsonDialog(false)
+    runIngest('pasted JSON', qs =>
+      fetch(`${API}/upload-json${qs}`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    text,
+      }))
   }
 
   // ── Export layer-selection dialog ─────────────────────────────────
@@ -722,7 +758,7 @@ export default function App() {
             <polyline points="17 8 12 3 7 8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          Upload CSV
+          Upload Data
         </button>
         <input
           ref={fileInputRef}
@@ -731,6 +767,18 @@ export default function App() {
           style={{ display: 'none' }}
           onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])}
         />
+
+        <button
+          onClick={() => { setJsonText(''); setJsonError(''); setJsonDialog(true) }}
+          title="Paste a JSON roster instead of uploading a file"
+          style={{
+            background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
+            padding: '5px 10px', color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          Paste JSON
+        </button>
 
         <button
           onClick={() => loadDemo()}
@@ -1121,6 +1169,77 @@ export default function App() {
     </div>
 
     {/* ── Export layer-selection dialog ───────────────────────────────── */}
+    {jsonDialog && createPortal(
+      <div
+        onClick={() => setJsonDialog(false)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(4,12,20,0.72)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: '#0c1c2c', border: '1px solid rgba(52,145,232,0.35)',
+            borderRadius: 12, padding: '28px 32px', width: 'min(680px, 90vw)',
+            boxShadow: '0 12px 48px rgba(0,0,0,0.6)',
+            display: 'flex', flexDirection: 'column', gap: 14,
+          }}
+        >
+          <div style={{ color: '#e0eaf4', fontSize: 14, fontWeight: 600 }}>
+            Paste JSON roster
+          </div>
+          <div style={{ color: '#7ca0bb', fontSize: 12, lineHeight: 1.5 }}>
+            An array of people, or an object wrapping one under <code>items</code>,{' '}
+            <code>records</code>, <code>data</code>…  Keys may be camelCase{' '}
+            (<code>fullName</code>, <code>jobTitle</code>, <code>companyName</code>,{' '}
+            <code>countryName</code>) or snake_case.
+          </div>
+
+          <textarea
+            value={jsonText}
+            onChange={e => { setJsonText(e.target.value); setJsonError('') }}
+            placeholder={'{\n  "items": [\n    {\n      "fullName": "Jane Doe",\n      "jobTitle": "Chief Financial Officer",\n      "companyName": "Acme",\n      "countryName": "United Kingdom"\n    }\n  ]\n}'}
+            spellCheck={false}
+            style={{
+              background: '#081522', border: `1px solid ${jsonError ? '#E63946' : 'rgba(52,145,232,0.35)'}`,
+              borderRadius: 8, padding: '12px 14px', color: '#e0eaf4',
+              fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: 11.5,
+              lineHeight: 1.5, minHeight: 220, resize: 'vertical', outline: 'none',
+            }}
+          />
+
+          {jsonError && (
+            <div style={{ color: '#E63946', fontSize: 11.5 }}>{jsonError}</div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setJsonDialog(false)}
+              style={{
+                background: 'transparent', border: 'none', color: '#4a7a9b',
+                fontSize: 11, cursor: 'pointer', padding: '8px 12px',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handlePasteJson}
+              style={{
+                background: 'rgba(52,145,232,0.12)', border: '1px solid rgba(52,145,232,0.45)',
+                borderRadius: 8, padding: '8px 18px', color: '#3491E8',
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Build org chart
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+
     {exportDialog !== null && createPortal(
       <div
         onClick={() => setExportDialog(null)}
