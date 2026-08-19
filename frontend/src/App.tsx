@@ -7,6 +7,32 @@ import { ExecPanel } from './components/ExecPanel'
 
 const API = (import.meta.env.VITE_API_URL || '/api').trim()
 
+// ── Per-org identifier ────────────────────────────────────────────────
+// Minted once per browser so parallel users/tabs no longer share one
+// backend-wide chart. Not shareable by URL on purpose — purely an internal
+// key to keep this browser's uploads isolated from everyone else's.
+const ORG_ID_KEY = 'orgchart_org_id'
+
+function getOrCreateOrgId(): string {
+  try {
+    let id = localStorage.getItem(ORG_ID_KEY)
+    if (!id) {
+      id = crypto.randomUUID()
+      localStorage.setItem(ORG_ID_KEY, id)
+    }
+    return id
+  } catch {
+    return crypto.randomUUID()   // localStorage unavailable — still usable for this tab's lifetime
+  }
+}
+
+const orgId = getOrCreateOrgId()
+
+function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
+  const sep = path.includes('?') ? '&' : '?'
+  return fetch(`${API}${path}${sep}org_id=${encodeURIComponent(orgId)}`, opts)
+}
+
 // ── History ────────────────────────────────────────────────────────────
 const HISTORY_KEY  = 'orgchart_history'
 const HISTORY_MAX  = 12
@@ -185,7 +211,7 @@ export default function App() {
     // Demo entries: reload the dataset so /executives calls succeed after restore.
     // Upload entries: exec cache covers this; backend keeps data in memory.
     if (entry.source === 'demo') {
-      fetch(`${API}/load-demo`, { method: 'POST' }).catch(() => {})
+      apiFetch('/load-demo', { method: 'POST' }).catch(() => {})
     }
   }, [])
 
@@ -233,7 +259,7 @@ export default function App() {
       await Promise.all(
         deptNodes.slice(i, i + BATCH).map(async (node) => {
           try {
-            const r = await fetch(`${API}/executives?dept_id=${encodeURIComponent(node.node_id)}&limit=200`)
+            const r = await apiFetch(`/executives?dept_id=${encodeURIComponent(node.node_id)}&limit=200`)
             if (!r.ok) return
             const data = await r.json()
             if (data.loaded === false) return
@@ -248,7 +274,7 @@ export default function App() {
   }, [updateExecCache])
 
   const handleReset = async () => {
-    try { await fetch(`${API}/reset`, { method: 'POST' }) } catch {}
+    try { await apiFetch('/reset', { method: 'POST' }) } catch {}
     setStatus('idle')
     setStatusMsg('')
     setDeptTree(null)
@@ -286,7 +312,7 @@ export default function App() {
     setStatusMsg(retrying ? 'Reconnecting to backend…' : 'Loading demo dataset…')
     setPanelDept(null); setPanelExecs(null)
     try {
-      const res = await fetch(`${API}/load-demo`, { method: 'POST' })
+      const res = await apiFetch('/load-demo', { method: 'POST' })
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setStats(data.stats)
@@ -310,7 +336,7 @@ export default function App() {
     // dept_only=true: strips person nodes server-side; adds headcount to each
     // dept node.  Keeps the response small regardless of how many people are
     // in the org — people load on demand via /executives when a dept is clicked.
-    const res = await fetch(`${API}/tree?root=root_global&max_depth=3&dept_only=true`)
+    const res = await apiFetch('/tree?root=root_global&max_depth=3&dept_only=true')
     if (!res.ok) throw new Error(await res.text())
     const raw: OrgNode = await res.json()
     const filtered = filterToDeptNodes(raw)
@@ -350,7 +376,7 @@ export default function App() {
       } else if (node.has_more) {
         // Expand: lazy-fetch only this dept's immediate sub-depts (dept_only keeps it small)
         setExpandingId(node.node_id)
-        fetch(`${API}/tree?root=${encodeURIComponent(node.node_id)}&max_depth=2&dept_only=true`)
+        apiFetch(`/tree?root=${encodeURIComponent(node.node_id)}&max_depth=2&dept_only=true`)
           .then(r => { if (!r.ok) throw new Error(); return r.json() })
           .then((fetched: OrgNode) => {
             const children = (filterToDeptNodes(fetched).children ?? []).filter(c => c.node_id)
@@ -386,7 +412,7 @@ export default function App() {
         // First page: most-senior 200 people (sorted by layer asc then name).
         // panelTotal carries the full count so ExecPanel can show "200 of N".
         const fetchAndSet = (retryAfterReload = false): Promise<void> =>
-          fetch(`${API}/executives?dept_id=${encodeURIComponent(deptId)}&limit=200`)
+          apiFetch(`/executives?dept_id=${encodeURIComponent(deptId)}&limit=200`)
             .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
             .then(async (data) => {
               // Backend restarted and lost in-memory data (Render free tier)
@@ -396,7 +422,7 @@ export default function App() {
                   : undefined
                 if (src === 'demo') {
                   // Auto-reload demo and retry once
-                  await fetch(`${API}/load-demo`, { method: 'POST' })
+                  await apiFetch('/load-demo', { method: 'POST' })
                   return fetchAndSet(true)
                 }
                 // Upload entry — backend can't restore without the file
@@ -478,7 +504,7 @@ export default function App() {
           return
         }
         try {
-          const pr = await fetch(`${API}/leadership-ready`)
+          const pr = await apiFetch('/leadership-ready')
           if (!pr.ok) { clearInterval(pollTimer); return }
           const pd = await pr.json()
           // Update industry if background task refined it
@@ -515,7 +541,7 @@ export default function App() {
     runIngest(file.name, qs => {
       const form = new FormData()
       form.append('file', file)
-      return fetch(`${API}/upload${qs}`, { method: 'POST', body: form })
+      return apiFetch(`/upload${qs}`, { method: 'POST', body: form })
     })
 
   // ── Paste JSON ─────────────────────────────────────────────────────
@@ -538,7 +564,7 @@ export default function App() {
     setJsonError('')
     setJsonDialog(false)
     runIngest('pasted JSON', qs =>
-      fetch(`${API}/upload-json${qs}`, {
+      apiFetch(`/upload-json${qs}`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    text,
@@ -556,7 +582,7 @@ export default function App() {
     setExporting(true)
     setExportError('')
     try {
-      const res = await fetch(`${API}/export?fmt=csv&max_layer=${maxLayer}`)
+      const res = await apiFetch(`/export?fmt=csv&max_layer=${maxLayer}`)
       if (!res.ok) {
         const txt = await res.text().catch(() => `HTTP ${res.status}`)
         throw new Error(txt || `Server error ${res.status}`)
@@ -589,7 +615,7 @@ export default function App() {
   // Fetch backend company on mount and after each upload (when status becomes 'ready')
   useEffect(() => {
     if (status !== 'ready') return
-    fetch(`${API}/company`).then(r => r.ok ? r.json() : null).then(d => {
+    apiFetch('/company').then(r => r.ok ? r.json() : null).then(d => {
       setBackendCompany(d?.loaded ? (d.company ?? null) : null)
     }).catch(() => setBackendCompany(null))
   }, [status])
@@ -598,7 +624,7 @@ export default function App() {
     setPptError('')
     try {
       // ── Sanity-check: backend must have the same company as what's displayed ──
-      const companyRes = await fetch(`${API}/company`).catch(() => null)
+      const companyRes = await apiFetch('/company').catch(() => null)
       if (companyRes && companyRes.ok) {
         const { loaded, company: backendCo } = await companyRes.json()
         if (!loaded) {
@@ -620,7 +646,7 @@ export default function App() {
         }
       }
 
-      const res = await fetch(`${API}/export/pptx?max_layer=${maxLayer}`)
+      const res = await apiFetch(`/export/pptx?max_layer=${maxLayer}`)
       if (!res.ok) {
         const txt = await res.text().catch(() => `HTTP ${res.status}`)
         throw new Error(txt || `Server error ${res.status}`)
