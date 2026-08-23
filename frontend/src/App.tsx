@@ -18,6 +18,27 @@ interface Usage {
   geminiPricingIsEstimate: boolean
 }
 
+// Shared, server-wide "Org History" page — one row per completed job,
+// backed by GET /history (Postgres — survives a redeploy, unlike a job's
+// live in-memory/SQLite state). Field names match the raw backend response.
+interface HistoryRun {
+  job_id:       string
+  company_name: string
+  industry:     string | null
+  source:       'upload' | 'demo'
+  status:       string
+  people_count: number | null
+  dept_count:   number | null
+  board_count:  number | null
+  exec_count:   number | null
+  created_at:   string | null
+  completed_at: string | null
+  input_tokens:  number
+  output_tokens: number
+  cost_usd:      number
+  gemini_pricing_is_estimate: boolean
+}
+
 interface HistoryEntry {
   id:          string
   companyName: string
@@ -130,10 +151,189 @@ function toPersonNode(p: Record<string, any>, fallbackColor: string): OrgNode {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// ORG HISTORY PAGE — shared, server-wide, durable across redeploys.
+// Format mirrors the sibling AI-Insights app's /reports "Reports Library"
+// page (a single filterable+searchable table, whole-row-clickable View,
+// cost never fabricated as $0), scoped and persisted differently: this
+// list is server-wide rather than per-browser, and cost/tokens are the
+// real values captured at generation time rather than reconstructed later
+// from raw usage logs.
+// ─────────────────────────────────────────────────────────────────────
+
+function HistoryPageView({
+  runs, loading, error, sourceFilter, onSourceFilterChange,
+  search, onSearchChange, onRefresh, onView,
+}: {
+  runs: HistoryRun[]
+  loading: boolean
+  error: string
+  sourceFilter: 'all' | 'upload' | 'demo'
+  onSourceFilterChange: (f: 'all' | 'upload' | 'demo') => void
+  search: string
+  onSearchChange: (s: string) => void
+  onRefresh: () => void
+  onView: (run: HistoryRun) => void
+}) {
+  const filtered = runs.filter(r => {
+    if (sourceFilter !== 'all' && r.source !== sourceFilter) return false
+    if (search.trim() && !r.company_name.toLowerCase().includes(search.trim().toLowerCase())) return false
+    return true
+  })
+
+  const pill = (active: boolean) => ({
+    padding: '5px 12px', borderRadius: 14, fontSize: 11, cursor: 'pointer',
+    border: `1px solid ${active ? '#3491E8' : 'rgba(255,255,255,0.2)'}`,
+    background: active ? 'rgba(52,145,232,0.18)' : 'transparent',
+    color: active ? '#7ec8f8' : 'rgba(255,255,255,0.65)',
+    whiteSpace: 'nowrap' as const,
+  })
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '24px 32px', background: '#080f16' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>
+            Shared Across All Users
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#ffffff', marginTop: 2 }}>
+            Org History
+          </div>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          style={{
+            background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
+            padding: '5px 12px', color: 'rgba(255,255,255,0.75)', fontSize: 11,
+            cursor: loading ? 'wait' : 'pointer',
+          }}
+        >
+          {loading ? 'Refreshing…' : '↻ Refresh'}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        {(['all', 'upload', 'demo'] as const).map(f => (
+          <div key={f} style={pill(sourceFilter === f)} onClick={() => onSourceFilterChange(f)}>
+            {f === 'all' ? 'All' : f === 'upload' ? 'Upload' : 'Demo'}
+            {f !== 'all' && ` (${runs.filter(r => r.source === f).length})`}
+          </div>
+        ))}
+        <input
+          value={search}
+          onChange={e => onSearchChange(e.target.value)}
+          placeholder="Search company name…"
+          style={{
+            marginLeft: 'auto', background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.15)', borderRadius: 7,
+            padding: '6px 10px', color: '#e0eaf4', fontSize: 12, minWidth: 220,
+          }}
+        />
+      </div>
+
+      {error && (
+        <div style={{ color: '#E63946', fontSize: 12, marginBottom: 12 }}>⚠ {error}</div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div style={{
+          border: '1px dashed rgba(255,255,255,0.2)', borderRadius: 10,
+          padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.45)', fontSize: 12,
+        }}>
+          {runs.length === 0 ? 'No org charts generated yet.' : 'No runs match this filter.'}
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
+                {['Company', 'Source', 'Details', 'Cost', 'Generated', ''].map(h => (
+                  <th key={h} style={{
+                    textAlign: 'left', padding: '8px 10px', fontSize: 10,
+                    color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5,
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr
+                  key={r.job_id}
+                  onClick={() => onView(r)}
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <td style={{ padding: '10px', color: '#e0eaf4', fontWeight: 600 }}>
+                    {r.company_name}
+                    {r.industry && (
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>{r.industry}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    <span style={{
+                      fontSize: 10, padding: '2px 8px', borderRadius: 10,
+                      background: r.source === 'demo' ? 'rgba(230,185,57,0.15)' : 'rgba(52,145,232,0.15)',
+                      border: `1px solid ${r.source === 'demo' ? 'rgba(230,185,57,0.35)' : 'rgba(52,145,232,0.35)'}`,
+                      color: r.source === 'demo' ? '#e6b939' : '#7ec8f8',
+                    }}>
+                      {r.source === 'demo' ? 'Demo' : 'Upload'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px', color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>
+                    {r.people_count ?? 0} people · {r.dept_count ?? 0} depts
+                    {((r.board_count ?? 0) > 0 || (r.exec_count ?? 0) > 0) &&
+                      ` · ${r.board_count ?? 0} board · ${r.exec_count ?? 0} exec`}
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    <div
+                      style={{ color: 'rgba(230,185,57,0.9)', fontSize: 11 }}
+                      title={r.gemini_pricing_is_estimate
+                        ? 'Includes an estimated Gemini rate — verify current pricing at ai.google.dev/pricing'
+                        : undefined}
+                    >
+                      ${r.cost_usd.toFixed(4)}{r.gemini_pricing_is_estimate ? ' *' : ''}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
+                      {(r.input_tokens + r.output_tokens).toLocaleString()} tokens
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px', color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>
+                    {r.created_at ? relativeTime(new Date(r.created_at).getTime()) : '—'}
+                  </td>
+                  <td style={{ padding: '10px', textAlign: 'right' }}>
+                    <span style={{ color: '#3491E8', fontSize: 11, fontWeight: 600 }}>View →</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>
+        Showing {filtered.length} of {runs.length} runs · shared across everyone using this backend
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // APP
 // ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // 'history' swaps the main area for the shared Org History page — no
+  // router in this app, so this is a same-page view toggle rather than a route.
+  const [view, setView] = useState<'chart' | 'history'>('chart')
+  const [historyRuns,        setHistoryRuns]        = useState<HistoryRun[]>([])
+  const [historyLoading,     setHistoryLoading]     = useState(false)
+  const [historyError,       setHistoryError]       = useState('')
+  const [historySourceFilter, setHistorySourceFilter] = useState<'all' | 'upload' | 'demo'>('all')
+  const [historySearch,      setHistorySearch]      = useState('')
+
   const [status, setStatus]         = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [statusMsg, setStatusMsg]   = useState('')
   const [deptTree, setDeptTree]     = useState<OrgNode | null>(null)
@@ -364,6 +564,7 @@ export default function App() {
 
   // ── Load demo ──────────────────────────────────────────────────────
   const loadDemo = async (retrying = false) => {
+    setView('chart')
     setStatus('loading')
     setStatusMsg(retrying ? 'Reconnecting to backend…' : 'Loading demo dataset…')
     setPanelDept(null); setPanelExecs(null)
@@ -407,6 +608,51 @@ export default function App() {
       // Skipped for large datasets — people load on demand instead.
       const snapId = activeEntryIdRef.current
       if (snapId) prefetchAllExecutives(filtered, snapId, currentStats)
+    }
+  }
+
+  // ── Org History page — shared, server-wide, durable list of past jobs ──
+  const loadHistoryRuns = useCallback(async () => {
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const res = await apiCreate('/history?limit=100')
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setHistoryRuns(data.runs ?? [])
+    } catch (e: any) {
+      setHistoryError(e?.message || 'Could not load history')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (view === 'history') loadHistoryRuns()
+  }, [view, loadHistoryRuns])
+
+  // "View" a past run: point the existing job-addressing machinery at it —
+  // no separate rendering path, just the same /tree flow every other chart uses.
+  const viewHistoryRun = async (run: HistoryRun) => {
+    activeJobIdRef.current = run.job_id
+    setView('chart')
+    setStatus('loading')
+    setStatusMsg(`Loading ${run.company_name}…`)
+    setPanelDept(null); setPanelExecs(null)
+    try {
+      const sr = await apiFetch('/stats')
+      if (!sr.ok) throw new Error(await sr.text())
+      const s = await sr.json()
+      const realStats: Stats = {
+        total_nodes: s.total_nodes, total_edges: s.total_edges,
+        people_nodes: s.people_nodes, ghost_nodes: s.ghost_nodes, max_depth: s.max_depth,
+      }
+      setStats(realStats)
+      if (run.industry) setIndustry(run.industry)
+      await loadDeptStructure(realStats, run.industry ?? '', run.source, toUsage(run), run.job_id)
+    } catch (e: any) {
+      setStatus('error')
+      setStatusMsg(`Could not load ${run.company_name}: ${e?.message ?? 'unknown error'}`)
     }
   }
 
@@ -513,6 +759,7 @@ export default function App() {
   // and pasted JSON (→ POST /upload-json).  `post` receives the query string
   // so each caller can pick its own endpoint.
   const runIngest = async (label: string, post: (qs: string) => Promise<Response>) => {
+    setView('chart')
     setStatus('loading')
     setColWarning(null)
     setPanelDept(null); setPanelExecs(null)
@@ -890,6 +1137,19 @@ export default function App() {
           Demo
         </button>
 
+        <button
+          onClick={() => setView(v => v === 'history' ? 'chart' : 'history')}
+          title="Shared history of every org chart generated on this backend"
+          style={{
+            background: view === 'history' ? 'rgba(52,145,232,0.18)' : 'transparent',
+            border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
+            padding: '5px 10px', color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          {view === 'history' ? '← Back to Chart' : 'History'}
+        </button>
+
         {status === 'ready' && (
           <button
             onClick={() => setExportDialog('csv')}
@@ -982,7 +1242,20 @@ export default function App() {
 
       {/* ── MAIN AREA ─────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-
+      {view === 'history' ? (
+        <HistoryPageView
+          runs={historyRuns}
+          loading={historyLoading}
+          error={historyError}
+          sourceFilter={historySourceFilter}
+          onSourceFilterChange={setHistorySourceFilter}
+          search={historySearch}
+          onSearchChange={setHistorySearch}
+          onRefresh={loadHistoryRuns}
+          onView={viewHistoryRun}
+        />
+      ) : (
+      <>
         {/* ── SIDEBAR ──────────────────────────────────────────── */}
         <aside style={{
           width: 180, flexShrink: 0, background: '#0c3649',
@@ -1275,6 +1548,8 @@ export default function App() {
             companyName={deptTree?.label ?? ''}
           />
         </div>
+      </>
+      )}
       </div>
     </div>
 

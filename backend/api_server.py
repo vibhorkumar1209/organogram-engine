@@ -5,6 +5,7 @@ Provides REST endpoints for the React frontend.
 
 import io
 import json
+import logging
 import re
 import tempfile
 import time
@@ -13,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Load .env file for local development ─────────────────────────────────────
 # On Render/production, env vars are injected by the platform.
@@ -42,6 +45,7 @@ from structural_engine import (
     purge_csv_from_enriched_panels,
 )
 from usage_tracker import UsageTracker, start_tracking
+import history_store
 
 # ─── Flexible column name mapping ────────────
 # Maps any common column variant → canonical field name
@@ -301,6 +305,11 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _init_history_store():
+    history_store.init_schema()
+
+
 _ROSTER_KEYS = ("records", "items", "data", "results",
                 "people", "rows", "profiles", "contacts", "employees")
 
@@ -457,29 +466,71 @@ def _evict_if_stale(job_id: str) -> None:
         del _JOBS[job_id]
 
 
+def _dag_from_snapshot(snapshot: dict) -> "OrganogramDAG | None":
+    """Rebuild a DAG from a history_store snapshot
+    ({"company_name": ..., "nodes": [...], "edges": [...]}) — the same
+    node/edge shape OrganogramDB.load_dag() reconstructs from SQLite rows,
+    just sourced from the durable Postgres copy instead of a local file."""
+    nodes = snapshot.get("nodes") or []
+    if not nodes:
+        return None
+    dag = OrganogramDAG(company_name=snapshot.get("company_name") or "Organization")
+    for attrs in nodes:
+        node_id = attrs.get("node_id")
+        if not node_id:
+            continue
+        if node_id == "root_global":
+            dag.G.nodes["root_global"].update(attrs)
+        else:
+            dag._ensure_node(node_id, **attrs)
+    for edge in snapshot.get("edges") or []:
+        u, v = edge.get("source"), edge.get("target")
+        if u in dag.G and v in dag.G:
+            dag._ensure_edge(u, v)
+    return dag
+
+
 def _try_reload_job(job_id: str) -> None:
-    """On-demand reload from disk — replaces the old startup-only auto-restore."""
+    """On-demand reload — disk first (the per-job SQLite file, survives a
+    process restart but not a redeploy), then Postgres (chart_runs.snapshot,
+    survives a redeploy too, but only exists once a job has fully completed)."""
     path = _job_db_path(job_id)
-    if not os.path.exists(path):
+    if os.path.exists(path):
+        try:
+            restored_db = OrganogramDB(db_path=path)
+            restored_dag = restored_db.load_dag()
+            if restored_dag and restored_dag.G.number_of_nodes() > 1:
+                _JOBS[job_id] = JobSession(
+                    dag=restored_dag, db=restored_db,
+                    classified_records=[], enrichment_done=True,
+                    last_accessed_at=time.time(), db_path=path,
+                    company_name=getattr(restored_dag, "company_name", ""),
+                )
+                logger.info("Reloaded job '%s' from disk (%d nodes)",
+                            job_id, restored_dag.G.number_of_nodes())
+                return
+        except Exception as exc:
+            logger.warning("Disk reload failed for job '%s': %s", job_id, exc)
+
+    snapshot = history_store.load_snapshot(job_id)
+    if not snapshot:
         return
     try:
-        restored_db = OrganogramDB(db_path=path)
-        restored_dag = restored_db.load_dag()
-        if restored_dag and restored_dag.G.number_of_nodes() > 1:
-            _JOBS[job_id] = JobSession(
-                dag=restored_dag, db=restored_db,
-                classified_records=[], enrichment_done=True,
-                last_accessed_at=time.time(), db_path=path,
-                company_name=getattr(restored_dag, "company_name", ""),
-            )
-            import logging as _lg
-            _lg.getLogger(__name__).info(
-                "Reloaded org '%s' from %s (%d nodes)",
-                job_id, path, restored_dag.G.number_of_nodes(),
-            )
+        restored_dag = _dag_from_snapshot(snapshot)
+        if not restored_dag or restored_dag.G.number_of_nodes() <= 1:
+            return
+        restored_db = OrganogramDB(db_path=":memory:")
+        restored_db.upsert_dag(restored_dag)
+        _JOBS[job_id] = JobSession(
+            dag=restored_dag, db=restored_db,
+            classified_records=[], enrichment_done=True,
+            last_accessed_at=time.time(), db_path=path,
+            company_name=restored_dag.company_name,
+        )
+        logger.info("Reloaded job '%s' from Postgres history (%d nodes)",
+                    job_id, restored_dag.G.number_of_nodes())
     except Exception as exc:
-        import logging as _lg
-        _lg.getLogger(__name__).warning("Reload failed for org '%s': %s", job_id, exc)
+        logger.warning("Postgres reload failed for job '%s': %s", job_id, exc)
 
 
 def _require_dag(job_id: str):
@@ -665,6 +716,7 @@ async def _ingest_records(records: list[dict],
         last_accessed_at=time.time(), db_path=db_path, company_name=company_name,
         usage_tracker=tracker,
     )
+    history_store.record_job_created(job_id, company_name, "upload")
 
     # ── Sync BOD/EM injection ─────────────────────────────────────────────────
     # Passes the inferred domain so the company's own website is tried first.
@@ -750,6 +802,10 @@ async def _ingest_records(records: list[dict],
             _session = _JOBS.get(job_id)
             if _session is not None:
                 _session.enrichment_done = True   # always mark done, even on error / empty result
+                _root_meta = dag.G.nodes.get("root_global", {}).get("metadata", {})
+                history_store.record_job_completed(
+                    job_id, dag, _root_meta.get("industry", ""), _session.usage_tracker.summary()
+                )
 
     if background_tasks is not None:
         background_tasks.add_task(_run_enrichment, job_id, dag, classified, company_name, domain, db)
@@ -857,6 +913,10 @@ async def load_demo():
         last_accessed_at=time.time(), db_path=db_path, company_name="AutoPrime Motors",
         usage_tracker=tracker,
     )
+    # Demo jobs are fully built synchronously (no background enrichment phase),
+    # so they go straight to 'ready' — record both history_store steps here.
+    history_store.record_job_created(job_id, "AutoPrime Motors", "demo")
+    history_store.record_job_completed(job_id, dag, industry or "", tracker.summary())
     return {
         "status": "ok",
         "job_id": job_id,
@@ -1361,6 +1421,7 @@ async def reset_data(job_id: str = Query(...)):
     db_path = _job_db_path(job_id)
     if os.path.exists(db_path):
         os.remove(db_path)
+    history_store.delete_job(job_id)
     return {"status": "reset"}
 
 
@@ -2538,6 +2599,23 @@ async def get_loaded_company(job_id: str = Query(...)):
     company = root.get("label") or "Unknown"
     people  = sum(1 for _, a in dag.G.nodes(data=True) if a.get("node_type") == "person")
     return {"loaded": True, "company": company, "people": people}
+
+
+@app.get("/history")
+async def list_history(
+    limit:  int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    source: str = Query("", description="Filter: 'upload' or 'demo'; empty = both"),
+    q:      str = Query("", description="Case-insensitive company-name substring filter"),
+):
+    """
+    Shared, server-wide list of completed org-chart generations — durable
+    across redeploys (backed by Postgres, see history_store.py), unlike an
+    individual job's live session state. No auth: matches every other
+    endpoint in this API, and lets an external caller discover job_ids to
+    address via /tree, /company, /export, etc. without already knowing one.
+    """
+    return {"runs": history_store.list_jobs(limit=limit, offset=offset, source=source, q=q)}
 
 
 # ─────────────────────────────────────────────

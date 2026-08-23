@@ -2349,6 +2349,7 @@ def _enrich_with_llm_leadership(
         ctx0   = list(companies.values())[0] if companies else {}
         dag._ensure_node(
             bod_id,
+            node_id=bod_id,
             node_type=NODE_DEPT_P,
             label="Board of Management",
             layer=0,
@@ -2526,6 +2527,7 @@ def promote_uploaded_to_leadership(
         if dept_id not in dag.G:
             dag._ensure_node(
                 dept_id,
+                node_id    = dept_id,
                 node_type  = NODE_DEPT_P,
                 label      = dept_primary,
                 layer      = 0,
