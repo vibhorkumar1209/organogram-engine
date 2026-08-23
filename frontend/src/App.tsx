@@ -7,35 +7,16 @@ import { ExecPanel } from './components/ExecPanel'
 
 const API = (import.meta.env.VITE_API_URL || '/api').trim()
 
-// ── Per-org identifier ────────────────────────────────────────────────
-// Minted once per browser so parallel users/tabs no longer share one
-// backend-wide chart. Not shareable by URL on purpose — purely an internal
-// key to keep this browser's uploads isolated from everyone else's.
-const ORG_ID_KEY = 'orgchart_org_id'
-
-function getOrCreateOrgId(): string {
-  try {
-    let id = localStorage.getItem(ORG_ID_KEY)
-    if (!id) {
-      id = crypto.randomUUID()
-      localStorage.setItem(ORG_ID_KEY, id)
-    }
-    return id
-  } catch {
-    return crypto.randomUUID()   // localStorage unavailable — still usable for this tab's lifetime
-  }
-}
-
-const orgId = getOrCreateOrgId()
-
-function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
-  const sep = path.includes('?') ? '&' : '?'
-  return fetch(`${API}${path}${sep}org_id=${encodeURIComponent(orgId)}`, opts)
-}
-
 // ── History ────────────────────────────────────────────────────────────
 const HISTORY_KEY  = 'orgchart_history'
 const HISTORY_MAX  = 12
+
+interface Usage {
+  inputTokens:  number
+  outputTokens: number
+  costUsd:      number
+  geminiPricingIsEstimate: boolean
+}
 
 interface HistoryEntry {
   id:          string
@@ -46,6 +27,18 @@ interface HistoryEntry {
   industry:    string
   source:      'demo' | 'upload'   // so restore knows whether to reload backend
   execCache:   Record<string, OrgNode[]>   // dept_id → executives (for offline restore)
+  usage:       Usage | null   // tokens/$ spent generating this chart; null for entries saved before this existed
+  jobId:       string | null   // server-assigned id for the backend job that produced this chart; null for entries saved before this existed
+}
+
+function toUsage(raw: any): Usage | null {
+  if (!raw) return null
+  return {
+    inputTokens:  raw.input_tokens  ?? 0,
+    outputTokens: raw.output_tokens ?? 0,
+    costUsd:      raw.cost_usd      ?? 0,
+    geminiPricingIsEstimate: !!raw.gemini_pricing_is_estimate,
+  }
 }
 
 function loadHistory(): HistoryEntry[] {
@@ -176,7 +169,37 @@ export default function App() {
   const historyRef       = useRef<HistoryEntry[]>(history)
   useEffect(() => { historyRef.current = history }, [history])
 
-  const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string, src: 'demo' | 'upload' = 'upload') => {
+  // The backend-assigned job_id for the chart currently being viewed. Unlike
+  // the old per-browser org_id, this is minted server-side per generation
+  // (POST /upload, /upload-json, /load-demo all return one) — the client
+  // never picks it, only carries it forward on later calls that address that
+  // same job. A ref (not state) because nothing renders off this value; it's
+  // read synchronously inside async closures the same way activeEntryIdRef is.
+  const activeJobIdRef = useRef<string | null>(null)
+
+  // apiCreate: the three endpoints that mint a *new* job (no id to send).
+  function apiCreate(path: string, opts?: RequestInit): Promise<Response> {
+    return fetch(`${API}${path}`, opts)
+  }
+  // apiFetch: every other call, which addresses the currently active job.
+  function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
+    const jobId = activeJobIdRef.current
+    if (!jobId) return fetch(`${API}${path}`, opts)   // no active job — let the backend's 422 surface
+    const sep = path.includes('?') ? '&' : '?'
+    return fetch(`${API}${path}${sep}job_id=${encodeURIComponent(jobId)}`, opts)
+  }
+
+  // Patch a history entry's stored job_id — used when restoring a demo entry
+  // (which always mints a fresh job) so the entry stays addressable afterward.
+  const updateJobId = useCallback((entryId: string, jobId: string) => {
+    setHistory(prev => {
+      const next = prev.map(e => e.id === entryId ? { ...e, jobId } : e)
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
+  const saveSnapshot = useCallback((tree: OrgNode, s: Stats, ind: string, src: 'demo' | 'upload' = 'upload', usage: Usage | null = null, jobId: string | null = null) => {
     const entry: HistoryEntry = {
       id:          `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       companyName: tree.label || 'Unknown Company',
@@ -186,6 +209,8 @@ export default function App() {
       industry:    ind,
       source:      src,
       execCache:   {},
+      usage,
+      jobId,
     }
     activeEntryIdRef.current = entry.id
     setHistory(prev => {
@@ -209,11 +234,30 @@ export default function App() {
     setHighlight(null)
     bumpFit()
     // Demo entries: reload the dataset so /executives calls succeed after restore.
-    // Upload entries: exec cache covers this; backend keeps data in memory.
+    // Upload entries: exec cache covers this; backend keeps data in memory —
+    // just point the active job ref at whatever job this entry was created under.
     if (entry.source === 'demo') {
-      apiFetch('/load-demo', { method: 'POST' }).catch(() => {})
+      // /load-demo always mints a brand-new job — adopt it as active and patch
+      // the entry's stored jobId so it stays addressable on a later restore.
+      apiCreate('/load-demo', { method: 'POST' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.job_id) {
+            activeJobIdRef.current = data.job_id
+            updateJobId(entry.id, data.job_id)
+            // The [status, deptTree] effect already fired against the ref's
+            // pre-resync value (this resolves after that render), so refresh
+            // backendCompany explicitly now that the ref points at the right job.
+            apiFetch('/company').then(r => r.ok ? r.json() : null).then(d => {
+              setBackendCompany(d?.loaded ? (d.company ?? null) : null)
+            }).catch(() => {})
+          }
+        })
+        .catch(() => {})
+    } else {
+      activeJobIdRef.current = entry.jobId
     }
-  }, [])
+  }, [updateJobId])
 
   const deleteSnapshot = useCallback((id: string) => {
     setHistory(prev => {
@@ -231,6 +275,17 @@ export default function App() {
           ? { ...e, execCache: { ...e.execCache, [deptId]: people } }
           : e
       )
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
+  // Patch a history entry's usage figure as background enrichment accumulates
+  // more Claude/Gemini calls — mirrors updateExecCache above.
+  const updateUsage = useCallback((entryId: string, usage: Usage | null) => {
+    if (!usage) return
+    setHistory(prev => {
+      const next = prev.map(e => e.id === entryId ? { ...e, usage } : e)
       persistHistory(next)
       return next
     })
@@ -275,6 +330,7 @@ export default function App() {
 
   const handleReset = async () => {
     try { await apiFetch('/reset', { method: 'POST' }) } catch {}
+    activeJobIdRef.current = null   // the job was just deleted on the backend
     setStatus('idle')
     setStatusMsg('')
     setDeptTree(null)
@@ -312,11 +368,12 @@ export default function App() {
     setStatusMsg(retrying ? 'Reconnecting to backend…' : 'Loading demo dataset…')
     setPanelDept(null); setPanelExecs(null)
     try {
-      const res = await apiFetch('/load-demo', { method: 'POST' })
+      const res = await apiCreate('/load-demo', { method: 'POST' })
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
+      activeJobIdRef.current = data.job_id ?? null
       setStats(data.stats)
-      await loadDeptStructure(data.stats, data.industry ?? '', 'demo')
+      await loadDeptStructure(data.stats, data.industry ?? '', 'demo', toUsage(data.usage), data.job_id ?? null)
     } catch (e: any) {
       const isNetwork = (e?.message ?? '').toLowerCase().includes('fetch')
       if (isNetwork && !retrying) {
@@ -332,7 +389,7 @@ export default function App() {
   }
 
   // ── Fetch dept-only structure ──────────────────────────────────────
-  const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string, src: 'demo' | 'upload' = 'upload') => {
+  const loadDeptStructure = async (currentStats?: Stats, currentIndustry?: string, src: 'demo' | 'upload' = 'upload', currentUsage?: Usage | null, currentJobId?: string | null) => {
     // dept_only=true: strips person nodes server-side; adds headcount to each
     // dept node.  Keeps the response small regardless of how many people are
     // in the org — people load on demand via /executives when a dept is clicked.
@@ -345,7 +402,7 @@ export default function App() {
     setStatus('ready')
     // Auto-save to history whenever a chart successfully loads
     if (currentStats) {
-      saveSnapshot(filtered, currentStats, currentIndustry ?? '', src)
+      saveSnapshot(filtered, currentStats, currentIndustry ?? '', src, currentUsage ?? null, currentJobId ?? null)
       // Fire-and-forget: eagerly cache all executives so history is self-contained.
       // Skipped for large datasets — people load on demand instead.
       const snapId = activeEntryIdRef.current
@@ -421,8 +478,16 @@ export default function App() {
                   ? historyRef.current.find(e => e.id === entryId)?.source
                   : undefined
                 if (src === 'demo') {
-                  // Auto-reload demo and retry once
-                  await apiFetch('/load-demo', { method: 'POST' })
+                  // Auto-reload demo and retry once — /load-demo mints a fresh
+                  // job, so the active ref (and the entry's stored jobId) must
+                  // move to it before the retry, or fetchAndSet(true) would
+                  // still address the orphaned old job and fail the same way.
+                  const rd = await apiCreate('/load-demo', { method: 'POST' })
+                  const rdData = await rd.json().catch(() => null)
+                  if (rdData?.job_id) {
+                    activeJobIdRef.current = rdData.job_id
+                    if (entryId) updateJobId(entryId, rdData.job_id)
+                  }
                   return fetchAndSet(true)
                 }
                 // Upload entry — backend can't restore without the file
@@ -441,7 +506,7 @@ export default function App() {
         fetchAndSet()
       }
     }
-  }, [updateExecCache])
+  }, [updateExecCache, updateJobId])
 
   // ── Ingest ─────────────────────────────────────────────────────────
   // Shared by both inputs: an uploaded file (CSV/JSON/Excel → POST /upload)
@@ -478,6 +543,7 @@ export default function App() {
         throw new Error(detail)
       }
       const data = await res.json()
+      activeJobIdRef.current = data.job_id ?? null   // set before any job-scoped fetch fires below
       setStats(data.stats)
       if (data.industry) setIndustry(data.industry)
       if (data.canonical_missing?.length > 0) {
@@ -487,7 +553,7 @@ export default function App() {
           `Detected columns: ${data.detected_columns?.join(', ') ?? '(unknown)'}.`
         )
       }
-      await loadDeptStructure(data.stats, data.industry ?? '', 'upload')
+      await loadDeptStructure(data.stats, data.industry ?? '', 'upload', toUsage(data.usage), data.job_id ?? null)
 
       // ── Poll for BOD/EM data (background enrichment takes ~90s) ──────
       // Parallel.AI research runs in the background. Poll every 10s up to
@@ -511,11 +577,15 @@ export default function App() {
           if (pd.industry && pd.industry !== industry) {
             setIndustry(pd.industry)
           }
+          // Usage climbs across polls as background enrichment makes more
+          // Claude/Gemini calls — patch it into the active history entry live.
+          if (activeEntryIdRef.current) updateUsage(activeEntryIdRef.current, toUsage(pd.usage))
           if (pd.ready) {
             clearInterval(pollTimer)
             setLeadershipNote(`✅ Found ${pd.board_count} board members · ${pd.exec_count} executives`)
-            // Quietly reload the tree — BOD/EM nodes now exist in the DAG
-            await loadDeptStructure(data.stats, pd.industry || data.industry || '', 'upload')
+            // Quietly reload the tree — BOD/EM nodes now exist in the DAG.
+            // Same backend job as the original upload, just re-synced.
+            await loadDeptStructure(data.stats, pd.industry || data.industry || '', 'upload', toUsage(pd.usage), activeJobIdRef.current)
           } else if (pd.enrichment_done) {
             clearInterval(pollTimer)
             setLeadershipNote('ℹ No public leadership data found — add company website URL and re-upload to retry')
@@ -541,7 +611,7 @@ export default function App() {
     runIngest(file.name, qs => {
       const form = new FormData()
       form.append('file', file)
-      return apiFetch(`/upload${qs}`, { method: 'POST', body: form })
+      return apiCreate(`/upload${qs}`, { method: 'POST', body: form })
     })
 
   // ── Paste JSON ─────────────────────────────────────────────────────
@@ -564,7 +634,7 @@ export default function App() {
     setJsonError('')
     setJsonDialog(false)
     runIngest('pasted JSON', qs =>
-      apiFetch(`/upload-json${qs}`, {
+      apiCreate(`/upload-json${qs}`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    text,
@@ -612,13 +682,16 @@ export default function App() {
   const [exportingPPT,   setExportingPPT]   = useState(false)
   const [pptError,       setPptError]       = useState('')
   const [backendCompany, setBackendCompany] = useState<string | null>(null)
-  // Fetch backend company on mount and after each upload (when status becomes 'ready')
+  // Fetch backend company on mount and whenever the displayed chart changes —
+  // depends on deptTree (not just status) so restoring a different history
+  // entry while already 'ready' still re-checks against its own job_id,
+  // instead of leaving the previous chart's stale backendCompany displayed.
   useEffect(() => {
     if (status !== 'ready') return
     apiFetch('/company').then(r => r.ok ? r.json() : null).then(d => {
       setBackendCompany(d?.loaded ? (d.company ?? null) : null)
     }).catch(() => setBackendCompany(null))
-  }, [status])
+  }, [status, deptTree])
   const handleExportPPT = async (maxLayer: number) => {
     setExportingPPT(true)
     setPptError('')
@@ -1034,6 +1107,17 @@ export default function App() {
                         </div>
                       )
                     })()}
+                    {entry.usage && (
+                      <div
+                        style={{ fontSize: 8, color: 'rgba(230,185,57,0.8)', marginTop: 1 }}
+                        title={entry.usage.geminiPricingIsEstimate
+                          ? 'Includes an estimated Gemini rate — verify current pricing at ai.google.dev/pricing'
+                          : undefined}
+                      >
+                        ${entry.usage.costUsd.toFixed(4)} · {(entry.usage.inputTokens + entry.usage.outputTokens).toLocaleString()} tokens
+                        {entry.usage.geminiPricingIsEstimate ? ' *' : ''}
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); deleteSnapshot(entry.id) }}

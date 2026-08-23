@@ -189,6 +189,9 @@ def _llm_classify(company_name: str, context: str) -> str:
             system=_SYSTEM_CLASSIFY,
             messages=[{"role": "user", "content": user_msg}],
         )
+        from usage_tracker import record_usage
+        record_usage("anthropic", "claude-haiku-4-5-20251001",
+                      response.usage.input_tokens, response.usage.output_tokens)
         raw = response.content[0].text.strip().strip('"').strip("'")
         # Validate against list
         if raw in _INDUSTRY_SET:

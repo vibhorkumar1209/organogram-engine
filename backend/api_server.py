@@ -41,6 +41,7 @@ from structural_engine import (
     promote_uploaded_to_leadership,
     purge_csv_from_enriched_panels,
 )
+from usage_tracker import UsageTracker, start_tracking
 
 # ─── Flexible column name mapping ────────────
 # Maps any common column variant → canonical field name
@@ -280,16 +281,16 @@ _DB_DIR = os.environ.get("ORGANOGRAM_DB_DIR", "/tmp")
 _ORG_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
-def _validate_org_id(org_id: str) -> str:
-    """Reject malformed org_id before it's ever used in a filesystem path."""
-    if not _ORG_ID_RE.match(org_id):
-        raise HTTPException(status_code=422, detail="Invalid org_id")
-    return org_id
+def _validate_job_id(job_id: str) -> str:
+    """Reject malformed job_id before it's ever used in a filesystem path."""
+    if not _ORG_ID_RE.match(job_id):
+        raise HTTPException(status_code=422, detail="Invalid job_id")
+    return job_id
 
 
-def _org_db_path(org_id: str) -> str:
-    _validate_org_id(org_id)
-    return os.path.join(_DB_DIR, f"organogram_{org_id}.db")
+def _job_db_path(job_id: str) -> str:
+    _validate_job_id(job_id)
+    return os.path.join(_DB_DIR, f"organogram_{job_id}.db")
 
 app.add_middleware(
     CORSMiddleware,
@@ -419,15 +420,15 @@ def ping():
 
 # ─── Per-org in-memory state ──────────────────
 # One process now serves many orgs in parallel, each keyed by a client-minted
-# org_id. There is no eager startup restore any more (there's no single
-# well-known file to restore) — a request for any previously-uploaded org_id
+# job_id. There is no eager startup restore any more (there's no single
+# well-known file to restore) — a request for any previously-uploaded job_id
 # transparently reloads it from its own SQLite file on demand, whether that's
 # because the process just restarted or because the session was TTL-evicted.
 _TTL_SECONDS = int(os.environ.get("ORGANOGRAM_TTL_HOURS", "24")) * 3600
 
 
 @dataclass
-class OrgSession:
+class JobSession:
     dag: OrganogramDAG
     db: OrganogramDB
     classified_records: list = field(default_factory=list)
@@ -435,9 +436,10 @@ class OrgSession:
     last_accessed_at: float = field(default_factory=time.time)
     db_path: str = ""
     company_name: str = ""
+    usage_tracker: UsageTracker = field(default_factory=UsageTracker)
 
 
-_SESSIONS: dict[str, "OrgSession"] = {}
+_JOBS: dict[str, "JobSession"] = {}
 
 
 _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
@@ -445,26 +447,26 @@ _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
                           "people_nodes": 0, "ghost_nodes": 0, "max_depth": 0}}
 
 
-def _evict_if_stale(org_id: str) -> None:
-    session = _SESSIONS.get(org_id)
+def _evict_if_stale(job_id: str) -> None:
+    session = _JOBS.get(job_id)
     if session is not None and (time.time() - session.last_accessed_at) > _TTL_SECONDS:
         try:
             session.db.conn.close()
         except Exception:
             pass
-        del _SESSIONS[org_id]
+        del _JOBS[job_id]
 
 
-def _try_reload_org(org_id: str) -> None:
+def _try_reload_job(job_id: str) -> None:
     """On-demand reload from disk — replaces the old startup-only auto-restore."""
-    path = _org_db_path(org_id)
+    path = _job_db_path(job_id)
     if not os.path.exists(path):
         return
     try:
         restored_db = OrganogramDB(db_path=path)
         restored_dag = restored_db.load_dag()
         if restored_dag and restored_dag.G.number_of_nodes() > 1:
-            _SESSIONS[org_id] = OrgSession(
+            _JOBS[job_id] = JobSession(
                 dag=restored_dag, db=restored_db,
                 classified_records=[], enrichment_done=True,
                 last_accessed_at=time.time(), db_path=path,
@@ -473,35 +475,35 @@ def _try_reload_org(org_id: str) -> None:
             import logging as _lg
             _lg.getLogger(__name__).info(
                 "Reloaded org '%s' from %s (%d nodes)",
-                org_id, path, restored_dag.G.number_of_nodes(),
+                job_id, path, restored_dag.G.number_of_nodes(),
             )
     except Exception as exc:
         import logging as _lg
-        _lg.getLogger(__name__).warning("Reload failed for org '%s': %s", org_id, exc)
+        _lg.getLogger(__name__).warning("Reload failed for org '%s': %s", job_id, exc)
 
 
-def _require_dag(org_id: str):
+def _require_dag(job_id: str):
     """Return (dag, db) for this org, or raise — reloads from disk on demand."""
-    _validate_org_id(org_id)
-    _evict_if_stale(org_id)
-    if org_id not in _SESSIONS:
-        _try_reload_org(org_id)
-    session = _SESSIONS.get(org_id)
+    _validate_job_id(job_id)
+    _evict_if_stale(job_id)
+    if job_id not in _JOBS:
+        _try_reload_job(job_id)
+    session = _JOBS.get(job_id)
     if session is None:
         raise HTTPException(status_code=400, detail="No dataset loaded. POST /upload first.")
     session.last_accessed_at = time.time()
     return session.dag, session.db
 
 
-def _dag_loaded(org_id: str) -> bool:
+def _dag_loaded(job_id: str) -> bool:
     """Presence check — but every endpoint gates on this *before* calling
     _require_dag(), so it must attempt the same evict/reload dance itself;
-    otherwise a reload-worthy org_id would never reach _require_dag at all."""
-    _validate_org_id(org_id)
-    _evict_if_stale(org_id)
-    if org_id not in _SESSIONS:
-        _try_reload_org(org_id)
-    return org_id in _SESSIONS
+    otherwise a reload-worthy job_id would never reach _require_dag at all."""
+    _validate_job_id(job_id)
+    _evict_if_stale(job_id)
+    if job_id not in _JOBS:
+        _try_reload_job(job_id)
+    return job_id in _JOBS
 
 
 # ─────────────────────────────────────────────
@@ -527,7 +529,6 @@ def canonicalise_records(records: list[dict]) -> tuple[list[dict], list[str], li
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...),
-                      org_id: str = Query(...),
                       company_name: str = Query("Organization"),
                       company_website: str = Query(""),
                       background_tasks: BackgroundTasks = None):
@@ -582,13 +583,12 @@ async def upload_file(file: UploadFile = File(...),
     if not records:
         raise HTTPException(status_code=422, detail="File appears empty.")
 
-    return await _ingest_records(org_id, records, detected_cols, mapped_cols,
+    return await _ingest_records(records, detected_cols, mapped_cols,
                                  company_name, company_website, background_tasks)
 
 
 @app.post("/upload-json")
 async def upload_json(payload: dict | list = Body(...),
-                      org_id: str = Query(...),
                       company_name: str = Query("Organization"),
                       company_website: str = Query(""),
                       background_tasks: BackgroundTasks = None):
@@ -613,12 +613,11 @@ async def upload_json(payload: dict | list = Body(...),
         )
 
     records, detected_cols, mapped_cols = canonicalise_records(records)
-    return await _ingest_records(org_id, records, detected_cols, mapped_cols,
+    return await _ingest_records(records, detected_cols, mapped_cols,
                                  company_name, company_website, background_tasks)
 
 
-async def _ingest_records(org_id: str,
-                          records: list[dict],
+async def _ingest_records(records: list[dict],
                           detected_cols: list[str],
                           mapped_cols: list[str],
                           company_name: str,
@@ -628,10 +627,18 @@ async def _ingest_records(org_id: str,
     Shared ingestion path for every entry point (file upload and JSON body).
 
     Builds the DAG, kicks off background BOD/EM enrichment, and returns the
-    stats payload the frontend expects.  Scoped to a single org_id — each org
-    gets its own OrgSession and its own SQLite file (see _org_db_path).
+    stats payload the frontend expects.  job_id is a server-assigned id for
+    this specific generation, not a caller input — minted here and handed
+    back in the response so the client can address this job on later calls.
+    Each job gets its own JobSession and its own SQLite file (see _job_db_path).
     """
-    db_path = _org_db_path(org_id)
+    job_id = str(uuid.uuid4())
+    db_path = _job_db_path(job_id)
+
+    # Binds a fresh UsageTracker to this request's context — stays visible
+    # through the background enrichment task scheduled below (see
+    # usage_tracker.py's module docstring for why that's safe).
+    tracker = start_tracking()
 
     MAX_ROWS = 200_000
     if len(records) > MAX_ROWS:
@@ -653,9 +660,10 @@ async def _ingest_records(org_id: str,
         raise HTTPException(status_code=500,
                             detail=f"Pipeline failed: {e}\n{traceback.format_exc()}")
 
-    _SESSIONS[org_id] = OrgSession(
+    _JOBS[job_id] = JobSession(
         dag=dag, db=db, classified_records=classified, enrichment_done=False,
         last_accessed_at=time.time(), db_path=db_path, company_name=company_name,
+        usage_tracker=tracker,
     )
 
     # ── Sync BOD/EM injection ─────────────────────────────────────────────────
@@ -677,7 +685,7 @@ async def _ingest_records(org_id: str,
     # the org chart immediately and let the enrichment run in a background thread.
     # The frontend can re-fetch /chart after a few seconds to pick up BOD/EM data.
 
-    def _run_enrichment(org_id, dag, classified, co_name, domain, db):
+    def _run_enrichment(job_id, dag, classified, co_name, domain, db):
         import logging, traceback
         _log = logging.getLogger(__name__)
         try:
@@ -739,15 +747,15 @@ async def _ingest_records(org_id: str,
         finally:
             # Guard with .get() — the session may have been evicted while this
             # background task was running; if so, just let the write no-op.
-            _session = _SESSIONS.get(org_id)
+            _session = _JOBS.get(job_id)
             if _session is not None:
                 _session.enrichment_done = True   # always mark done, even on error / empty result
 
     if background_tasks is not None:
-        background_tasks.add_task(_run_enrichment, org_id, dag, classified, company_name, domain, db)
+        background_tasks.add_task(_run_enrichment, job_id, dag, classified, company_name, domain, db)
     else:
         # Fallback: run synchronously if no background task context available
-        _run_enrichment(org_id, dag, classified, company_name, domain, db)
+        _run_enrichment(job_id, dag, classified, company_name, domain, db)
 
     # ── Field coverage check (group-aware) ──────────────────────────────────
     # Vendors use many equivalent column names.  We check coverage by semantic
@@ -777,26 +785,29 @@ async def _ingest_records(org_id: str,
 
     return {
         "status": "ok",
+        "job_id": job_id,
         "records_ingested":  len(records),
         "detected_columns":  detected_cols,
         "mapped_columns":    mapped_cols,
         "canonical_missing": missing,   # empty list = all key fields detected
         "industry":          industry or "",
         "stats": dag.stats(),
+        "usage": tracker.summary(),
     }
 
 
 @app.get("/leadership-ready")
-async def leadership_ready(org_id: str = Query(...)):
+async def leadership_ready(job_id: str = Query(...)):
     """
     Poll this after upload to detect when background BOD/EM enrichment is done.
     Returns board_count, exec_count, and the latest industry (updated by background task).
     Frontend polls every 10s; re-fetches /tree when counts > 0 or industry changed.
     """
-    _validate_org_id(org_id)
-    session = _SESSIONS.get(org_id)   # hot poll path — in-memory only, no disk reload
+    _validate_job_id(job_id)
+    session = _JOBS.get(job_id)   # hot poll path — in-memory only, no disk reload
     if session is None:
-        return {"ready": False, "board_count": 0, "exec_count": 0, "industry": ""}
+        return {"ready": False, "board_count": 0, "exec_count": 0, "industry": "",
+                "usage": UsageTracker().summary()}
     dag = session.dag
     board_count = 0
     exec_count  = 0
@@ -821,13 +832,15 @@ async def leadership_ready(org_id: str = Query(...)):
         "exec_count":       exec_count,
         "industry":         industry,
         "enrichment_done":  session.enrichment_done,  # True once background task finished
+        "usage":            session.usage_tracker.summary(),
     }
 
 
 @app.post("/load-demo")
-async def load_demo(org_id: str = Query(...)):
-    """Load the bundled test_data.json."""
-    db_path = _org_db_path(org_id)
+async def load_demo():
+    """Load the bundled test_data.json under a freshly minted job_id."""
+    job_id = str(uuid.uuid4())
+    db_path = _job_db_path(job_id)
     data_path = Path(__file__).parent / "test_data.json"
     if not data_path.exists():
         raise HTTPException(status_code=404, detail="test_data.json not found")
@@ -835,25 +848,29 @@ async def load_demo(org_id: str = Query(...)):
     with open(data_path) as f:
         records = json.load(f)
 
+    tracker = start_tracking()
     dag, db, classified, domain, industry = build_from_records(
         records, company_name="AutoPrime Motors", db_path=db_path
     )
-    _SESSIONS[org_id] = OrgSession(
+    _JOBS[job_id] = JobSession(
         dag=dag, db=db, classified_records=classified, enrichment_done=True,
         last_accessed_at=time.time(), db_path=db_path, company_name="AutoPrime Motors",
+        usage_tracker=tracker,
     )
     return {
         "status": "ok",
+        "job_id": job_id,
         "records_ingested": len(records),
         "stats": dag.stats(),
+        "usage": tracker.summary(),
     }
 
 
 @app.get("/debug/classified")
-def debug_classified(org_id: str = Query(...)):
+def debug_classified(job_id: str = Query(...)):
     """Return NLP classification results per person — useful for diagnosing wrong dept mappings."""
-    _validate_org_id(org_id)
-    session = _SESSIONS.get(org_id)
+    _validate_job_id(job_id)
+    session = _JOBS.get(job_id)
     if session is None or not session.classified_records:
         return {"error": "No data loaded. POST /upload first."}
     rows = []
@@ -897,7 +914,7 @@ _SENIORITY_LABELS: dict[int, str] = {
 
 @app.get("/export")
 def export_org_chart(
-    org_id:    str = Query(...),
+    job_id:    str = Query(...),
     fmt:       str = Query("csv", description="csv or json"),
     max_layer: int = Query(8,     description="Highest layer to include (6=Director, 8=Manager)"),
 ):
@@ -907,9 +924,9 @@ def export_org_chart(
     CSV columns:
       Name, Title, Category, Seniority Level, Region, Location, LinkedIn URL, Source
     """
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         raise HTTPException(status_code=404, detail="No data loaded. POST /upload first.")
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
 
     # Collect company name from root node
     root_attrs  = dag.G.nodes.get("root_global", {})
@@ -1003,16 +1020,16 @@ def export_org_chart(
 
 @app.get("/export/pptx")
 def export_pptx(
-    org_id:    str = Query(...),
+    job_id:    str = Query(...),
     max_layer: int = Query(8, description="Highest layer to include (6=Director, 8=Manager)"),
 ):
     """
     Export the full org chart as a PowerPoint presentation.
     One slide per top-level department; people arranged in seniority-band rows.
     """
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         raise HTTPException(status_code=404, detail="No data loaded. POST /upload first.")
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
 
     # Company metadata from root node
     root_attrs = dag.G.nodes.get("root_global", {})
@@ -1235,11 +1252,11 @@ def export_pptx(
 # ─────────────────────────────────────────────
 
 @app.get("/graph")
-def get_full_graph(org_id: str = Query(...)):
+def get_full_graph(job_id: str = Query(...)):
     """Return full node + edge list for the frontend renderer."""
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {**_EMPTY_GRAPH}
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
     return {
         "loaded": True,
         "nodes": dag.get_flat_nodes(),
@@ -1250,7 +1267,7 @@ def get_full_graph(org_id: str = Query(...)):
 
 @app.get("/tree")
 def get_tree(
-    org_id: str = Query(...),
+    job_id: str = Query(...),
     root: str = Query("root_global"),
     max_depth: int = Query(20),
     dept_only: bool = Query(False),
@@ -1263,9 +1280,9 @@ def get_tree(
     subtree.  Use this for large datasets (>10K people) to keep the payload
     small — people are loaded on demand via /executives.
     """
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "id": root, "children": []}
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
     tree = dag.get_subtree(root, max_depth=max_depth, dept_only=dept_only)
     if not tree:
         raise HTTPException(status_code=404, detail=f"Node '{root}' not found.")
@@ -1273,29 +1290,29 @@ def get_tree(
 
 
 @app.get("/subtree")
-def get_subtree_db(org_id: str = Query(...), root: str = Query("root_global")):
+def get_subtree_db(job_id: str = Query(...), root: str = Query("root_global")):
     """Recursive CTE from SQLite — flat list with depth."""
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "nodes": []}
-    _, db = _require_dag(org_id)
+    _, db = _require_dag(job_id)
     return db.recursive_subtree(root)
 
 
 @app.get("/search")
-def search_nodes(org_id: str = Query(...), q: str = Query(..., min_length=1)):
+def search_nodes(job_id: str = Query(...), q: str = Query(..., min_length=1)):
     """Full-text search across node labels, sectors, types."""
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "results": []}
-    _, db = _require_dag(org_id)
+    _, db = _require_dag(job_id)
     return db.search(q)
 
 
 @app.get("/stats")
-def get_stats(org_id: str = Query(...)):
-    if not _dag_loaded(org_id):
+def get_stats(job_id: str = Query(...)):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "total_nodes": 0, "total_edges": 0,
                 "people_nodes": 0, "ghost_nodes": 0, "max_depth": 0}
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
     return {"loaded": True, **dag.stats()}
 
 
@@ -1329,19 +1346,19 @@ def get_industries():
 
 
 @app.post("/reset")
-async def reset_data(org_id: str = Query(...)):
+async def reset_data(job_id: str = Query(...)):
     """Clear all loaded data for this org — including its on-disk file — and
     return to idle state.  Deleting the file (not just the session dict entry)
     matters: otherwise the next lazy reload would silently resurrect the
     "reset" org right back from disk."""
-    _validate_org_id(org_id)
-    session = _SESSIONS.pop(org_id, None)
+    _validate_job_id(job_id)
+    session = _JOBS.pop(job_id, None)
     if session is not None:
         try:
             session.db.conn.close()
         except Exception:
             pass
-    db_path = _org_db_path(org_id)
+    db_path = _job_db_path(job_id)
     if os.path.exists(db_path):
         os.remove(db_path)
     return {"status": "reset"}
@@ -1349,7 +1366,7 @@ async def reset_data(org_id: str = Query(...)):
 
 @app.get("/executives")
 def get_executives(
-    org_id: str = Query(...),
+    job_id: str = Query(...),
     dept_id: str = Query(...),
     offset: int = Query(0, ge=0),
     limit:  int = Query(200, ge=1, le=5000),
@@ -1363,9 +1380,9 @@ def get_executives(
     People are sorted most-senior first, so the first page always contains
     the highest-layer executives.
     """
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "executives": [], "count": 0, "total": 0}
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
     if dept_id not in dag.G:
         raise HTTPException(status_code=404, detail=f"Node '{dept_id}' not found.")
 
@@ -2508,15 +2525,15 @@ async def get_change_reports():
 
 
 @app.get("/company")
-async def get_loaded_company(org_id: str = Query(...)):
+async def get_loaded_company(job_id: str = Query(...)):
     """Return the company currently loaded for this org.
 
     Frontend calls this before PPTX export to confirm the backend holds the
     same dataset as what the user is viewing (prevents exporting stale/wrong data).
     """
-    if not _dag_loaded(org_id):
+    if not _dag_loaded(job_id):
         return {"loaded": False, "company": None, "people": 0}
-    dag, _ = _require_dag(org_id)
+    dag, _ = _require_dag(job_id)
     root   = dag.G.nodes.get("root_global", {})
     company = root.get("label") or "Unknown"
     people  = sum(1 for _, a in dag.G.nodes(data=True) if a.get("node_type") == "person")

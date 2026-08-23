@@ -660,6 +660,10 @@ def _gemini_discover_leadership_urls(
                 continue
 
             data = resp.json()
+            um = data.get("usageMetadata", {})
+            from usage_tracker import record_usage
+            record_usage("gemini", _GEMINI_MODEL,
+                          um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
             for candidate in data.get("candidates", []):
                 # Collect generated text (may already list names + titles)
                 parts = candidate.get("content", {}).get("parts", [])
@@ -742,6 +746,10 @@ def _gemini_search_linkedin_batch(
             return {}
 
         data = resp.json()
+        um = data.get("usageMetadata", {})
+        from usage_tracker import record_usage
+        record_usage("gemini", _GEMINI_MODEL,
+                      um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
         result: dict[str, str] = {}
 
         for candidate in data.get("candidates", []):
@@ -923,6 +931,10 @@ def _gemini_fetch_leadership(
             return {}
 
         data = resp.json()
+        um = data.get("usageMetadata", {})
+        from usage_tracker import record_usage
+        record_usage("gemini", _GEMINI_MODEL,
+                      um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
         candidates = data.get("candidates", [])
         if not candidates:
             return {}
@@ -1210,7 +1222,7 @@ def _call_claude(system: str, user_msg: str, label: str,
     _MODEL_CANDIDATES = [
         "claude-haiku-4-5-20251001",       # Claude Haiku 4.5 dated
         "claude-haiku-4-5",                # Claude Haiku 4.5 latest alias
-        "claude-3-5-haiku-20241022",       # Claude 3.5 Haiku (always works)
+        # claude-3-5-haiku-20241022 retired 2026-02-19 — no longer callable, removed.
     ]
     try:
         import anthropic
@@ -1232,6 +1244,9 @@ def _call_claude(system: str, user_msg: str, label: str,
                 logger.debug("Model %s failed: %s — trying next", model_id, _me)
         if response is None:
             raise last_exc or RuntimeError("All Claude models failed")
+        from usage_tracker import record_usage
+        record_usage("anthropic", model_id,
+                      response.usage.input_tokens, response.usage.output_tokens)
         raw = response.content[0].text.strip()
 
         # Strip markdown code fences if the model added them

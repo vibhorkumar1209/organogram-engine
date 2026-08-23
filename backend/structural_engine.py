@@ -7,6 +7,7 @@ Supports recursive CTE-style drill-down queries.
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import uuid
