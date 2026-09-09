@@ -989,6 +989,14 @@ def _gemini_fetch_leadership(
 # ─────────────────────────────────────────────────────────────────────────────
 
 _LEADERSHIP_CACHE: dict[str, dict] = {}
+_LEADERSHIP_CACHE_MAX = 500  # entries hold full board/exec lists — cap tighter
+                             # than the industry cache to bound long-run memory.
+
+
+def _cache_leadership(key: str, value: dict) -> None:
+    if key not in _LEADERSHIP_CACHE and len(_LEADERSHIP_CACHE) >= _LEADERSHIP_CACHE_MAX:
+        _LEADERSHIP_CACHE.pop(next(iter(_LEADERSHIP_CACHE)))  # drop oldest (dict insertion order)
+    _LEADERSHIP_CACHE[key] = value
 
 
 def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
@@ -1030,7 +1038,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         result = _gemini_fetch_leadership(company_name, domain, gemini_key)
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
-            _LEADERSHIP_CACHE[cache_key] = result
+            _cache_leadership(cache_key, result)
             return result
         logger.info("Gemini returned no leaders for '%s' — falling back to Wikipedia", company_name)
     else:
@@ -1056,7 +1064,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
-            _LEADERSHIP_CACHE[cache_key] = result
+            _cache_leadership(cache_key, result)
             return result
 
     # ── No result — don't cache so next upload can retry ─────────────────────

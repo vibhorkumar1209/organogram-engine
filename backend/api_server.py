@@ -3,6 +3,7 @@ Universal Organogram Engine - FastAPI Server
 Provides REST endpoints for the React frontend.
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -308,6 +309,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def _init_history_store():
     history_store.init_schema()
+    asyncio.create_task(_sweep_stale_jobs_loop())
 
 
 _ROSTER_KEYS = ("records", "items", "data", "results",
@@ -456,14 +458,45 @@ _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
                           "people_nodes": 0, "ghost_nodes": 0, "max_depth": 0}}
 
 
-def _evict_if_stale(job_id: str) -> None:
-    session = _JOBS.get(job_id)
-    if session is not None and (time.time() - session.last_accessed_at) > _TTL_SECONDS:
+def _evict_job(job_id: str) -> None:
+    """Drop a job from memory and close its SQLite connection. Safe to call
+    freely: completed jobs are durably persisted in Postgres (history_store)
+    and _try_reload_job transparently rehydrates on next access, so this
+    only affects RAM, never data."""
+    session = _JOBS.pop(job_id, None)
+    if session is not None:
         try:
             session.db.conn.close()
         except Exception:
             pass
-        del _JOBS[job_id]
+
+
+def _evict_if_stale(job_id: str) -> None:
+    session = _JOBS.get(job_id)
+    if session is not None and (time.time() - session.last_accessed_at) > _TTL_SECONDS:
+        _evict_job(job_id)
+
+
+_SWEEP_INTERVAL_SECONDS = int(os.environ.get("ORGANOGRAM_SWEEP_MINUTES", "30")) * 60
+
+
+async def _sweep_stale_jobs_loop() -> None:
+    """Background task: evicts stale jobs proactively rather than waiting
+    for someone to happen to re-request that exact job_id. Without this,
+    a job nobody ever revisits sits in memory for the process's entire
+    lifetime — the actual cause of the OOM restart this was added for."""
+    while True:
+        await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
+        try:
+            now = time.time()
+            stale = [jid for jid, s in _JOBS.items() if (now - s.last_accessed_at) > _TTL_SECONDS]
+            for jid in stale:
+                _evict_job(jid)
+            if stale:
+                logger.info("Background sweep evicted %d stale job(s), %d remain in memory",
+                            len(stale), len(_JOBS))
+        except Exception as exc:
+            logger.warning("Background job sweep failed: %s", exc)
 
 
 def _dag_from_snapshot(snapshot: dict) -> "OrganogramDAG | None":
@@ -1412,12 +1445,7 @@ async def reset_data(job_id: str = Query(...)):
     matters: otherwise the next lazy reload would silently resurrect the
     "reset" org right back from disk."""
     _validate_job_id(job_id)
-    session = _JOBS.pop(job_id, None)
-    if session is not None:
-        try:
-            session.db.conn.close()
-        except Exception:
-            pass
+    _evict_job(job_id)
     db_path = _job_db_path(job_id)
     if os.path.exists(db_path):
         os.remove(db_path)

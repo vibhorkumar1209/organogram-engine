@@ -215,6 +215,14 @@ def _llm_classify(company_name: str, context: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _INDUSTRY_CACHE: dict[str, str] = {}
+_INDUSTRY_CACHE_MAX = 2000  # small per-entry (a label string) but unbounded growth
+                            # over a long-lived process still adds up — cap it.
+
+
+def _cache_industry(key: str, value: str) -> None:
+    if key not in _INDUSTRY_CACHE and len(_INDUSTRY_CACHE) >= _INDUSTRY_CACHE_MAX:
+        _INDUSTRY_CACHE.pop(next(iter(_INDUSTRY_CACHE)))  # drop oldest (dict insertion order)
+    _INDUSTRY_CACHE[key] = value
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +258,7 @@ def classify_industry(company_name: str, email_domain: str = "",
         # Background task will run full classification and update if needed.
         industry = _llm_classify(company_name, "")
         if industry:
-            _INDUSTRY_CACHE[cache_key] = industry
+            _cache_industry(cache_key, industry)
         return industry
 
     # ── Step 1: web search ───────────────────────────────────────────────
@@ -274,5 +282,5 @@ def classify_industry(company_name: str, email_domain: str = "",
 
     industry = _llm_classify(company_name, context)
 
-    _INDUSTRY_CACHE[cache_key] = industry
+    _cache_industry(cache_key, industry)
     return industry
