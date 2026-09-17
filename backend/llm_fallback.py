@@ -1323,9 +1323,25 @@ def _gemini_fetch_leadership(
         t for t in (grounded_text, discovered_page_text) if t
     )
 
+    # Built once so every exit path — including the failures — is observable.
+    harvest_info = {
+        "pages":           len(harvester.fetched),
+        "canonical":       len(harvester.canonical_urls),
+        "chars":           len(discovered_page_text),
+        "canonical_chars": len(canonical_text),
+        "grounded_chars":  len(grounded_text),
+        "deadline_hit":    harvester._expired,
+        "urls":            harvester.fetched[:40],
+    }
+
     if not combined_text:
-        logger.warning("Gemini Phase A returned no content for '%s'", company_name)
-        return {}
+        # Nothing fetched AND nothing grounded: usually the site refused us
+        # (WAF/rate limit) rather than a bug. Without this the caller saw a
+        # bare {} and had no way to tell those apart.
+        logger.warning("Gemini Phase A returned no content for '%s' (harvest: %s)",
+                       company_name, harvest_info)
+        return {"board": [], "executives": [], "_harvest": harvest_info,
+                "_error": "no_content_harvested"}
 
     logger.info(
         "Gemini Phase A for '%s': %d chars grounded + %d chars scraped",
@@ -1359,20 +1375,16 @@ def _gemini_fetch_leadership(
     partials.extend(_corroborate_canonical(company_name, canonical_text))
 
     if not partials:
-        return {}
+        logger.warning("No extraction succeeded for '%s' (harvest: %s)",
+                       company_name, harvest_info)
+        return {"board": [], "executives": [], "_harvest": harvest_info,
+                "_error": "no_extraction"}
 
     result = _merge_leadership(partials)
     result = _resolve_stale(result, canonical_text)
     _strip_internal_fields(result)
     # Diagnostics for /debug-leadership — consumers read board/executives only.
-    result["_harvest"] = {
-        "pages":          len(harvester.fetched),
-        "canonical":      len(harvester.canonical_urls),
-        "chars":          len(discovered_page_text),
-        "canonical_chars": len(canonical_text),
-        "deadline_hit":   harvester._expired,
-        "urls":           harvester.fetched[:40],
-    }
+    result["_harvest"] = harvest_info
     logger.info(
         "Gemini Phase B merged for '%s': %d board, %d execs (%d senior)",
         company_name,
