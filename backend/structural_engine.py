@@ -2123,6 +2123,12 @@ def _inject_knowledge_leadership(
     dag.repair_governance_edges()
 
 
+# Companies given a full leadership web crawl per upload. Each one costs up to
+# 30 fetched pages and several LLM calls, so this bounds both the memory spike
+# and the enrichment time of a single upload.
+_MAX_ENRICH_COMPANIES = int(os.environ.get("ORGANOGRAM_MAX_ENRICH_COMPANIES", "5"))
+
+
 def _enrich_with_llm_leadership(
     dag: OrganogramDAG,
     classified: list,
@@ -2195,6 +2201,29 @@ def _enrich_with_llm_leadership(
         if (dag.G.nodes[n].get("node_type") == "person"
             and dag.G.nodes[n].get("metadata", {}).get("nlp_method") == "llm_leadership_ai")
     }
+
+    # ── Bound how many companies get a full web crawl ─────────────────
+    # Every company here costs a full leadership harvest (up to 30 pages and
+    # ~110 KB held in memory, plus several LLM calls). A roster whose Company
+    # column lists each person's previous employer would kick off dozens of
+    # crawls for one chart — slow, expensive, and the largest memory spike a
+    # single upload can produce. The declared company always goes first; the
+    # rest are ordered by how many people they account for.
+    if len(companies) > _MAX_ENRICH_COMPANIES:
+        from collections import Counter
+        headcount = Counter(
+            (getattr(rec, "company", "") or "").strip() for rec in classified
+        )
+        ranked = sorted(
+            companies.items(),
+            key=lambda kv: (kv[0] != company_name.strip(), -headcount.get(kv[0], 0)),
+        )
+        skipped = len(companies) - _MAX_ENRICH_COMPANIES
+        companies = dict(ranked[:_MAX_ENRICH_COMPANIES])
+        logger.info(
+            "Enriching top %d of %d companies by headcount (skipped %d) for '%s'",
+            _MAX_ENRICH_COMPANIES, _MAX_ENRICH_COMPANIES + skipped, skipped, company_name,
+        )
 
     for co, ctx in companies.items():
         leadership = llm_fetch_leadership(co, domain=domain if co == company_name else "")

@@ -260,17 +260,13 @@ kept = L._resolve_stale(maersk, "vincent clerc chief executive officer robert er
 ok(len(kept) == 5, f"unit: all 5 Maersk executives kept (got {len(kept)})")
 
 # ── 8. harvester: JS shell WITH embedded data is kept, empty shell dropped ───
-class _Resp:
-    def __init__(self, text): self.status_code, self.text = 200, text
 shell_with_data = ('<div id="root"></div><script id="__NEXT_DATA__" type="application/json">'
                    + json.dumps({"board": [{"name": "Ana Silva", "jobTitle": "Chair"}]})
                    + "</script>")
 empty_shell = '<html><body><div id="root"></div></body></html>'
 pages = {"https://a.com/led": shell_with_data, "https://a.com/empty": empty_shell}
-L.httpx = types.SimpleNamespace()  # not used; patch the import site instead
-import httpx as _real_httpx
-_orig_get = _real_httpx.get
-_real_httpx.get = lambda url, **kw: _Resp(pages.get(url, ""))
+_orig_get_bounded = L._get_bounded
+L._get_bounded = lambda url, timeout=6: pages.get(url)
 try:
     h = L._Harvester()
     got_data = h.fetch("https://a.com/led")
@@ -282,7 +278,32 @@ try:
     h.chars = L._MAX_HARVEST_CHARS
     ok(h.exhausted, "harvester: budget enforced")
 finally:
-    _real_httpx.get = _orig_get
+    L._get_bounded = _orig_get_bounded
+
+# ── 9. page-size cap keeps one huge page from blowing up memory ─────────────
+ok(L._MAX_PAGE_BYTES > 0, "page cap: configured")
+_calls = {}
+def _fake_stream(method, url, **kw):
+    class _R:
+        status_code = 200
+        headers = {"content-type": "text/html", "content-length": str(kw.pop("_len", 0))}
+        encoding = "utf-8"
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def iter_bytes(self):
+            # 4 MB body, streamed in 256 KB chunks
+            for _ in range(16):
+                yield b"x" * (256 * 1024)
+    _calls["n"] = _calls.get("n", 0) + 1
+    return _R()
+import httpx as _hx
+_orig_stream = _hx.stream
+_hx.stream = _fake_stream
+try:
+    ok(L._get_bounded("https://big.example/page") is None,
+       "page cap: 4 MB body refused before it is decoded")
+finally:
+    _hx.stream = _orig_stream
 
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

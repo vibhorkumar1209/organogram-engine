@@ -679,6 +679,54 @@ def _is_archival(url: str) -> bool:
     return bool(_ARCHIVAL_URL_RE.search(urlparse(url).path))
 
 
+_MAX_PAGE_BYTES = int(os.environ.get("ORGANOGRAM_MAX_PAGE_KB", "2048")) * 1024
+
+
+def _get_bounded(url: str, timeout: int = 6) -> str | None:
+    """
+    GET a page, refusing to hold more than _MAX_PAGE_BYTES of it in memory.
+
+    resp.text on an unbounded response is only the first copy — _strip_html,
+    _extract_js_data and _extract_attr_names each scan the whole string and
+    the re.sub chains allocate more. One oversized page could therefore cost
+    many times its own size. Streaming lets us stop reading instead.
+
+    Returns the decoded HTML, or None when the page is unusable (non-HTML,
+    non-200, or over the cap).
+    """
+    import httpx
+
+    with httpx.stream("GET", url, headers=_FETCH_HEADERS, timeout=timeout,
+                      follow_redirects=True) as resp:
+        if resp.status_code != 200:
+            return None
+        ctype = resp.headers.get("content-type", "").lower()
+        if ctype and "html" not in ctype and "xml" not in ctype and "json" not in ctype:
+            logger.debug("Skipping %s: content-type %s", url, ctype)
+            return None
+        declared = resp.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > _MAX_PAGE_BYTES:
+            logger.info("Skipping %s: %d bytes exceeds page cap", url, int(declared))
+            return None
+
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in resp.iter_bytes():
+            total += len(chunk)
+            if total > _MAX_PAGE_BYTES:
+                logger.info("Skipping %s: body exceeded %d-byte page cap",
+                            url, _MAX_PAGE_BYTES)
+                return None
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+
+    encoding = resp.encoding or "utf-8"
+    try:
+        return raw.decode(encoding, errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")
+
+
 class _Harvester:
     """
     Budgeted page collector shared by the static-path crawl and the
@@ -749,17 +797,14 @@ class _Harvester:
 
         self.seen.add(url)
         try:
-            resp = httpx.get(url, headers=_FETCH_HEADERS, timeout=6,
-                             follow_redirects=True)
+            html = _get_bounded(url)
         except Exception as exc:
             self.dead_hosts[host] = self.dead_hosts.get(host, 0) + 1
             logger.debug("Fetch %s: %s", url, exc)
             return False
         self.dead_hosts.pop(host, None)
-        if resp.status_code != 200:
+        if html is None:
             return False
-
-        html = resp.text
         block = _extract_page_signals(html, url)
         # A JS shell with no structured data is genuinely empty — but one that
         # ships __NEXT_DATA__ or JSON-LD carries the whole leadership roster,

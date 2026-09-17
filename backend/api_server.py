@@ -477,6 +477,47 @@ def _evict_if_stale(job_id: str) -> None:
         _evict_job(job_id)
 
 
+# A 24h TTL bounds how LONG a job stays resident but not HOW MANY are
+# resident at once. Measured cost is ~0.7 MB per 300-person job, so a busy
+# day of uploads accumulates hundreds of MB before the TTL retires any of
+# them — which is what keeps tripping Render's memory limit.
+_MAX_RESIDENT_JOBS = int(os.environ.get("ORGANOGRAM_MAX_RESIDENT_JOBS", "40"))
+
+# Upload bounds. This app charts leadership rosters — 300 executives is about
+# 50 KB and 300 rows. The old 200,000-row ceiling and the complete absence of
+# a byte limit meant one large spreadsheet could hold five copies of itself in
+# memory (raw bytes -> DataFrame -> dicts -> DataFrame -> dicts) and take the
+# whole process down. These are still ~30x more than the stated use case.
+_MAX_UPLOAD_BYTES = int(os.environ.get("ORGANOGRAM_MAX_UPLOAD_MB", "10")) * 1024 * 1024
+_MAX_ROWS         = int(os.environ.get("ORGANOGRAM_MAX_ROWS", "10000"))
+
+
+def _check_upload_size(content: bytes) -> None:
+    """Reject oversized uploads before pandas multiplies them."""
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(f"File is {len(content) / 1024 / 1024:.1f} MB; the limit is "
+                    f"{_MAX_UPLOAD_BYTES // 1024 // 1024} MB. This tool charts "
+                    f"leadership rosters — a few thousand people is well under "
+                    f"1 MB. Export just the people you want charted."),
+        )
+
+
+def _enforce_job_capacity() -> None:
+    """Evict least-recently-accessed jobs beyond the resident cap.
+
+    Safe for the same reason _evict_job is: completed jobs live in Postgres
+    and rehydrate on next access, so this costs a reload, never data.
+    """
+    if len(_JOBS) <= _MAX_RESIDENT_JOBS:
+        return
+    by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
+    for jid, _ in by_age[: len(_JOBS) - _MAX_RESIDENT_JOBS]:
+        _evict_job(jid)
+    logger.info("Job capacity: evicted down to %d resident job(s)", len(_JOBS))
+
+
 _SWEEP_INTERVAL_SECONDS = int(os.environ.get("ORGANOGRAM_SWEEP_MINUTES", "30")) * 60
 
 
@@ -539,6 +580,7 @@ def _try_reload_job(job_id: str) -> None:
                     last_accessed_at=time.time(), db_path=path,
                     company_name=getattr(restored_dag, "company_name", ""),
                 )
+                _enforce_job_capacity()
                 logger.info("Reloaded job '%s' from disk (%d nodes)",
                             job_id, restored_dag.G.number_of_nodes())
                 return
@@ -560,6 +602,7 @@ def _try_reload_job(job_id: str) -> None:
             last_accessed_at=time.time(), db_path=path,
             company_name=restored_dag.company_name,
         )
+        _enforce_job_capacity()
         logger.info("Reloaded job '%s' from Postgres history (%d nodes)",
                     job_id, restored_dag.G.number_of_nodes())
     except Exception as exc:
@@ -622,6 +665,7 @@ async def upload_file(file: UploadFile = File(...),
     When provided, the backend scrapes that domain for BOD/EM leadership data.
     """
     content = await file.read()
+    _check_upload_size(content)
     fname   = file.filename or ""
 
     try:
@@ -724,10 +768,9 @@ async def _ingest_records(records: list[dict],
     # usage_tracker.py's module docstring for why that's safe).
     tracker = start_tracking()
 
-    MAX_ROWS = 200_000
-    if len(records) > MAX_ROWS:
-        logger.warning("Upload truncated: %d → %d rows", len(records), MAX_ROWS)
-        records = records[:MAX_ROWS]
+    if len(records) > _MAX_ROWS:
+        logger.warning("Upload truncated: %d → %d rows", len(records), _MAX_ROWS)
+        records = records[:_MAX_ROWS]
 
     # ── Fix 1: always prefer org name inferred from data ────────────────
     # Data-derived name (Company col → email_domain → LinkedIn slug) beats
@@ -749,6 +792,7 @@ async def _ingest_records(records: list[dict],
         last_accessed_at=time.time(), db_path=db_path, company_name=company_name,
         usage_tracker=tracker,
     )
+    _enforce_job_capacity()
     history_store.record_job_created(job_id, company_name, "upload")
 
     # ── Sync BOD/EM injection ─────────────────────────────────────────────────
@@ -946,6 +990,7 @@ async def load_demo():
         last_accessed_at=time.time(), db_path=db_path, company_name="AutoPrime Motors",
         usage_tracker=tracker,
     )
+    _enforce_job_capacity()
     # Demo jobs are fully built synchronously (no background enrichment phase),
     # so they go straight to 'ready' — record both history_store steps here.
     history_store.record_job_created(job_id, "AutoPrime Motors", "demo")
