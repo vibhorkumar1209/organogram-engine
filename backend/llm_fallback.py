@@ -1342,6 +1342,14 @@ def _gemini_fetch_leadership(
         if partial:
             partials.append(partial)
 
+    # ── Corroboration pass over the canonical leadership pages ───────────────
+    # Gemini's synthesis is not reliably exhaustive: on 3M it returned 11, 12
+    # and 8 board members across otherwise identical runs, while every one of
+    # those directors was present in the harvest the whole time. A second
+    # model over the index pages costs little and the merge is a union, so a
+    # name either model sees survives. Off via ORGANOGRAM_CORROBORATE=0.
+    partials.extend(_corroborate_canonical(company_name, canonical_text))
+
     if not partials:
         return {}
 
@@ -1356,6 +1364,50 @@ def _gemini_fetch_leadership(
         len(result.get("senior_leadership", [])),
     )
     return result
+
+
+_CORROBORATE_MAX_CHUNKS = 3   # index pages only — bounds the added cost
+
+
+def _corroborate_canonical(company_name: str, canonical_text: str) -> list[dict]:
+    """
+    Re-extract the company's own leadership index pages with Claude.
+
+    Two models reading the same pages miss different people, and
+    _merge_leadership is a union, so anyone either model names is kept. This
+    runs only over the canonical index pages (never the whole harvest), which
+    is where the full board roster lives, so the extra cost is bounded to a
+    few Haiku calls per company.
+    """
+    if os.environ.get("ORGANOGRAM_CORROBORATE", "1") != "1":
+        return []
+    if not canonical_text or not os.environ.get("ANTHROPIC_API_KEY"):
+        return []
+
+    chunks = _chunk_for_synthesis(canonical_text)[:_CORROBORATE_MAX_CHUNKS]
+    out: list[dict] = []
+    for idx, chunk in enumerate(chunks, start=1):
+        result = _call_claude(
+            system=_SYSTEM_FROM_WEB,
+            user_msg=(
+                f"Extract the Board of Directors and Executive Management for "
+                f"{company_name}.\n"
+                f"COMPLETENESS: this is excerpt {idx} of {len(chunks)} from the "
+                f"company's own leadership pages. Extract EVERY person named — "
+                f"a page listing 12 directors must yield 12 entries.\n"
+                f"NO HALLUCINATIONS: only people explicitly named below.\n\n{chunk}"
+            ),
+            label=f"{company_name} corroborate {idx}/{len(chunks)}",
+            source_text=chunk,
+        )
+        if result.get("board") or result.get("executives"):
+            out.append(result)
+    if out:
+        logger.info("Corroboration for '%s': %d chunk(s) added %d board, %d execs",
+                    company_name, len(out),
+                    sum(len(r.get("board", [])) for r in out),
+                    sum(len(r.get("executives", [])) for r in out))
+    return out
 
 
 def _chunk_for_synthesis(text: str) -> list[str]:
