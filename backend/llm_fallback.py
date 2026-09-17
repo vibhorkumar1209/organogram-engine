@@ -1676,6 +1676,53 @@ def _loads_lenient(raw: str) -> dict | None:
     return None
 
 
+_HONORIFIC_RE = re.compile(
+    r"^(?:dr|mr|mrs|ms|miss|prof|professor|sir|dame|lord|lady|rev|hon|ing|eng)\.?\s+",
+    re.IGNORECASE,
+)
+_SUFFIX_RE = re.compile(
+    r"\s+(?:jr|sr|ii|iii|iv|phd|ph\.d|mba|cpa|cfa|md|esq|obe|cbe|mbe)\.?$",
+    re.IGNORECASE,
+)
+_NICKNAME_RE = re.compile(r'["“”\'(]([A-Za-z][\w\'-]*)["“”\')]')
+
+
+def _name_aliases(name: str) -> set[str]:
+    """
+    All first+last keys a person's name could be written under.
+
+    The same director arrives as "Dr. John Banovetz" on one page and "John
+    Banovetz" on another, or as 'William "Bill" Brown' and plain "Bill Brown" —
+    keying on the raw string puts them in the chart twice. Honorifics and
+    suffixes are stripped, and a quoted/parenthesised nickname yields a second
+    key with the nickname standing in for the given name.
+    """
+    raw = _ascii_fold(str(name or "")).strip()
+    if not raw:
+        return set()
+
+    nickname = ""
+    m = _NICKNAME_RE.search(raw)
+    if m:
+        nickname = m.group(1)
+        raw = _NICKNAME_RE.sub(" ", raw)
+
+    cleaned = _SUFFIX_RE.sub("", _HONORIFIC_RE.sub("", raw)).lower()
+    words = [w for w in re.sub(r"[^a-z ]", " ", cleaned).split() if len(w) > 1]
+    if not words:
+        return set()
+
+    def _key(parts: list[str]) -> str:
+        return f"{parts[0]} {parts[-1]}" if len(parts) >= 2 else parts[0]
+
+    aliases = {_key(words)}
+    if nickname:
+        nick = re.sub(r"[^a-z]", "", nickname.lower())
+        if nick:
+            aliases.add(_key([nick] + words[1:]) if len(words) >= 2 else nick)
+    return aliases
+
+
 def _merge_leadership(results: list[dict]) -> dict:
     """
     Union several per-chunk extractions into one, de-duplicated by person.
@@ -1685,24 +1732,29 @@ def _merge_leadership(results: list[dict]) -> dict:
     varying detail. Keep the richest version: the entry with the most populated
     fields, tie-broken by the longer (more specific) title.
     """
-    def _key(entry: dict) -> str:
-        name = _ascii_fold(str(entry.get("name", "")).lower())
-        return " ".join(re.sub(r"[^a-z ]", " ", name).split())
-
     def _score(entry: dict) -> tuple[int, int]:
         return (len([v for v in entry.values() if v]), len(str(entry.get("title", ""))))
 
     merged: dict = {}
     for section in ("board", "executives", "senior_leadership"):
-        best: dict[str, dict] = {}
+        # alias → index into `picked`, so the same person reached by any of
+        # their name forms collapses onto one entry.
+        index: dict[str, int] = {}
+        picked: list[dict] = []
         for result in results:
             for entry in result.get(section, []) or []:
-                k = _key(entry)
-                if not k:
+                aliases = _name_aliases(str(entry.get("name", "")))
+                if not aliases:
                     continue
-                if k not in best or _score(entry) > _score(best[k]):
-                    best[k] = entry
-        merged[section] = list(best.values())
+                slot = next((index[a] for a in aliases if a in index), None)
+                if slot is None:
+                    picked.append(entry)
+                    slot = len(picked) - 1
+                elif _score(entry) > _score(picked[slot]):
+                    picked[slot] = entry
+                for a in aliases:
+                    index[a] = slot
+        merged[section] = picked
 
     # Preserve the passthrough fields the flat schema carries.
     for extra in ("dual_roles", "data_gaps"):
