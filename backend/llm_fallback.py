@@ -696,6 +696,8 @@ class _Harvester:
         self.seen: set[str] = set()
         self.bio_queue: list[str] = []
         self.canonical_blocks: list[str] = []
+        self.fetched: list[str] = []          # diagnostics: what was actually read
+        self.canonical_urls: list[str] = []
         self.chars = 0
         self.deadline = time.monotonic() + _HARVEST_DEADLINE_S
         self._expired = False
@@ -773,8 +775,10 @@ class _Harvester:
         # sitemap leadership URL, a Gemini grounding hit) are the company's own
         # current-roster pages. Names appearing there are corroborated as
         # current; names found only on deeper pages are not.
+        self.fetched.append(url)
         if follow_bios:
             self.canonical_blocks.append(block)
+            self.canonical_urls.append(url)
         self.chars += len(block)
         logger.info("Harvested %s (%d chars, %d/%d pages)",
                     url, len(block), len(self.blocks), _MAX_PAGES)
@@ -1290,17 +1294,21 @@ def _gemini_fetch_leadership(
     # and extract any leadership content not captured in the grounded text.
     harvester = _Harvester()
     try:
-        # Fetch the URLs Gemini grounding discovered, following one level of
-        # bio links from each — these are usually the exact leadership pages.
+        # The company's OWN governance paths go first. They are the
+        # authoritative current roster, and when they ran second a slow site
+        # could spend the page budget and the wall-clock deadline on grounding
+        # URLs before /governance/board-of-directors was ever requested —
+        # which is how three sitting 3M directors went missing from live runs
+        # while being present in a local crawl of the same domain.
+        if domain:
+            _fetch_static_leadership(domain, harvester=harvester)
+
+        # Then the URLs Gemini grounding discovered, following one level of
+        # bio links from each — these cover sites whose paths we can't guess.
         for u in discovered_urls[:15]:
             if harvester.exhausted:
                 break
             harvester.fetch(u, follow_bios=True)
-
-        # Then the known static paths + sitemap on the company's own domain,
-        # sharing the same budget so nothing is fetched or counted twice.
-        if domain and not harvester.exhausted:
-            _fetch_static_leadership(domain, harvester=harvester)
 
         # Bios last, so every index page is captured before drilling into people
         harvester.drain_bios()
@@ -1356,6 +1364,15 @@ def _gemini_fetch_leadership(
     result = _merge_leadership(partials)
     result = _resolve_stale(result, canonical_text)
     _strip_internal_fields(result)
+    # Diagnostics for /debug-leadership — consumers read board/executives only.
+    result["_harvest"] = {
+        "pages":          len(harvester.fetched),
+        "canonical":      len(harvester.canonical_urls),
+        "chars":          len(discovered_page_text),
+        "canonical_chars": len(canonical_text),
+        "deadline_hit":   harvester._expired,
+        "urls":           harvester.fetched[:40],
+    }
     logger.info(
         "Gemini Phase B merged for '%s': %d board, %d execs (%d senior)",
         company_name,
