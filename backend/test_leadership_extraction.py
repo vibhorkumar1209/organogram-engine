@@ -205,6 +205,28 @@ ok(L._name_in_source("Mitchill, Neil", board_src), "hallu: surname-first form st
 ok(L._name_in_source("Charles Scharf", "... scharf, charles w. is ceo ..."),
    "hallu: reversed with middle initial still matches")
 
+# ── 7g. board titles describe an OUTSIDE career (real 3M directors) ─────────
+real_board = {"board": [
+    {"name": "Audrey Choi", "title": "Retired Chief Sustainability Officer and Chief Marketing Officer, Morgan Stanley"},
+    {"name": "Thomas K. Brown", "title": "Retired Group Vice President, Global Purchasing, Ford"},
+    {"name": "James R. Fitterling", "title": "Chairman and Chief Executive Officer, Dow"},
+    {"name": "Jennifer W. Rumsey", "title": "Chair, President and Chief Executive Officer, Cummins"},
+    {"name": "Pedro J. Pizarro", "title": "President and Chief Executive Officer, Edison International"},
+    {"name": "Neil G. Mitchill, Jr.", "title": "Chief Financial Officer, RTX"},
+    {"name": "Anne H. Chow", "title": "Retired Chief Executive Officer, AT&T Business"},
+], "executives": [], "senior_leadership": []}
+before = len(real_board["board"])
+after = len(L._resolve_stale(real_board, "audrey choi thomas k. brown james r. fitterling")["board"])
+ok(after == before,
+   f"board: {before} directors who each ran another company all kept (got {after})")
+
+# executives are still resolved
+ex = {"board": [], "senior_leadership": [], "executives": [
+    {"name": "Bill Brown", "title": "Chairman and CEO", "_mentions": 3},
+    {"name": "Michael Roman", "title": "Executive Chairman of the Board", "_mentions": 1}]}
+ok(len(L._resolve_stale(ex, "bill brown chairman and chief executive officer")["executives"]) == 1,
+   "exec: former Executive Chairman still dropped")
+
 # ── 8. harvester: JS shell WITH embedded data is kept, empty shell dropped ───
 class _Resp:
     def __init__(self, text): self.status_code, self.text = 200, text

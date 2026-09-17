@@ -1951,7 +1951,16 @@ def _resolve_stale(result: dict, canonical_text: str) -> dict:
         on_index = 1 if _name_in_source(str(entry.get("name", "")), canon) else 0
         return (on_index, int(entry.get("_mentions", 1)), len(str(entry.get("title", ""))))
 
-    for section in ("board", "executives", "senior_leadership"):
+    # NOT the board. A director's title describes their OUTSIDE career —
+    # "Retired Chief Sustainability Officer and Chief Marketing Officer,
+    # Morgan Stanley", "Retired Group Vice President, Ford" — so two directors
+    # who each ran a different company collide on the same role key and one
+    # gets deleted as stale. That is exactly what dropped three real 3M
+    # directors (12 merged -> 9 final) in a live run. _clean_list and
+    # _rich_to_flat already refuse to apply retirement logic to board titles
+    # for this same reason; this pass has to honour it too. Board seats are
+    # not singular roles in any case — a board has many directors.
+    for section in ("executives", "senior_leadership"):
         people = result.get(section) or []
         by_role: dict[str, list[dict]] = {}
         for person in people:
