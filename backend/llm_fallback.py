@@ -1688,12 +1688,27 @@ def _name_in_source(name: str, source_lower: str) -> bool:
     def _check(n: str, src: str) -> bool:
         if n in src:
             return True
-        parts = [p for p in n.split() if len(p) >= 2]
-        if len(parts) >= 2 and all(p in src for p in parts):
-            return True
-        surname = n.split()[-1] if n.split() else ""
-        if len(surname) >= 4 and surname in src:
-            return True
+        words = [re.sub(r"[^\w]", "", p) for p in n.split()]
+        words = [w for w in words if len(w) >= 2]
+        if not words:
+            return False
+        if len(words) == 1:
+            return words[0] in src
+
+        # Given name and surname must appear NEAR each other, not merely both
+        # somewhere in the page. Scattered-token matching let models invent a
+        # director by keeping a real first name and initial and swapping the
+        # surname ("Neil G. Mitchill" -> "Neil G. Bluhm"): every token existed
+        # somewhere on the page, so the fabrication passed. Proximity still
+        # accepts real variants — "Scharf, Charles" or "Charles W. Scharf".
+        given, surname = words[0], words[-1]
+        window = 60
+        start = src.find(surname)
+        while start != -1:
+            around = src[max(0, start - window): start + len(surname) + window]
+            if given in around:
+                return True
+            start = src.find(surname, start + 1)
         return False
 
     return _check(name_lower, source_lower) or _check(name_ascii, source_ascii)
