@@ -236,6 +236,29 @@ ok([p["name"] for p in L._clean_list([{"name": "John P.", "title": "EVP"},
                                       {"name": "Bill Brown", "title": "CEO"}])] == ["Bill Brown"],
    "name: _clean_list drops the truncated entry")
 
+# ── 7i. divisional seats are not the global seat (real Maersk titles) ───────
+for scoped in ["CEO, Maersk Ocean", "CEO of Maersk Ocean", "CFO, Terminals",
+               "CEO of Logistics & Services",
+               "President and Chief Executive Officer, Cummins",
+               "Retired Chief Marketing Officer, Morgan Stanley"]:
+    ok(L._role_keys(scoped) == set(), f"unit: divisional/outside seat not singular ({scoped})")
+for glob, exp in [("Chairman and CEO", {"ceo", "chairman"}),
+                  ("Executive Chairman of the 3M Board of Directors", {"chairman"}),
+                  ("Chairman of the Board", {"chairman"}),
+                  ("Chief Executive Officer of the Company", {"ceo"}),
+                  ("Chief Financial Officer", {"cfo"})]:
+    ok(L._role_keys(glob) == exp, f"unit: global seat still singular ({glob})")
+
+# The live Maersk conflict set must no longer collide
+maersk = {"board": [], "senior_leadership": [], "executives": [
+    {"name": "Vincent Clerc", "title": "Chief Executive Officer", "_mentions": 3},
+    {"name": "Keith Svendsen", "title": "CEO, Maersk Ocean", "_mentions": 1},
+    {"name": "Tina Revsbech", "title": "CEO of Logistics & Services", "_mentions": 1},
+    {"name": "Robert Erni", "title": "Chief Financial Officer", "_mentions": 2},
+    {"name": "Jakob Sjostrom", "title": "CFO, Terminals", "_mentions": 1}]}
+kept = L._resolve_stale(maersk, "vincent clerc chief executive officer robert erni")["executives"]
+ok(len(kept) == 5, f"unit: all 5 Maersk executives kept (got {len(kept)})")
+
 # ── 8. harvester: JS shell WITH embedded data is kept, empty shell dropped ───
 class _Resp:
     def __init__(self, text): self.status_code, self.text = 200, text

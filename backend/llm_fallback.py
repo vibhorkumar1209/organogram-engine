@@ -1925,9 +1925,40 @@ def _role_keys(title: str) -> set[str]:
     t = re.sub(r"^\s*(?:executive|senior|sr\.?|exec\.?)?\s*vice president(?:\s+and)?,?\s*",
                "", t, flags=re.IGNORECASE)
     t = re.sub(r"^\s*(?:e?vp|svp)(?:\s+and)?,?\s*", "", t, flags=re.IGNORECASE)
-    if _SCOPE_QUALIFIER_RE.search(t):
+    if _SCOPE_QUALIFIER_RE.search(t) or _has_unit_qualifier(t):
         return set()
     return {role for role, pattern in _SINGULAR_ROLES if pattern.search(t)}
+
+
+# "of the Board" / "of the Company" still describe the top seat; anything else
+# after "of" or a comma names a business unit or an outside employer.
+# Searched, not anchored: the company's own name often sits in front of the
+# scope word ("of the 3M Board of Directors", "of Maersk Group"), and those
+# are still the top seat rather than a division.
+_GLOBAL_SCOPE_RE = re.compile(
+    r"\b(?:board|company|group|corporation|organi[sz]ation|firm)\b",
+    re.IGNORECASE,
+)
+_NAME_SUFFIX_RE = re.compile(r"^(?:jr|sr|ii|iii|iv|phd|cpa|cfa|md|esq)\.?$", re.IGNORECASE)
+
+
+def _has_unit_qualifier(title: str) -> bool:
+    """
+    True when a title is scoped to a business unit or an outside employer.
+
+    "CEO, Maersk Ocean" and "CFO of Terminals" are divisional seats that
+    legitimately coexist with the group CEO and CFO — treating them as claims
+    on the single global role would delete real executives, which is the same
+    mistake that deleted real directors. "Chairman of the Board" is not scoped.
+    """
+    for tail in re.split(r",\s*", title)[1:]:
+        tail = tail.strip()
+        if tail and not _NAME_SUFFIX_RE.match(tail) and not _GLOBAL_SCOPE_RE.search(tail):
+            return True
+    m = re.search(r"\bof\s+(.+)$", title, flags=re.IGNORECASE)
+    if m and not _GLOBAL_SCOPE_RE.search(m.group(1).strip()):
+        return True
+    return False
 
 
 def _resolve_stale(result: dict, canonical_text: str) -> dict:
