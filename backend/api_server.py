@@ -31,7 +31,6 @@ try:
 except ImportError:
     pass  # python-dotenv not installed — rely on shell env
 
-import pandas as pd
 from fastapi import (BackgroundTasks, Body, FastAPI, File, HTTPException, Query,
                      Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
@@ -157,118 +156,254 @@ COLUMN_ALIASES: dict[str, str] = {
 }
 
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _table_columns(records: list[dict]) -> list[str]:
+    """Union of keys in first-seen order — what pd.DataFrame(records) produced."""
+    cols: list[str] = []
+    seen: set = set()
+    for rec in records:
+        for key in rec:
+            if key not in seen:
+                seen.add(key)
+                cols.append(key)
+    return cols
+
+
+def _isna(value) -> bool:
+    """True for a genuinely missing value — None or NaN, NOT an empty string.
+
+    pandas drew that distinction and one branch below depends on it: the
+    LinkedIn-slug company fallback fires only when the Company column is
+    entirely absent or all-NA, and a present-but-blank "" must not trigger it.
     """
-    Remap DataFrame columns to canonical schema names.
+    return value is None or (isinstance(value, float) and value != value)
+
+
+_BLANK_TOKENS = {"nan", "none", "null", "nat"}
+
+
+def _cell(value) -> str:
+    """Cell as a stripped string, with pandas' missing-value spellings blanked."""
+    if _isna(value):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in _BLANK_TOKENS else text
+
+
+def normalize_columns(records: list[dict]) -> tuple[list[dict], list[str]]:
+    """
+    Remap record keys to canonical schema names, in place on a list of dicts.
 
     Priority for name: FullName (FULL_NAME) > FirstName+LastName.
     Priority for title: Designation (JOB_TITLE) > linkedin_headline.
     Priority for company: Company > job_org_linkedin_url > email_domain.
     Priority for location/region: job_country_code > job_country > Location.
+
+    Was a pandas DataFrame transform. pandas cost ~56 MB of the 512 MB
+    instance and was used for nothing but this remap and file parsing, so it
+    now works directly on the list of dicts every caller already had.
+
+    Returns (records, columns) — columns in first-seen order, as the callers'
+    "mapped_columns" contract expects.
     """
-    # Build rename map ensuring each canonical name is claimed by at most ONE
-    # source column.  Without this guard, two source columns that both alias
-    # to e.g. "Department" would both be renamed, creating duplicate columns —
-    # and any subsequent df["Department"].str.strip() receives a DataFrame
-    # instead of a Series, raising "'DataFrame' object has no attribute 'str'".
+    if not records:
+        return records, []
+
+    cols = _table_columns(records)
+
+    # Build a rename map ensuring each canonical name is claimed by at most
+    # ONE source column, so two columns aliasing to e.g. "Department" cannot
+    # collide. Canonicals already present win.
     rename_map: dict = {}
-    already_claimed: set = set(df.columns)   # canonicals already present win
-    for col in df.columns:
+    already_claimed: set = set(cols)
+    for col in cols:
         key = re.sub(r"[^a-z0-9 _]", "", str(col).lower().strip())
         canonical = COLUMN_ALIASES.get(key)
         if canonical and canonical not in already_claimed:
             rename_map[col] = canonical
-            already_claimed.add(canonical)   # block any second column claiming it
+            already_claimed.add(canonical)
     if rename_map:
-        df = df.rename(columns=rename_map)
+        cols = [rename_map.get(c, c) for c in cols]
+        records = [
+            {rename_map.get(k, k): v for k, v in rec.items()} for rec in records
+        ]
 
-    # Safety net: drop any duplicate columns that may have survived
-    # (can happen when the Excel itself has repeated headers).
-    if df.columns.duplicated().any():
-        df = df.loc[:, ~df.columns.duplicated(keep="first")]
+    colset = set(cols)
+
+    def _add_column(name: str) -> None:
+        if name not in colset:
+            colset.add(name)
+            cols.append(name)
 
     # ── Name synthesis ────────────────────────────────────────────────
     # 1. FullName present → split into First + Last
-    if "FullName" in df.columns:
-        if "FirstName" not in df.columns or "LastName" not in df.columns:
-            parts = df["FullName"].astype(str).str.strip().str.split(n=1, expand=True)
-            if "FirstName" not in df.columns:
-                df["FirstName"] = parts[0]
-            if "LastName" not in df.columns:
-                df["LastName"] = parts[1] if parts.shape[1] > 1 else ""
+    if "FullName" in colset and ("FirstName" not in colset or "LastName" not in colset):
+        want_first = "FirstName" not in colset
+        want_last  = "LastName" not in colset
+        for rec in records:
+            parts = _cell(rec.get("FullName")).split(None, 1)
+            if want_first:
+                rec["FirstName"] = parts[0] if parts else ""
+            if want_last:
+                rec["LastName"] = parts[1] if len(parts) > 1 else ""
+        if want_first:
+            _add_column("FirstName")
+        if want_last:
+            _add_column("LastName")
     # 2. No name columns at all → try any remaining full-name-like column
-    if "FirstName" not in df.columns and "LastName" not in df.columns:
+    if "FirstName" not in colset and "LastName" not in colset:
         for alias in ["contact name", "person name", "employee name"]:
             key = re.sub(r"[^a-z0-9 ]", "", alias)
-            match = next((c for c in df.columns
-                          if re.sub(r"[^a-z0-9 ]", "", c.lower()) == key), None)
+            match = next((c for c in cols
+                          if re.sub(r"[^a-z0-9 ]", "", str(c).lower()) == key), None)
             if match:
-                parts = df[match].astype(str).str.split(n=1, expand=True)
-                df["FirstName"] = parts[0]
-                df["LastName"]  = parts[1] if parts.shape[1] > 1 else ""
+                for rec in records:
+                    parts = _cell(rec.get(match)).split(None, 1)
+                    rec["FirstName"] = parts[0] if parts else ""
+                    rec["LastName"]  = parts[1] if len(parts) > 1 else ""
+                _add_column("FirstName")
+                _add_column("LastName")
                 break
 
     # ── Title fallback: LINKEDIN_HEADLINE when JOB_TITLE is blank ────
     # Strip " at [Company]" suffix that LinkedIn appends to headlines
     # e.g. "Service Engineer at Recorders & Medicare Systems" → "Service Engineer"
-    if "linkedin_headline" in df.columns:
-        df["linkedin_headline"] = (
-            df["linkedin_headline"].astype(str)
-            .str.replace(r"\s+at\s+.+$", "", regex=True)
-            .str.strip()
-        )
-    if "Designation" in df.columns and "linkedin_headline" in df.columns:
-        mask = df["Designation"].isna() | (df["Designation"].astype(str).str.strip() == "")
-        df.loc[mask, "Designation"] = df.loc[mask, "linkedin_headline"]
-    elif "linkedin_headline" in df.columns and "Designation" not in df.columns:
-        df["Designation"] = df["linkedin_headline"]
+    if "linkedin_headline" in colset:
+        for rec in records:
+            rec["linkedin_headline"] = re.sub(
+                r"\s+at\s+.+$", "", _cell(rec.get("linkedin_headline"))
+            ).strip()
+        if "Designation" in colset:
+            for rec in records:
+                if _cell(rec.get("Designation")) == "":
+                    rec["Designation"] = rec.get("linkedin_headline", "")
+        else:
+            for rec in records:
+                rec["Designation"] = rec.get("linkedin_headline", "")
+            _add_column("Designation")
 
     # ── Company fallback: job_org_linkedin_url → slug, email_domain → domain ─
-    if "Company" not in df.columns or df["Company"].isna().all():
-        if "job_org_linkedin_url" in df.columns:
-            def _slug_to_name(url: str) -> str:
-                url = str(url or "").strip()
-                if not url:
-                    return ""
-                slug = url.rstrip("/").split("/")[-1]
-                return slug.replace("-", " ").title()
-            df["Company"] = df["job_org_linkedin_url"].apply(_slug_to_name)
-    if "Company" in df.columns:
-        mask = df["Company"].isna() | (df["Company"].astype(str).str.strip() == "")
-        if "email_domain" in df.columns:
-            df.loc[mask, "Company"] = df.loc[mask, "email_domain"].apply(
-                lambda d: str(d or "").split(".")[0].title() if d else ""
-            )
+    # The all-NA test deliberately ignores blank strings, matching the
+    # pandas isna().all() this replaced: a present-but-empty Company column
+    # does not license overwriting it from the LinkedIn slug.
+    if ("Company" not in colset
+            or all(_isna(rec.get("Company")) for rec in records)):
+        if "job_org_linkedin_url" in colset:
+            for rec in records:
+                url = str(rec.get("job_org_linkedin_url") or "").strip()
+                slug = url.rstrip("/").split("/")[-1] if url else ""
+                rec["Company"] = slug.replace("-", " ").title() if slug else ""
+            _add_column("Company")
+    if "Company" in colset and "email_domain" in colset:
+        for rec in records:
+            if _cell(rec.get("Company")) == "":
+                domain = rec.get("email_domain")
+                rec["Company"] = (
+                    str(domain or "").split(".")[0].title() if domain else ""
+                )
 
     # ── Location synthesis: city first, falling back to country ──────
     # Coalesce rather than pick a single column: vendor exports routinely
     # carry a country with a null city, and picking "city" wholesale would
     # leave those rows with no location at all.
-    if "Location" not in df.columns:
+    if "Location" not in colset:
+        have_location = False
         for col in ["job_city", "city", "job_country", "country_name"]:
-            if col not in df.columns:
+            if col not in colset:
                 continue
-            # fillna() before astype(str): on pandas' string dtype a missing
-            # value survives astype() as NaN rather than the literal "nan",
-            # so it would never match the blank checks below.
-            vals = df[col].fillna("").astype(str).str.strip().replace(
-                {"nan": "", "None": "", "none": "", "null": "", "NaT": ""}
-            )
-            if "Location" not in df.columns:
-                df["Location"] = vals
+            values = [_cell(rec.get(col)) for rec in records]
+            if not have_location:
+                for rec, val in zip(records, values):
+                    rec["Location"] = val
+                _add_column("Location")
+                have_location = True
             else:
-                blank = df["Location"] == ""
-                df.loc[blank, "Location"] = vals[blank]
+                for rec, val in zip(records, values):
+                    if rec.get("Location", "") == "":
+                        rec["Location"] = val
 
     # ── Industry fallback: LINKEDIN_INDUSTRY when Industry_Hint is blank ─
-    if "linkedin_industry" in df.columns:
-        if "Industry_Hint" not in df.columns:
-            df["Industry_Hint"] = df["linkedin_industry"]
+    if "linkedin_industry" in colset:
+        if "Industry_Hint" not in colset:
+            for rec in records:
+                rec["Industry_Hint"] = rec.get("linkedin_industry", "")
+            _add_column("Industry_Hint")
         else:
-            mask = df["Industry_Hint"].isna() | (df["Industry_Hint"].astype(str).str.strip() == "")
-            df.loc[mask, "Industry_Hint"] = df.loc[mask, "linkedin_industry"]
+            for rec in records:
+                if _cell(rec.get("Industry_Hint")) == "":
+                    rec["Industry_Hint"] = rec.get("linkedin_industry", "")
 
-    return df
+    return records, cols
+
+
+def _read_csv_bytes(content: bytes) -> tuple[list[dict], list[str]]:
+    """Parse CSV bytes into records with stdlib csv.
+
+    Two deliberate differences from the pd.read_csv this replaces, both
+    improvements: values stay strings rather than being type-inferred (pandas
+    turned an ID column containing any blank into floats, so 12345 reached the
+    pipeline as "12345.0"), and decoding tolerates stray bytes instead of
+    raising on the whole upload.
+    """
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    detected = [c for c in (reader.fieldnames or []) if c is not None]
+    records: list[dict] = []
+    for row in reader:
+        # restkey None collects extra cells on ragged rows; drop it.
+        row.pop(None, None)
+        records.append({k: ("" if v is None else v) for k, v in row.items()
+                        if k is not None})
+    return records, detected
+
+
+def _read_excel_bytes(content: bytes) -> tuple[list[dict], list[str]]:
+    """Parse the first worksheet with openpyxl (already a dependency).
+
+    read_only=True streams rows instead of materialising the whole sheet,
+    which matters on a 512 MB instance.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        ws = wb[wb.sheetnames[0]]
+        rows = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(rows)
+        except StopIteration:
+            return [], []
+        detected: list[str] = []
+        for idx, cell in enumerate(header_row):
+            name = "" if cell is None else str(cell).strip()
+            detected.append(name or f"Unnamed: {idx}")
+
+        records: list[dict] = []
+        for row in rows:
+            if row is None or all(c is None or str(c).strip() == "" for c in row):
+                # Deliberate change from read_excel, which KEPT blank rows and
+                # so produced a nameless person per trailing empty row — and
+                # spreadsheets people have edited are full of those.
+                continue
+            rec: dict = {}
+            for name, value in zip(detected, row):
+                rec[name] = "" if value is None else value
+            records.append(rec)
+        return records, detected
+    finally:
+        wb.close()
+
+
+def _fill_missing(records: list[dict], cols: list[str]) -> list[dict]:
+    """Give every row every column, blanking missing values.
+
+    Replaces df.where(pd.notna(df), "").to_dict(orient="records"): callers
+    downstream index these dicts by canonical key and expect the key to exist.
+    """
+    return [
+        {c: ("" if _isna(rec.get(c)) else rec.get(c, "")) for c in cols}
+        for rec in records
+    ]
+
 
 import csv
 import os
@@ -706,9 +841,8 @@ def canonicalise_records(records: list[dict]) -> tuple[list[dict], list[str], li
     if not records:
         return [], [], []
     detected_cols = list(records[0].keys())
-    df = normalize_columns(pd.DataFrame(records))
-    mapped_cols = list(df.columns)
-    return df.where(pd.notna(df), "").to_dict(orient="records"), detected_cols, mapped_cols
+    records, mapped_cols = normalize_columns(records)
+    return _fill_missing(records, mapped_cols), detected_cols, mapped_cols
 
 
 @app.post("/upload")
@@ -746,17 +880,13 @@ async def upload_file(file: UploadFile = File(...),
                 )
             records, detected_cols, mapped_cols = canonicalise_records(found)
         elif fname.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-            detected_cols = list(df.columns)
-            df = normalize_columns(df)
-            mapped_cols = list(df.columns)
-            records = df.where(pd.notna(df), "").to_dict(orient="records")
+            raw_records, detected_cols = _read_csv_bytes(content)
+            raw_records, mapped_cols = normalize_columns(raw_records)
+            records = _fill_missing(raw_records, mapped_cols)
         elif fname.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(content))
-            detected_cols = list(df.columns)
-            df = normalize_columns(df)
-            mapped_cols = list(df.columns)
-            records = df.where(pd.notna(df), "").to_dict(orient="records")
+            raw_records, detected_cols = _read_excel_bytes(content)
+            raw_records, mapped_cols = normalize_columns(raw_records)
+            records = _fill_missing(raw_records, mapped_cols)
         else:
             raise HTTPException(status_code=400,
                                 detail="Unsupported format. Use JSON, CSV, or Excel.")
