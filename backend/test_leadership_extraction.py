@@ -227,6 +227,15 @@ ex = {"board": [], "senior_leadership": [], "executives": [
 ok(len(L._resolve_stale(ex, "bill brown chairman and chief executive officer")["executives"]) == 1,
    "exec: former Executive Chairman still dropped")
 
+# ── 7h. truncated names (a live run produced "John P." as an executive) ─────
+for bad in ["John P.", "A. B.", "Madonna", "Jane"]:
+    ok(not L._is_full_name(bad), f"name: truncated/partial rejected ({bad})")
+for good in ["Bill Brown", "Neil G. Mitchill, Jr.", "Li Wei", "J. Smith", "C. Scharf"]:
+    ok(L._is_full_name(good), f"name: real name kept ({good})")
+ok([p["name"] for p in L._clean_list([{"name": "John P.", "title": "EVP"},
+                                      {"name": "Bill Brown", "title": "CEO"}])] == ["Bill Brown"],
+   "name: _clean_list drops the truncated entry")
+
 # ── 8. harvester: JS shell WITH embedded data is kept, empty shell dropped ───
 class _Resp:
     def __init__(self, text): self.status_code, self.text = 200, text

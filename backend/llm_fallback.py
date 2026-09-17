@@ -2083,7 +2083,7 @@ def _rich_to_flat(data: dict, source_text: str = "") -> dict:
     def _board_entry(b: dict) -> dict | None:
         name = str(b.get("name") or "").strip()
         title = str(b.get("designation") or b.get("title") or "").strip()
-        if not name or not title or len(name.split()) < 2:
+        if not name or not title or not _is_full_name(name):
             return None
         # Do NOT apply _is_retired to board members — their title describes their
         # external career (e.g. "Retired CEO, SunTrust Banks"). They are active
@@ -2103,7 +2103,7 @@ def _rich_to_flat(data: dict, source_text: str = "") -> dict:
     def _exec_entry(e: dict, title_key: str = "title") -> dict | None:
         name = str(e.get("name") or "").strip()
         title = str(e.get(title_key) or "").strip()
-        if not name or not title or len(name.split()) < 2:
+        if not name or not title or not _is_full_name(name):
             return None
         if _is_retired(name, title):
             return None
@@ -2199,7 +2199,7 @@ def _call_claude(system: str, user_msg: str, label: str,
                         continue
                     name  = str(b.get("name", "") or "").strip()
                     title = str(b.get("title", "") or b.get("designation", "") or "").strip()
-                    if not name or not title or len(name.split()) < 2:
+                    if not name or not title or not _is_full_name(name):
                         continue
                     # Board members' titles describe their OTHER career
                     # (e.g. "Retired CEO, SunTrust Banks") — they are ACTIVE
@@ -2255,6 +2255,26 @@ _RETIRED_TITLE_RE = re.compile(
 )
 
 
+_INITIAL_ONLY_RE = re.compile(r"^[A-Za-z]\.?$")
+
+
+def _is_full_name(name: str) -> bool:
+    """
+    True when *name* has a real given name AND a real surname.
+
+    len(split()) >= 2 alone lets a truncated extraction through: a live run
+    produced "John P." as an executive, which renders as a person's name in
+    the org chart. A trailing initial is not a surname.
+    """
+    parts = str(name or "").split()
+    if len(parts) < 2:
+        return False
+    # Only the SURNAME must be a real word. "J. Smith" and "C. Scharf" are how
+    # plenty of sites print a real person (_name_in_source handles that form
+    # deliberately), so requiring a spelled-out given name would cost recall.
+    return not _INITIAL_ONLY_RE.match(parts[-1])
+
+
 _PLACEHOLDER_TITLES = {"unknown", "n/a", "na", "none", "-", "--", "not stated",
                        "not specified", "null", "tbd"}
 
@@ -2302,7 +2322,7 @@ def _clean_list(raw: list, is_board: bool = False) -> list[dict]:
             continue
         name  = str(item.get("name",  "") or "").strip()
         title = str(item.get("title", "") or "").strip()
-        if not name or not title or len(name.split()) < 2:
+        if not name or not title or not _is_full_name(name):
             continue
         if not is_board and _is_retired(name, title):
             logger.debug("Skipping retired/former executive: %s — %s", name, title)
