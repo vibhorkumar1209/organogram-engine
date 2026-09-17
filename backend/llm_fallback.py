@@ -1697,16 +1697,20 @@ def _name_aliases(name: str) -> set[str]:
     suffixes are stripped, and a quoted/parenthesised nickname yields a second
     key with the nickname standing in for the given name.
     """
-    raw = _ascii_fold(str(name or "")).strip()
-    if not raw:
+    original = str(name or "").strip()
+    if not original:
         return set()
 
+    # Nickname FIRST, on the unfolded string: _ascii_fold drops curly quotes
+    # entirely, so folding before this turns William “Bill” Brown into the
+    # three-word "William Bill Brown" and the nickname is lost.
     nickname = ""
-    m = _NICKNAME_RE.search(raw)
+    m = _NICKNAME_RE.search(original)
     if m:
         nickname = m.group(1)
-        raw = _NICKNAME_RE.sub(" ", raw)
+        original = _NICKNAME_RE.sub(" ", original)
 
+    raw = _ascii_fold(original).strip()
     cleaned = _SUFFIX_RE.sub("", _HONORIFIC_RE.sub("", raw)).lower()
     words = [w for w in re.sub(r"[^a-z ]", " ", cleaned).split() if len(w) > 1]
     if not words:
@@ -1721,6 +1725,35 @@ def _name_aliases(name: str) -> set[str]:
         if nick:
             aliases.add(_key([nick] + words[1:]) if len(words) >= 2 else nick)
     return aliases
+
+
+def _prefix_match(aliases: set[str], index: dict[str, int]) -> int | None:
+    """
+    Find an already-seen person whose surname matches and whose given name is a
+    shortening of this one — "Chris Goralski" is "Christian Goralski".
+
+    Unquoted nicknames carry no marker to key on, so this is the only way to
+    collapse them. Requires the shorter given name to be at least 3 characters
+    and a true prefix, which keeps distinct people (Ana / Anabel would merge,
+    but two leaders of one company sharing a surname and a name stem is far
+    rarer than the same person written two ways).
+    """
+    for alias in aliases:
+        parts = alias.split()
+        if len(parts) != 2:
+            continue
+        given, surname = parts
+        for known, slot in index.items():
+            kparts = known.split()
+            if len(kparts) != 2 or kparts[1] != surname:
+                continue
+            kgiven = kparts[0]
+            if given == kgiven:
+                return slot
+            short, long_ = sorted((given, kgiven), key=len)
+            if len(short) >= 3 and long_.startswith(short):
+                return slot
+    return None
 
 
 def _merge_leadership(results: list[dict]) -> dict:
@@ -1747,6 +1780,8 @@ def _merge_leadership(results: list[dict]) -> dict:
                 if not aliases:
                     continue
                 slot = next((index[a] for a in aliases if a in index), None)
+                if slot is None:
+                    slot = _prefix_match(aliases, index)
                 if slot is None:
                     picked.append(entry)
                     slot = len(picked) - 1
