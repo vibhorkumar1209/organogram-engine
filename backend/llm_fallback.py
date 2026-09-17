@@ -1372,7 +1372,10 @@ def _gemini_fetch_leadership(
     # those directors was present in the harvest the whole time. A second
     # model over the index pages costs little and the merge is a union, so a
     # name either model sees survives. Off via ORGANOGRAM_CORROBORATE=0.
-    partials.extend(_corroborate_canonical(company_name, canonical_text))
+    gemini_board = len(_merge_leadership(partials).get("board", [])) if partials else 0
+    corroborated = _corroborate_canonical(company_name, canonical_text)
+    corrob_board = len(_merge_leadership(corroborated).get("board", [])) if corroborated else 0
+    partials.extend(corroborated)
 
     if not partials:
         logger.warning("No extraction succeeded for '%s' (harvest: %s)",
@@ -1381,7 +1384,15 @@ def _gemini_fetch_leadership(
                 "_error": "no_extraction"}
 
     result = _merge_leadership(partials)
+    merged_board = len(result.get("board", []))
     result = _resolve_stale(result, canonical_text)
+    harvest_info["stages"] = {
+        "gemini_board":       gemini_board,
+        "corroborated_board": corrob_board,
+        "merged_board":       merged_board,
+        "final_board":        len(result.get("board", [])),
+        "corroboration_ran":  bool(corroborated),
+    }
     _strip_internal_fields(result)
     # Diagnostics for /debug-leadership — consumers read board/executives only.
     result["_harvest"] = harvest_info
@@ -1625,6 +1636,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
+    gemini_result: dict = {}
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -1632,6 +1644,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     if gemini_key:
         logger.info("Step 1 Gemini for '%s'", company_name)
         result = _gemini_fetch_leadership(company_name, domain, gemini_key)
+        gemini_result = result
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
             _cache_leadership(cache_key, result)
@@ -1665,7 +1678,15 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
 
     # ── No result — don't cache so next upload can retry ─────────────────────
     logger.info("No leaders found for '%s' — returning empty (not cached)", company_name)
-    return {"board": [], "executives": [], "_source": "none"}
+    empty: dict = {"board": [], "executives": [], "_source": "none"}
+    # Keep whatever the Gemini path recorded — otherwise an empty result
+    # reaches the caller with no indication of whether the site refused us,
+    # the extraction failed, or nothing was ever attempted.
+    if isinstance(gemini_result, dict):
+        for k in ("_harvest", "_error"):
+            if gemini_result.get(k) is not None:
+                empty[k] = gemini_result[k]
+    return empty
 
 
 # ─────────────────────────────────────────────────────────────────────────────
