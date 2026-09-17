@@ -679,7 +679,12 @@ def _is_archival(url: str) -> bool:
     return bool(_ARCHIVAL_URL_RE.search(urlparse(url).path))
 
 
-_MAX_PAGE_BYTES = int(os.environ.get("ORGANOGRAM_MAX_PAGE_KB", "2048")) * 1024
+# Per-page transient. The accumulated harvest (_MAX_HARVEST_CHARS, ~110 KB of
+# text) is negligible against the ~368 MB available, and pages are fetched one
+# at a time and freed — so page COUNT costs time, not memory, and is left alone
+# rather than trading away recall. This cap bounds the one real spike: a single
+# oversized page being decoded and regex-scanned several times.
+_MAX_PAGE_BYTES = int(os.environ.get("ORGANOGRAM_MAX_PAGE_KB", "1024")) * 1024
 
 
 def _get_bounded(url: str, timeout: int = 6) -> str | None:

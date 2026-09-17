@@ -75,8 +75,10 @@ finally:
 
 # ── Upload size limit ───────────────────────────────────────────────────────
 ok(A._MAX_UPLOAD_BYTES > 0 and A._MAX_ROWS > 0, "upload: bounds configured")
-ok(A._MAX_ROWS >= 10_000,
-   f"upload: row cap {A._MAX_ROWS} still >= 30x the 300-executive use case")
+ok(A._MAX_ROWS >= 1_500,
+   f"upload: row cap {A._MAX_ROWS} still >= 5x the 300-executive use case")
+ok(A._MAX_UPLOAD_BYTES <= 4 * 1024 * 1024,
+   "upload: byte cap small enough that the 5-copy parse fits 512 MB")
 
 A._check_upload_size(b"x" * 1024)          # small file: no raise
 ok(True, "upload: small file accepted")
@@ -98,6 +100,32 @@ ok(S._MAX_ENRICH_COMPANIES <= 10,
 import llm_fallback as L
 ok(L._MAX_PAGE_BYTES >= 256 * 1024, "page: cap large enough for real corporate pages")
 ok(L._MAX_PAGE_BYTES <= 8 * 1024 * 1024, "page: cap small enough to bound a spike")
+
+# ── Memory watchdog ─────────────────────────────────────────────────────────
+ok(A._RSS_SOFT_LIMIT_MB < 512, "watchdog: soft limit below the 512 MB hard ceiling")
+ok(A._RSS_SOFT_LIMIT_MB > 200, "watchdog: soft limit above the ~144 MB import baseline")
+ok(A._rss_mb() > 0, "watchdog: RSS is readable on this platform")
+
+_saved = dict(A._JOBS)
+A._JOBS.clear()
+try:
+    # Under the limit: nothing is shed.
+    for i in range(3):
+        A._JOBS[f"keep{i}"] = _make_session()
+    _orig_rss = A._rss_mb
+    A._rss_mb = lambda: 10.0
+    ok(A._shed_memory_if_needed() == 0, "watchdog: under limit is a no-op")
+    ok(len(A._JOBS) == 3, "watchdog: no jobs evicted under limit")
+
+    # Over the limit: sheds down, but never evicts the last job.
+    A._rss_mb = lambda: A._RSS_SOFT_LIMIT_MB + 50
+    shed = A._shed_memory_if_needed()
+    ok(shed > 0, f"watchdog: sheds when over limit (evicted {shed})")
+    ok(len(A._JOBS) == 1, "watchdog: keeps the most recent job usable")
+finally:
+    A._rss_mb = _orig_rss
+    A._JOBS.clear()
+    A._JOBS.update(_saved)
 
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

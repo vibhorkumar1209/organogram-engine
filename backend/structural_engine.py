@@ -2126,7 +2126,10 @@ def _inject_knowledge_leadership(
 # Companies given a full leadership web crawl per upload. Each one costs up to
 # 30 fetched pages and several LLM calls, so this bounds both the memory spike
 # and the enrichment time of a single upload.
-_MAX_ENRICH_COMPANIES = int(os.environ.get("ORGANOGRAM_MAX_ENRICH_COMPANIES", "5"))
+# Also a TIME bound, not just memory: on 0.5 CPU each company can spend up to
+# the 180s harvest deadline plus its LLM calls, so 5 companies could leave one
+# upload enriching for a quarter of an hour.
+_MAX_ENRICH_COMPANIES = int(os.environ.get("ORGANOGRAM_MAX_ENRICH_COMPANIES", "3"))
 
 
 def _enrich_with_llm_leadership(

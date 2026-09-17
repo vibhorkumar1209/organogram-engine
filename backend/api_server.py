@@ -272,6 +272,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 import csv
 import os
+import sys
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Organogram Engine API", version="1.0.0")
@@ -481,15 +482,19 @@ def _evict_if_stale(job_id: str) -> None:
 # resident at once. Measured cost is ~0.7 MB per 300-person job, so a busy
 # day of uploads accumulates hundreds of MB before the TTL retires any of
 # them — which is what keeps tripping Render's memory limit.
-_MAX_RESIDENT_JOBS = int(os.environ.get("ORGANOGRAM_MAX_RESIDENT_JOBS", "40"))
+# Sized for the actual Render instance: 512 MB RAM, 0.5 CPU. Importing the app
+# alone costs ~144 MB (pandas ~56, api_server ~42, anthropic/httpx ~18,
+# networkx ~14), so only ~368 MB is available for all request and job state.
+_MAX_RESIDENT_JOBS = int(os.environ.get("ORGANOGRAM_MAX_RESIDENT_JOBS", "12"))
 
 # Upload bounds. This app charts leadership rosters — 300 executives is about
 # 50 KB and 300 rows. The old 200,000-row ceiling and the complete absence of
 # a byte limit meant one large spreadsheet could hold five copies of itself in
 # memory (raw bytes -> DataFrame -> dicts -> DataFrame -> dicts) and take the
-# whole process down. These are still ~30x more than the stated use case.
-_MAX_UPLOAD_BYTES = int(os.environ.get("ORGANOGRAM_MAX_UPLOAD_MB", "10")) * 1024 * 1024
-_MAX_ROWS         = int(os.environ.get("ORGANOGRAM_MAX_ROWS", "10000"))
+# whole process down. 2 MB still allows ~15x the stated use case while keeping
+# that five-copy parse spike to roughly 10-20 MB of the ~368 MB available.
+_MAX_UPLOAD_BYTES = int(os.environ.get("ORGANOGRAM_MAX_UPLOAD_MB", "2")) * 1024 * 1024
+_MAX_ROWS         = int(os.environ.get("ORGANOGRAM_MAX_ROWS", "5000"))
 
 
 def _check_upload_size(content: bytes) -> None:
@@ -504,18 +509,67 @@ def _check_upload_size(content: bytes) -> None:
         )
 
 
+# Shed memory before Render's 512 MB ceiling kills the process. A count cap
+# alone can't see a transient spike (a big parse, several concurrent crawls),
+# and an OOM restart drops every in-flight request; evicting a job only costs
+# a Postgres reload on next access.
+_RSS_SOFT_LIMIT_MB = int(os.environ.get("ORGANOGRAM_RSS_SOFT_LIMIT_MB", "380"))
+
+
+def _rss_mb() -> float:
+    """Current resident set size in MB, or 0.0 when it can't be determined."""
+    try:
+        # Linux (Render): /proc/self/statm reports CURRENT rss in pages.
+        with open("/proc/self/statm", "rb") as fh:
+            pages = int(fh.read().split()[1])
+        return pages * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024)
+    except Exception:
+        pass
+    try:
+        import resource
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # macOS reports bytes, Linux kilobytes. Peak, not current — only used
+        # as a local-dev fallback where /proc is absent.
+        return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
+    except Exception:
+        return 0.0
+
+
+def _shed_memory_if_needed() -> int:
+    """Evict oldest jobs while RSS is over the soft limit. Returns count evicted."""
+    rss = _rss_mb()
+    if rss <= 0 or rss < _RSS_SOFT_LIMIT_MB:
+        return 0
+    evicted = 0
+    by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
+    for jid, _ in by_age:
+        if len(_JOBS) <= 1:
+            break   # always keep the most recent job usable
+        _evict_job(jid)
+        evicted += 1
+        if _rss_mb() < _RSS_SOFT_LIMIT_MB:
+            break
+    if evicted:
+        logger.warning(
+            "Memory watchdog: RSS %.0f MB over %d MB soft limit — evicted %d job(s), "
+            "%d resident, RSS now %.0f MB",
+            rss, _RSS_SOFT_LIMIT_MB, evicted, len(_JOBS), _rss_mb(),
+        )
+    return evicted
+
+
 def _enforce_job_capacity() -> None:
     """Evict least-recently-accessed jobs beyond the resident cap.
 
     Safe for the same reason _evict_job is: completed jobs live in Postgres
     and rehydrate on next access, so this costs a reload, never data.
     """
-    if len(_JOBS) <= _MAX_RESIDENT_JOBS:
-        return
-    by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
-    for jid, _ in by_age[: len(_JOBS) - _MAX_RESIDENT_JOBS]:
-        _evict_job(jid)
-    logger.info("Job capacity: evicted down to %d resident job(s)", len(_JOBS))
+    if len(_JOBS) > _MAX_RESIDENT_JOBS:
+        by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
+        for jid, _ in by_age[: len(_JOBS) - _MAX_RESIDENT_JOBS]:
+            _evict_job(jid)
+        logger.info("Job capacity: evicted down to %d resident job(s)", len(_JOBS))
+    _shed_memory_if_needed()
 
 
 _SWEEP_INTERVAL_SECONDS = int(os.environ.get("ORGANOGRAM_SWEEP_MINUTES", "30")) * 60
@@ -536,6 +590,9 @@ async def _sweep_stale_jobs_loop() -> None:
             if stale:
                 logger.info("Background sweep evicted %d stale job(s), %d remain in memory",
                             len(stale), len(_JOBS))
+            # Catches growth between uploads — a long crawl, or fragmentation
+            # that the per-insert check never sees because nobody uploaded.
+            _shed_memory_if_needed()
         except Exception as exc:
             logger.warning("Background job sweep failed: %s", exc)
 
