@@ -661,6 +661,24 @@ _BIO_LINK_SIGNAL = re.compile(
 )
 
 
+# Pages that describe the past, not the present. A 2019 press release names
+# its executives as current, so nothing in the text marks them as former —
+# the URL is the only reliable signal that the page is dated.
+_ARCHIVAL_URL_RE = re.compile(
+    r"/(?:news|newsroom|press|press-releases?|media|media-centre|media-center"
+    r"|blog|stories|articles?|archive|archives|events?|speeches?"
+    r"|annual-reports?|sec-filings?|earnings|quarterly-earnings"
+    r"|19\d\d|20\d\d)(?:[/-]|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_archival(url: str) -> bool:
+    """True when a URL's path marks it as dated/archived content."""
+    from urllib.parse import urlparse
+    return bool(_ARCHIVAL_URL_RE.search(urlparse(url).path))
+
+
 class _Harvester:
     """
     Budgeted page collector shared by the static-path crawl and the
@@ -677,6 +695,7 @@ class _Harvester:
         self.blocks: list[str] = []
         self.seen: set[str] = set()
         self.bio_queue: list[str] = []
+        self.canonical_blocks: list[str] = []
         self.chars = 0
         self.deadline = time.monotonic() + _HARVEST_DEADLINE_S
         self._expired = False
@@ -721,6 +740,11 @@ class _Harvester:
         if self.dead_hosts.get(host, 0) >= 2:
             return False
 
+        # Dated pages name the executives of their own era as if current.
+        if _is_archival(url):
+            logger.debug("Skipping archival URL: %s", url)
+            return False
+
         self.seen.add(url)
         try:
             resp = httpx.get(url, headers=_FETCH_HEADERS, timeout=6,
@@ -745,6 +769,12 @@ class _Harvester:
             return False
 
         self.blocks.append(block)
+        # Pages reached as a leadership INDEX (a known governance path, a
+        # sitemap leadership URL, a Gemini grounding hit) are the company's own
+        # current-roster pages. Names appearing there are corroborated as
+        # current; names found only on deeper pages are not.
+        if follow_bios:
+            self.canonical_blocks.append(block)
         self.chars += len(block)
         logger.info("Harvested %s (%d chars, %d/%d pages)",
                     url, len(block), len(self.blocks), _MAX_PAGES)
@@ -766,6 +796,10 @@ class _Harvester:
 
     def text(self) -> str:
         return "\n\n".join(self.blocks)
+
+    def canonical_text(self) -> str:
+        """Text from leadership index pages only — the current-roster evidence."""
+        return "\n\n".join(self.canonical_blocks)
 
 
 def _bio_links(html: str, base_url: str) -> list[str]:
@@ -818,7 +852,7 @@ def _bio_links(html: str, base_url: str) -> list[str]:
             and not _NAV_WORD_RE.search(anchor)
             and _slug_matches_name(parsed.path, anchor)
         ):
-            if absolute not in seen:
+            if absolute not in seen and not _is_archival(absolute):
                 seen.add(absolute)
                 out.append(absolute)
     return out
@@ -1094,7 +1128,8 @@ def _gemini_discover_leadership_urls(
                 for chunk in grounding.get("groundingChunks", []):
                     url = chunk.get("web", {}).get("uri", "")
                     if url and url not in seen:
-                        if any(kw in url.lower() for kw in _GEMINI_URL_SIGNAL):
+                        if (any(kw in url.lower() for kw in _GEMINI_URL_SIGNAL)
+                                and not _is_archival(url)):
                             seen.add(url)
                             all_urls.append(url)
                             logger.info("Gemini grounding URL for '%s': %s", company_name, url)
@@ -1270,9 +1305,11 @@ def _gemini_fetch_leadership(
         # Bios last, so every index page is captured before drilling into people
         harvester.drain_bios()
         discovered_page_text = harvester.text()
+        canonical_text = harvester.canonical_text()
     except Exception as exc:
         logger.warning("Page harvest failed for '%s': %s", company_name, exc)
         discovered_page_text = harvester.text()
+        canonical_text = harvester.canonical_text()
 
     combined_text = "\n\n[Direct website content]\n".join(
         t for t in (grounded_text, discovered_page_text) if t
@@ -1309,6 +1346,8 @@ def _gemini_fetch_leadership(
         return {}
 
     result = _merge_leadership(partials)
+    result = _resolve_stale(result, canonical_text)
+    _strip_internal_fields(result)
     logger.info(
         "Gemini Phase B merged for '%s': %d board, %d execs (%d senior)",
         company_name,
@@ -1727,6 +1766,105 @@ def _name_aliases(name: str) -> set[str]:
     return aliases
 
 
+# Roles a company has exactly one of. Two names holding one of these means one
+# of them has left — dated pages describe their own era's holder as current.
+_SINGULAR_ROLES: list[tuple[str, re.Pattern]] = [
+    ("ceo",      re.compile(r"\bchief executive officer\b|\bceo\b", re.I)),
+    ("cfo",      re.compile(r"\bchief financial officer\b|\bcfo\b", re.I)),
+    ("coo",      re.compile(r"\bchief operating officer\b|\bcoo\b", re.I)),
+    ("cto",      re.compile(r"\bchief technology officer\b|\bcto\b", re.I)),
+    ("cio",      re.compile(r"\bchief information (?:and digital )?officer\b|\bcio\b", re.I)),
+    ("chro",     re.compile(r"\bchief human resources officer\b|\bchro\b", re.I)),
+    ("cmo",      re.compile(r"\bchief marketing officer\b|\bcmo\b", re.I)),
+    ("clo",      re.compile(r"\bgeneral counsel\b|\bchief legal officer\b", re.I)),
+    ("chairman", re.compile(r"\bchair(?:man|woman|person)?\b(?!.*\bcommittee\b)", re.I)),
+]
+
+# A qualified title is not a singular role: "CEO, Australia" and "Group
+# President, Consumer" legitimately coexist with their global counterparts.
+_SCOPE_QUALIFIER_RE = re.compile(
+    r"\b(?:deputy|vice|assistant|regional|country|division|divisional|group"
+    r"|business unit|segment|interim|acting|designate|emerging|americas|europe"
+    r"|emea|apac|asia|africa|pacific|latin america|north america|china|india"
+    r"|japan|australia|brazil|canada|germany|france|uk|united states)\b",
+    re.IGNORECASE,
+)
+
+
+def _role_keys(title: str) -> set[str]:
+    """
+    Every singular global role a title claims — empty when it claims none.
+
+    A title can hold more than one ("Chairman and CEO" is both), and that
+    matters: a former Executive Chairman only conflicts with the sitting CEO
+    once the CEO's title is recognised as also claiming the chair.
+    """
+    t = str(title or "")
+    if not t:
+        return set()
+    # Strip the rank prefix FIRST — "Executive Vice President, Chief
+    # Information Officer" is the CIO, but the bare word "vice" in it would
+    # otherwise read as a scope qualifier and disqualify the whole title.
+    t = re.sub(r"^\s*(?:executive|senior|sr\.?|exec\.?)?\s*vice president(?:\s+and)?,?\s*",
+               "", t, flags=re.IGNORECASE)
+    t = re.sub(r"^\s*(?:e?vp|svp)(?:\s+and)?,?\s*", "", t, flags=re.IGNORECASE)
+    if _SCOPE_QUALIFIER_RE.search(t):
+        return set()
+    return {role for role, pattern in _SINGULAR_ROLES if pattern.search(t)}
+
+
+def _resolve_stale(result: dict, canonical_text: str) -> dict:
+    """
+    Drop office-holders contradicted by a current one.
+
+    Recall-first: nobody is removed for being absent from the canonical pages.
+    A person is dropped ONLY when someone else holds the same singular role and
+    is better evidenced — named on the company's own leadership index page,
+    corroborated across more excerpts, or described more specifically.
+
+    This is what catches a former Executive Chairman or a predecessor CIO: the
+    dated page that named them says nothing about their departure, so the only
+    signal is that the live roster names someone else in that seat.
+    """
+    if not canonical_text:
+        return result
+    canon = canonical_text.lower()
+
+    def _rank(entry: dict) -> tuple[int, int, int]:
+        on_index = 1 if _name_in_source(str(entry.get("name", "")), canon) else 0
+        return (on_index, int(entry.get("_mentions", 1)), len(str(entry.get("title", ""))))
+
+    for section in ("board", "executives", "senior_leadership"):
+        people = result.get(section) or []
+        by_role: dict[str, list[dict]] = {}
+        for person in people:
+            for role in _role_keys(person.get("title", "")):
+                by_role.setdefault(role, []).append(person)
+
+        drop: set[int] = set()
+        for role, holders in by_role.items():
+            if len(holders) < 2:
+                continue
+            best = max(holders, key=_rank)
+            for other in holders:
+                if other is best or _rank(other) == _rank(best):
+                    continue   # can't separate them — keep both rather than guess
+                drop.add(id(other))
+                logger.info("Stale: dropping %s (%s) — %s holds %s and is better evidenced",
+                            other.get("name"), other.get("title"),
+                            best.get("name"), role)
+        if drop:
+            result[section] = [p for p in people if id(p) not in drop]
+    return result
+
+
+def _strip_internal_fields(result: dict) -> None:
+    """Remove merge bookkeeping so it never reaches the DAG or the frontend."""
+    for section in ("board", "executives", "senior_leadership"):
+        for person in result.get(section) or []:
+            person.pop("_mentions", None)
+
+
 def _prefix_match(aliases: set[str], index: dict[str, int]) -> int | None:
     """
     Find an already-seen person whose surname matches and whose given name is a
@@ -1783,10 +1921,16 @@ def _merge_leadership(results: list[dict]) -> dict:
                 if slot is None:
                     slot = _prefix_match(aliases, index)
                 if slot is None:
+                    entry = dict(entry, _mentions=1)
                     picked.append(entry)
                     slot = len(picked) - 1
-                elif _score(entry) > _score(picked[slot]):
-                    picked[slot] = entry
+                else:
+                    # How many excerpts named this person — corroboration, used
+                    # to break ties when two people claim the same role.
+                    seen_count = int(picked[slot].get("_mentions", 1)) + 1
+                    if _score(entry) > _score(picked[slot]):
+                        picked[slot] = dict(entry)
+                    picked[slot]["_mentions"] = seen_count
                 for a in aliases:
                     index[a] = slot
         merged[section] = picked
