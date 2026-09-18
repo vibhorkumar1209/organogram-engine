@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import re
+import httpx
 import tempfile
 import time
 import uuid
@@ -40,6 +41,9 @@ from pydantic import BaseModel
 from structural_engine import (
     build_from_records, OrganogramDAG, OrganogramDB,
     _enrich_with_llm_leadership,
+    add_records_to_dag,
+    BOARD_DEPT,
+    EXEC_DEPT,
     _inject_knowledge_leadership,
     promote_uploaded_to_leadership,
     purge_csv_from_enriched_panels,
@@ -1683,6 +1687,267 @@ async def reset_data(job_id: str = Query(...)):
         os.remove(db_path)
     history_store.delete_job(job_id)
     return {"status": "reset"}
+
+
+# ─────────────────────────────────────────────
+# COMPANY-FIRST FLOW
+#
+# A chart now starts from company identity rather than a file: name, domain
+# and HQ location seed a Board of Directors / Executive Management search, and
+# the resulting leadership chart is what the user then fills in by selecting a
+# department or executive and ingesting a roster against it.
+# ─────────────────────────────────────────────
+
+_SAFE_URL_SCHEMES = {"http", "https"}
+
+
+class CompanyChartRequest(BaseModel):
+    company_name: str
+    domain: str = ""
+    hq_location: str = ""
+
+
+def _clean_domain(raw: str) -> str:
+    """'https://www.Acme.com/about' → 'acme.com'."""
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    value = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", value)
+    value = value.split("/")[0].split("?")[0].strip().lower()
+    return value[4:] if value.startswith("www.") else value
+
+
+@app.post("/company-chart")
+async def company_chart(payload: CompanyChartRequest,
+                        background_tasks: BackgroundTasks = None):
+    """
+    Start a chart from company identity alone — no file.
+
+    Builds an empty chart for the company, then runs the existing BOD/EM
+    leadership search against the domain in the background. Poll
+    /leadership-ready for completion, exactly as the upload path does.
+    """
+    company_name = str(payload.company_name or "").strip()
+    if len(company_name) < 2:
+        raise HTTPException(status_code=422,
+                            detail="Company name is required to start a chart.")
+    domain = _clean_domain(payload.domain)
+    hq = str(payload.hq_location or "").strip()
+
+    result = await _ingest_records([], [], [], company_name, domain, background_tasks)
+
+    # HQ location seeds the region for people the leadership search injects,
+    # and is shown on the root node.
+    job_id = result.get("job_id")
+    session = _JOBS.get(job_id) if job_id else None
+    if session is not None and "root_global" in session.dag.G.nodes:
+        meta = dict(session.dag.G.nodes["root_global"].get("metadata", {}))
+        if hq:
+            meta["hq_location"] = hq
+        if domain:
+            meta["domain"] = domain
+        session.dag.G.nodes["root_global"]["metadata"] = meta
+    result["hq_location"] = hq
+    result["domain"] = domain
+    return result
+
+
+@app.get("/selectable")
+def selectable_targets(job_id: str = Query(...)):
+    """
+    Departments and executives a roster can be ingested against.
+
+    The second stage of the flow: once BOD/EM exist, the user picks one or
+    more of these before uploading. Selection is a scope hint — the classifier
+    still decides each person's department — so this is deliberately a flat,
+    cheap listing rather than the full tree.
+    """
+    dag, _db = _require_dag(job_id)
+
+    def _parent_dept(node_id: str) -> str:
+        """A person's department comes from the edge to their dept node, not
+        from metadata — people carry designation/company, never dept_primary."""
+        for parent in dag.G.predecessors(node_id):
+            if str(dag.G.nodes[parent].get("node_type", "")).startswith("dept"):
+                return dag.G.nodes[parent].get("label", "")
+        return ""
+
+    departments, executives = [], []
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes[nid]
+        ntype = str(attrs.get("node_type", ""))
+        label = attrs.get("label", "")
+        if ntype.startswith("dept"):
+            people = sum(1 for kid in dag.G.successors(nid)
+                         if dag.G.nodes[kid].get("node_type") == "person")
+            departments.append({
+                "id": nid, "label": label, "level": ntype, "people": people,
+            })
+        elif ntype == "person":
+            dept = _parent_dept(nid)
+            if dept in (BOARD_DEPT, EXEC_DEPT):
+                executives.append({
+                    "id": nid, "label": label,
+                    "title": (attrs.get("metadata", {}) or {}).get("designation", ""),
+                    "department": dept,
+                })
+    departments.sort(key=lambda d: (d["level"], d["label"]))
+    executives.sort(key=lambda e: (e["department"], e["label"]))
+    return {"job_id": job_id, "departments": departments, "executives": executives}
+
+
+def _validate_ingest_url(url: str) -> str:
+    """Reject URLs that could make the server fetch internal resources.
+
+    The user supplies this, so it is untrusted: block non-HTTP schemes,
+    loopback/private/link-local addresses, and the cloud metadata endpoint.
+    """
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme.lower() not in _SAFE_URL_SCHEMES:
+        raise HTTPException(status_code=422,
+                            detail="Only http:// and https:// URLs can be ingested.")
+    host = parsed.hostname or ""
+    if not host:
+        raise HTTPException(status_code=422, detail="That URL has no host.")
+    if host.lower() in ("localhost", "metadata.google.internal"):
+        raise HTTPException(status_code=422, detail="That host is not allowed.")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"Could not resolve host '{host}'.")
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast):
+            raise HTTPException(
+                status_code=422,
+                detail="That URL resolves to a private address and cannot be fetched.")
+    return parsed.geturl()
+
+
+def _records_from_payload(payload) -> list[dict]:
+    """Normalise a JSON body (array, or object wrapping one) into records."""
+    found = json_records(payload)
+    if not found:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No person records found — parsed a {_describe_payload(payload)}.")
+    records, _detected, _mapped = canonicalise_records(found)
+    return records
+
+
+def _apply_ingest(job_id: str, records: list[dict], scope: list[str]) -> dict:
+    """Shared tail for every ingest source: classify, dedupe, persist."""
+    if not records:
+        raise HTTPException(status_code=422, detail="No records to ingest.")
+    if len(records) > _MAX_ROWS:
+        records = records[:_MAX_ROWS]
+
+    dag, db = _require_dag(job_id)
+    session = _JOBS[job_id]
+    industry = (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}).get("industry", "")
+
+    counts = add_records_to_dag(dag, records, session.company_name or dag.company_name,
+                                industry=industry)
+    db.upsert_dag(dag)
+    session.last_accessed_at = time.time()
+    _shed_memory_if_needed()
+
+    stats = dag.stats() if hasattr(dag, "stats") else {}
+    return {
+        "job_id": job_id,
+        "ingested": counts,
+        "scope": scope,
+        "stats": stats,
+        "usage": session.usage_tracker.summary(),
+    }
+
+
+@app.post("/ingest")
+async def ingest_into_chart(
+    job_id: str = Query(...),
+    scope: str = Query("", description="Comma-separated selected department/executive node ids"),
+    source_url: str = Query("", description="Optional URL to pull a roster from"),
+    file: UploadFile | None = File(None),
+):
+    """
+    Add a roster to an existing chart, scoped to the user's selection.
+
+    Accepts the same roster three ways: an uploaded CSV/Excel/JSON file, a
+    JSON body posted by another system, or a URL this server pulls from.
+    People already in the chart — the board members and executives the
+    leadership search found — are merged rather than duplicated.
+    """
+    _validate_job_id(job_id)
+    selected = [s for s in (scope or "").split(",") if s.strip()]
+
+    if file is not None:
+        content = await file.read()
+        _check_upload_size(content)
+        fname = (file.filename or "").lower()
+        if fname.endswith(".json"):
+            parsed = _parse_json_upload(content)
+            if parsed is None:
+                raise HTTPException(status_code=422, detail="Could not parse that file as JSON.")
+            records = _records_from_payload(parsed)
+        elif fname.endswith(".csv"):
+            raw, _detected = _read_csv_bytes(content)
+            raw, mapped = normalize_columns(raw)
+            records = _fill_missing(raw, mapped)
+        elif fname.endswith((".xlsx", ".xls")):
+            raw, _detected = _read_excel_bytes(content)
+            raw, mapped = normalize_columns(raw)
+            records = _fill_missing(raw, mapped)
+        else:
+            raise HTTPException(status_code=400,
+                                detail="Unsupported format. Use JSON, CSV, or Excel.")
+    elif source_url:
+        url = _validate_ingest_url(source_url)
+        try:
+            resp = httpx.get(url, timeout=15, follow_redirects=True)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Could not fetch that URL: {exc}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=422,
+                                detail=f"Source URL returned HTTP {resp.status_code}.")
+        if len(resp.content) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Source URL returned too much data.")
+        try:
+            records = _records_from_payload(resp.json())
+        except HTTPException:
+            raise
+        except Exception:
+            raw, _detected = _read_csv_bytes(resp.content)
+            raw, mapped = normalize_columns(raw)
+            records = _fill_missing(raw, mapped)
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a file, or source_url. POST JSON to /ingest-json instead.")
+
+    return _apply_ingest(job_id, records, selected)
+
+
+@app.post("/ingest-json")
+async def ingest_json_into_chart(
+    payload: dict | list = Body(...),
+    job_id: str = Query(...),
+    scope: str = Query("", description="Comma-separated selected department/executive node ids"),
+):
+    """
+    Add a roster to an existing chart from a JSON body.
+
+    Separate from /ingest because an operation that declares a file upload is
+    multipart, and multipart and application/json are mutually exclusive — a
+    posted JSON body cannot bind on the same route.
+    """
+    _validate_job_id(job_id)
+    selected = [s for s in (scope or "").split(",") if s.strip()]
+    return _apply_ingest(job_id, _records_from_payload(payload), selected)
 
 
 @app.get("/executives")

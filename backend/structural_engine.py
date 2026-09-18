@@ -1104,7 +1104,14 @@ class OrganogramDAG:
         # panels.  Only people injected via llm_fetch_leadership belong there.
         # True C-suite from the CSV (CEO, CFO, COO …) are allowed through so
         # they still appear in the EM panel.
-        _is_llm_injected = rec.nlp_method in ("llm_leadership_web", "llm_leadership_ai")
+        # "upload_leadership" is set by add_records_to_dag for uploaded rows
+        # whose titles _leadership_bucket recognised as genuine board or
+        # C-suite roles. The company-first flow requires those to land in the
+        # BOD/EM panels; everything else still falls through this guard to a
+        # functional department, so an ordinary roster cannot pollute them.
+        _is_llm_injected = rec.nlp_method in (
+            "llm_leadership_web", "llm_leadership_ai", "upload_leadership",
+        )
         if not _is_llm_injected:
             _fallback_dept = (
                 rec.dept_primary.strip()
@@ -2396,6 +2403,158 @@ def _enrich_with_llm_leadership(
 
     # ── Repair governance edges ───────────────────────────────────────────
     dag.repair_governance_edges()
+
+
+# ─────────────────────────────────────────────
+# INCREMENTAL INGEST  (add people to an existing chart)
+# ─────────────────────────────────────────────
+
+BOARD_DEPT = "Board of Management"
+EXEC_DEPT   = "Executive Management"
+
+
+def _person_alias_keys(name: str) -> set[str]:
+    """Dedup keys for a person, tolerant of honorifics, nicknames and suffixes.
+
+    Reuses the alias matching built for leadership merging, which already
+    collapses 'Dr. John Banovetz' / 'John Banovetz' and
+    'William "Bill" Brown' / 'Bill Brown'. Falls back to the older
+    first-two-words key if that module is unavailable.
+    """
+    try:
+        from llm_fallback import _name_aliases
+        keys = _name_aliases(name)
+        if keys:
+            return keys
+    except Exception:
+        pass
+    key = _name_key(name)
+    return {key} if key else set()
+
+
+def _leadership_bucket(title: str) -> str:
+    """Board of Management / Executive Management for a leadership title, else ''.
+
+    Implements the rule that an uploaded list containing board members or
+    C-suite executives files them under those panels rather than under a
+    functional department, while everyone else is left to the classifier.
+    """
+    if not title:
+        return ""
+    if _is_board_chairman(title) or _is_vice_chair(title) or _is_committee_chair(title):
+        return BOARD_DEPT
+    if re.search(r"\b(?:non[- ]executive director|independent director|board member"
+                 r"|director of the board|supervisory board)\b", title, re.IGNORECASE):
+        return BOARD_DEPT
+    if _is_ceo(title) or _is_csuite(title):
+        return EXEC_DEPT
+    return ""
+
+
+def _existing_person_index(dag: "OrganogramDAG") -> dict[str, str]:
+    """alias key → node id, for every person already in the chart."""
+    index: dict[str, str] = {}
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") != "person":
+            continue
+        for key in _person_alias_keys(attrs.get("label", "")):
+            index.setdefault(key, nid)
+    return index
+
+
+def add_records_to_dag(
+    dag: "OrganogramDAG",
+    records: list[dict],
+    company_name: str,
+    industry: str = "",
+) -> dict:
+    """
+    Classify *records* and add them to an EXISTING chart.
+
+    Deduplication is the point: a person already in the chart — typically a
+    board member or executive discovered from the company website — is NOT
+    added a second time. Their existing node is enriched with any detail the
+    upload carries that the web did not (LinkedIn URL, location), so the final
+    chart holds one node per person regardless of how many sources named them.
+
+    Returns counts: {"added", "merged", "board", "executives"}.
+    """
+    from inference_logic import InferenceEngine
+
+    if not records:
+        return {"added": 0, "merged": 0, "board": 0, "executives": 0}
+
+    engine = InferenceEngine(industry=industry)
+    classified = engine.classify_all(records)
+
+    # Route leadership titles to the BOD / EM panels; everyone else keeps
+    # whatever department the classifier inferred.
+    board_count = exec_count = 0
+    for rec in classified:
+        bucket = _leadership_bucket(getattr(rec, "designation", ""))
+        if bucket == BOARD_DEPT:
+            rec.dept_primary = BOARD_DEPT
+            rec.layer = 0 if _is_board_chairman(rec.designation) else 2
+            rec.nlp_method = "upload_leadership"
+            board_count += 1
+        elif bucket == EXEC_DEPT:
+            rec.dept_primary = EXEC_DEPT
+            rec.layer = 2 if _is_regional_exec(rec.designation) else 1
+            rec.nlp_method = "upload_leadership"
+            exec_count += 1
+
+    index = _existing_person_index(dag)
+    fresh, merged = [], 0
+    seen_in_batch: set[str] = set()
+
+    for rec in classified:
+        keys = _person_alias_keys(getattr(rec, "full_name", ""))
+        if not keys:
+            continue
+        hit = next((index[k] for k in keys if k in index), None)
+        if hit is not None:
+            _enrich_existing_node(dag, hit, rec)
+            merged += 1
+            continue
+        if any(k in seen_in_batch for k in keys):
+            merged += 1        # duplicate inside the uploaded file itself
+            continue
+        seen_in_batch.update(keys)
+        fresh.append(rec)
+
+    # Senior first, so ghost chains can route through real people.
+    fresh.sort(key=lambda r: r.layer)
+    for rec in fresh:
+        dag.insert_person(rec)
+        for key in _person_alias_keys(rec.full_name):
+            index.setdefault(key, rec.id)
+
+    dag.repair_governance_edges()
+    logger.info(
+        "Incremental ingest for '%s': %d added, %d merged into existing people "
+        "(%d board, %d exec titles)",
+        company_name, len(fresh), merged, board_count, exec_count,
+    )
+    return {"added": len(fresh), "merged": merged,
+            "board": board_count, "executives": exec_count}
+
+
+def _enrich_existing_node(dag: "OrganogramDAG", node_id: str, rec) -> None:
+    """Fill gaps on a node the upload matched — never overwrite existing detail."""
+    if node_id not in dag.G:
+        return
+    attrs = dag.G.nodes[node_id]
+    meta = dict(attrs.get("metadata", {}))
+    for field, key in (("linkedin_url", "linkedin_url"), ("location", "location"),
+                       ("country", "country"), ("company", "company")):
+        value = str(getattr(rec, field, "") or "").strip()
+        if value and not str(meta.get(key, "") or "").strip():
+            meta[key] = value
+    sources = set(meta.get("sources", []) or [])
+    sources.add("upload")
+    meta["sources"] = sorted(sources)
+    attrs["metadata"] = meta
 
 
 def purge_csv_from_enriched_panels(dag: "OrganogramDAG") -> int:
