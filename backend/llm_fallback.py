@@ -40,13 +40,14 @@ logger = logging.getLogger(__name__)
 # spending another few seconds crawling.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_MAX_PAGES            = int(os.environ.get("ORGANOGRAM_LEADERSHIP_MAX_PAGES",  "30"))
-_MAX_HARVEST_CHARS    = int(os.environ.get("ORGANOGRAM_LEADERSHIP_MAX_CHARS","110000"))
+_MAX_PAGES            = int(os.environ.get("ORGANOGRAM_LEADERSHIP_MAX_PAGES",  "45"))
+_MAX_HARVEST_CHARS    = int(os.environ.get("ORGANOGRAM_LEADERSHIP_MAX_CHARS","150000"))
 _PER_PAGE_CHARS       = 12_000   # per-page visible-text cap fed to the LLM
 _SYNTHESIS_CHUNK      = 18_000   # chars per Phase B synthesis call
-_MAX_SYNTHESIS_CHUNKS = 6        # hard ceiling on Phase B calls per company
+_MAX_SYNTHESIS_CHUNKS = 8        # hard ceiling on Phase B calls per company
 _MAX_BIO_LINKS        = 40       # bio/detail pages followed per company
 _HARVEST_DEADLINE_S   = int(os.environ.get("ORGANOGRAM_LEADERSHIP_DEADLINE_S", "180"))
+_INDEX_BUDGET_SHARE   = 0.55     # fraction of the char budget index pages may use
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTML UTILITIES
@@ -240,6 +241,12 @@ def _extract_json_ld(html: str) -> str:
 _PERSONISH_RE = re.compile(
     r"^[A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+){1,4}$"
 )
+_ATTR_PAIR_RE = re.compile(
+    r'\b(alt|aria-label|title|heading|subheading|eyebrow|imgalt|data-name'
+    r'|data-title|data-person|label|caption|name)\s*=\s*["\']([^"\']{3,140})["\']',
+    re.IGNORECASE,
+)
+
 _ATTR_NOISE_RE = re.compile(
     r"\b(logo|icon|banner|photo of|image|picture|thumbnail|arrow|search|menu"
     r"|close|play|video|download|linkedin|twitter|facebook)\b",
@@ -256,18 +263,34 @@ def _extract_attr_names(html: str) -> str:
     every tag, so those people were previously invisible to the extractor.
     Returns one candidate per line, or "".
     """
+    # Any tag, not just img/a/div/span: component-driven sites render people as
+    # custom elements. Abbott's leadership page is a wall of
+    # <abbott-card eyebrow="Chairman and Chief Executive Officer"
+    #              heading="Robert B. Ford "> — the entire board and executive
+    # team live in attributes, and none of it survives tag stripping.
+    # Two passes: tags first, then every attribute WITHIN each tag. A single
+    # regex over the document returns non-overlapping matches, so after it
+    # matched eyebrow= it resumed inside the same tag and never saw heading= —
+    # which is exactly where Abbott keeps the person's name.
     hits: list[str] = []
-    for m in re.finditer(
-        r'<(?:img|a|div|span)[^>]+(?:alt|aria-label|title)=["\']([^"\']{5,140})["\']',
-        html, flags=re.IGNORECASE,
-    ):
-        val = re.sub(r"\s+", " ", m.group(1)).strip()
-        if not val or _ATTR_NOISE_RE.search(val):
-            continue
-        # "Name, Title" / "Name - Title" / bare "Name"
-        head = re.split(r"\s*[,–—|]\s*|\s+-\s+", val, maxsplit=1)[0].strip()
-        if _PERSONISH_RE.match(head):
-            hits.append(val)
+    for tag in re.finditer(r"<[a-zA-Z][\w:-]*\s[^>]{0,4000}?>", html):
+        name_part, role_part = "", ""
+        for attr, val in _ATTR_PAIR_RE.findall(tag.group(0)):
+            val = re.sub(r"\s+", " ", val).strip()
+            if not val or _ATTR_NOISE_RE.search(val):
+                continue
+            head = re.split(r"\s*[,–—|]\s*|\s+-\s+", val, maxsplit=1)[0].strip()
+            if _PERSONISH_RE.match(head):
+                name_part = name_part or val
+            elif (attr.lower() in ("eyebrow", "subheading", "data-title", "caption")
+                  and len(val) < 90):
+                role_part = role_part or val
+        if name_part and role_part:
+            hits.append(f"{name_part} — {role_part}")
+        elif name_part:
+            hits.append(name_part)
+        elif role_part:
+            hits.append(role_part)
 
     seen: set[str] = set()
     out: list[str] = []
@@ -665,8 +688,14 @@ _BIO_LINK_SIGNAL = re.compile(
 # its executives as current, so nothing in the text marks them as former —
 # the URL is the only reliable signal that the page is dated.
 _ARCHIVAL_URL_RE = re.compile(
-    r"/(?:news|newsroom|press|press-releases?|media|media-centre|media-center"
-    r"|blog|stories|articles?|archive|archives|events?|speeches?"
+    # Matched anywhere inside a path segment, not just at its start: Abbott
+    # serves its newsroom under /corpnewsroom/, which an anchored pattern
+    # walked straight past — ten of those articles then consumed the entire
+    # harvest budget before the real leadership page could be drilled into.
+    r"/[^/]*(?:newsroom|press-?release|press-?room|mediacent|media-cent"
+    r"|newscent|news-cent)[^/]*(?:/|$)"
+    r"|/(?:news|press|media|blog|stories|article|articles|archive|archives"
+    r"|events?|speeches?|tag|tags|category|categories|author|authors"
     r"|annual-reports?|sec-filings?|earnings|quarterly-earnings"
     r"|19\d\d|20\d\d)(?:[/-]|$)",
     re.IGNORECASE,
@@ -752,14 +781,34 @@ class _Harvester:
         self.fetched: list[str] = []          # diagnostics: what was actually read
         self.canonical_urls: list[str] = []
         self.chars = 0
+        # Index pages get only part of the char budget; the rest is held back
+        # for individual bio pages, which is where a roster actually lives.
+        # Ten newsroom articles once consumed 107 KB of a 110 KB budget and
+        # left nothing for 34 Abbott bio pages that were already queued.
+        self.index_budget_chars = int(_MAX_HARVEST_CHARS * _INDEX_BUDGET_SHARE)
         self.deadline = time.monotonic() + _HARVEST_DEADLINE_S
         self._expired = False
         self.dead_hosts: dict[str, int] = {}   # host → consecutive connect failures
+        self.learned_prefix: str | None = None   # e.g. "/en-us"
+        self.learned_suffix: str | None = None   # e.g. ".html"
 
     @property
     def exhausted(self) -> bool:
+        # Hold back the reserve only while bio pages are actually waiting. The
+        # sitemap often yields the bio pages directly, and those are fetched as
+        # index pages — reserving unconditionally then capped the crawl at the
+        # 55% mark with nothing to spend the remainder on.
+        cap = self.index_budget_chars if self.bio_queue else _MAX_HARVEST_CHARS
+        return self._over_budget(cap)
+
+    @property
+    def fully_exhausted(self) -> bool:
+        """Budget including the slice reserved for bio pages."""
+        return self._over_budget(_MAX_HARVEST_CHARS)
+
+    def _over_budget(self, char_cap: int) -> bool:
         import time
-        if self.chars >= _MAX_HARVEST_CHARS or len(self.blocks) >= _MAX_PAGES:
+        if self.chars >= char_cap or len(self.blocks) >= _MAX_PAGES:
             return True
         # Wall-clock stop: an unresponsive site can burn the full timeout on
         # every guessed path, and this runs inside a request-scoped background
@@ -839,10 +888,38 @@ class _Harvester:
                     self.bio_queue.append(bio_url)
         return True
 
+    def path_variants(self, path: str) -> list[str]:
+        """Spellings to try for *path*, narrowed once the site's convention is known.
+
+        Guessing every locale prefix and .html spelling for every known path is
+        ~12 requests each; across the full path list that is hundreds of 404s
+        and the wall-clock deadline gone. After one path resolves, the same
+        prefix/suffix is assumed for the rest.
+        """
+        if self.learned_prefix is not None or self.learned_suffix is not None:
+            prefix = self.learned_prefix or ""
+            suffix = self.learned_suffix or ""
+            base = path if path.startswith(prefix + "/") else f"{prefix}{path}"
+            if suffix and not base.endswith((".html", ".htm", "/")):
+                base += suffix
+            return [base]
+        return _path_variants(path)
+
+    def learn_convention(self, variant: str, path: str) -> None:
+        """Remember the prefix/suffix that just worked."""
+        if self.learned_prefix is not None:
+            return
+        suffix = ".html" if variant.endswith(".html") else ""
+        trimmed = variant[: -len(suffix)] if suffix else variant
+        prefix = trimmed[: -len(path)] if path and trimmed.endswith(path) else ""
+        self.learned_prefix = prefix
+        self.learned_suffix = suffix
+        logger.info("Learned URL convention: prefix=%r suffix=%r", prefix, suffix)
+
     def drain_bios(self) -> None:
-        """Fetch queued bio/detail pages until the budget runs out."""
+        """Fetch queued bio/detail pages, spending the reserved budget."""
         fetched = 0
-        while self.bio_queue and not self.exhausted and fetched < _MAX_BIO_LINKS:
+        while self.bio_queue and not self.fully_exhausted and fetched < _MAX_BIO_LINKS:
             if self.fetch(self.bio_queue.pop(0)):
                 fetched += 1
         if fetched:
@@ -951,7 +1028,7 @@ _SITEMAP_URL_SIGNAL = {
 }
 
 
-def _sitemap_leadership_urls(domain: str, limit: int = 12) -> list[str]:
+def _sitemap_leadership_urls(domain: str, limit: int = 40) -> list[str]:
     """
     Mine the site's sitemap.xml for leadership/governance URLs.
 
@@ -1008,6 +1085,30 @@ def _sitemap_leadership_urls(domain: str, limit: int = 12) -> list[str]:
     return found[:limit]
 
 
+# Locale prefixes real corporate sites canonicalise to. Without these the
+# crawler depended on a search engine to find pages we could have guessed.
+_LOCALE_PREFIXES = ["", "/en-us", "/en-gb", "/us/en", "/en", "/global/en"]
+
+
+def _path_variants(path: str) -> list[str]:
+    """Every spelling of a leadership path worth trying, cheapest first.
+
+    Enterprise CMSes differ on two details we cannot know in advance: whether
+    pages carry a ".html" suffix (Adobe Experience Manager does — Abbott 404s
+    /about-abbott/leadership but serves /about-abbott/leadership.html) and
+    whether they sit under a locale prefix.
+    """
+    out: list[str] = []
+    for prefix in _LOCALE_PREFIXES:
+        if prefix and path.startswith(prefix + "/"):
+            continue                      # already carries this prefix
+        base = f"{prefix}{path}"
+        out.append(base)
+        if not base.endswith((".html", ".htm", "/")):
+            out.append(base + ".html")
+    return out
+
+
 def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None) -> str:
     """
     Crawl the company's own site for leadership/governance pages.
@@ -1025,19 +1126,35 @@ def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None)
 
     h = harvester or _Harvester()
 
-    # 1. Known leadership paths on www and plain domain
-    for path in _LEADERSHIP_FETCH_PATHS:
+    # 1. The sitemap first. It costs one request and names REAL urls, where
+    #    guessing costs a request per spelling and usually 404s. On Abbott it
+    #    lists every board and executive bio page directly, which no amount of
+    #    path guessing would have found (/about-abbott/leadership is a 404;
+    #    only /about-abbott/leadership.html works).
+    sitemap_hits = 0
+    for url in _sitemap_leadership_urls(domain):
         if h.exhausted:
             break
-        if not h.fetch(f"https://www.{domain}{path}", follow_bios=True):
-            h.fetch(f"https://{domain}{path}", follow_bios=True)
+        if h.fetch(url, follow_bios=True):
+            sitemap_hits += 1
 
-    # 2. Sitemap-discovered leadership URLs
-    if not h.exhausted:
-        for url in _sitemap_leadership_urls(domain):
+    # 2. Known leadership paths, across locale prefixes and .html spellings.
+    #    Skipped when the sitemap already produced a real harvest, so a site
+    #    that told us where its pages are is not then probed with hundreds of
+    #    guesses.
+    if sitemap_hits < 2:
+        for path in _LEADERSHIP_FETCH_PATHS:
             if h.exhausted:
                 break
-            h.fetch(url, follow_bios=True)
+            for variant in h.path_variants(path):
+                if h.exhausted:
+                    break
+                if h.fetch(f"https://www.{domain}{variant}", follow_bios=True):
+                    h.learn_convention(variant, path)
+                    break                 # found this path; stop trying spellings
+                if h.fetch(f"https://{domain}{variant}", follow_bios=True):
+                    h.learn_convention(variant, path)
+                    break
 
     # 3. IR subdomains (investor.company.com etc.)
     for sub in _IR_SUBDOMAINS:
@@ -1918,7 +2035,11 @@ def _name_aliases(name: str) -> set[str]:
 
     raw = _ascii_fold(original).strip()
     cleaned = _SUFFIX_RE.sub("", _HONORIFIC_RE.sub("", raw)).lower()
-    words = [w for w in re.sub(r"[^a-z ]", " ", cleaned).split() if len(w) > 1]
+    tokens = re.sub(r"[^a-z ]", " ", cleaned).split()
+    # Drop single letters (middle initials) EXCEPT a leading one: "N. Ahuja"
+    # must keep its "n" or it collapses to a surname-only key and can never be
+    # matched against "Nita Ahuja". Committee tables print directors that way.
+    words = [w for i, w in enumerate(tokens) if len(w) > 1 or i == 0]
     if not words:
         return set()
 
@@ -2097,6 +2218,12 @@ def _prefix_match(aliases: set[str], index: dict[str, int]) -> int | None:
                 return slot
             short, long_ = sorted((given, kgiven), key=len)
             if len(short) >= 3 and long_.startswith(short):
+                return slot
+            # A bare initial against a full given name, same surname:
+            # "N. Ahuja" is "Nita Ahuja". Committee tables print directors as
+            # initials while the roster prints them in full, and keying on
+            # first+last listed both as separate people.
+            if len(short) == 1 and long_.startswith(short):
                 return slot
     return None
 

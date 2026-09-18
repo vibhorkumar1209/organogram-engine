@@ -259,6 +259,66 @@ maersk = {"board": [], "senior_leadership": [], "executives": [
 kept = L._resolve_stale(maersk, "vincent clerc chief executive officer robert erni")["executives"]
 ok(len(kept) == 5, f"unit: all 5 Maersk executives kept (got {len(kept)})")
 
+# ── 7j. the Abbott failure: 4 executives found where 33 exist ───────────────
+# Abbott read 12 pages, ten of them /corpnewsroom/ articles that consumed the
+# whole harvest budget, so 34 queued bio pages were never fetched.
+for junk in ["https://www.abbott.com/en-us/corpnewsroom/tag/leadership",
+             "https://www.abbott.com/en-us/corpnewsroom/strategy-and-strength/x",
+             "https://x.com/press-room/2024/ceo", "https://x.com/media-center/story",
+             "https://x.com/en/newsroom/article"]:
+    ok(L._is_archival(junk), f"abbott: newsroom/tag page excluded ({junk.split('/')[-2]})")
+for keep in ["https://www.abbott.com/en-us/about-abbott/leadership",
+             "https://www.abbott.com/en-us/about-abbott/leadership/executive-team/robert-ford",
+             "https://www.abbott.com/investors/governance"]:
+    ok(not L._is_archival(keep), "abbott: real leadership URL kept")
+
+# Abbott 404s /about-abbott/leadership but serves /about-abbott/leadership.html,
+# and canonicalises under /en-us/. Neither spelling was ever tried.
+variants = L._path_variants("/leadership")
+ok("/leadership.html" in variants, "abbott: .html spelling tried")
+ok("/en-us/leadership" in variants, "abbott: locale prefix tried")
+ok("/en-us/leadership.html" in variants, "abbott: locale + .html tried")
+
+# Guessing every spelling for every path is hundreds of 404s, so the site's
+# convention is learned from the first hit.
+_h = L._Harvester()
+ok(len(_h.path_variants("/leadership")) > 4, "abbott: all spellings tried before one works")
+_h.learn_convention("/en-us/leadership.html", "/leadership")
+ok(_h.path_variants("/governance") == ["/en-us/governance.html"],
+   "abbott: convention learned, later paths tried once")
+
+# Names live in component attributes: <abbott-card eyebrow="Chairman and CEO"
+# heading="Robert B. Ford">. A single regex pass over the page returned
+# non-overlapping matches, so it saw eyebrow= and never heading= on that tag.
+card = ('<abbott-card color="medium" eyebrow="Chairman and Chief Executive Officer" '
+        'cardstyle="media" heading="Robert B. Ford " ctaType="arrow"></abbott-card>')
+attrs = L._extract_attr_names(card)
+ok("Robert B. Ford" in attrs, "abbott: name read from a custom element attribute")
+ok("Chief Executive Officer" in attrs, "abbott: role attribute read from the same tag")
+
+# Committee tables print directors as initials while the roster prints them in
+# full, which listed each director twice.
+merged = L._merge_leadership([
+    {"board": [{"name": "Nita Ahuja", "title": "Board of Directors"}]},
+    {"board": [{"name": "N. Ahuja", "title": "Board Member"}]},
+    {"board": [{"name": "Michelle A. Kumbier", "title": "Board of Directors"}]},
+    {"board": [{"name": "M.A. Kumbier", "title": "Board Member"}]},
+])
+ok(len(merged["board"]) == 2,
+   f"abbott: initial-form directors merged (4 entries -> {len(merged['board'])})")
+ok(L._name_aliases("N. Ahuja") == {"n ahuja"},
+   "abbott: a leading initial is kept in the alias key")
+two = L._merge_leadership([{"board": [{"name": "John Smith", "title": "Director"}]},
+                           {"board": [{"name": "Jane Smith", "title": "Director"}]}])
+ok(len(two["board"]) == 2, "abbott: different people sharing a surname stay separate")
+
+# The reserve must not strand budget when the sitemap yields bios directly.
+_h2 = L._Harvester()
+_h2.chars = _h2.index_budget_chars + 1
+ok(not _h2.exhausted, "abbott: no bios queued -> full budget usable")
+_h2.bio_queue.append("https://x.com/leadership/a")
+ok(_h2.exhausted, "abbott: bios queued -> index reserve enforced")
+
 # ── 8. harvester: JS shell WITH embedded data is kept, empty shell dropped ───
 shell_with_data = ('<div id="root"></div><script id="__NEXT_DATA__" type="application/json">'
                    + json.dumps({"board": [{"name": "Ana Silva", "jobTitle": "Chair"}]})
