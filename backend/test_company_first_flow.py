@@ -72,6 +72,11 @@ ok(meta.get("domain") == "acme.com", "company-chart: domain stored on the root n
 r = client.post("/company-chart", json={"company_name": "A", "domain": "", "hq_location": ""})
 ok(r.status_code == 422, "company-chart: rejects a company name that is too short")
 
+# No file was uploaded, so there are no columns to complain about. This warning
+# appearing on a brand-new company chart is what the live UI showed first.
+ok(body.get("canonical_missing") == [],
+   "company-chart: no missing-column warning when there is no file")
+
 # ── Stage 2: selectable targets ─────────────────────────────────────────────
 sel = client.get("/selectable", params={"job_id": job})
 ok(sel.status_code == 200, "selectable: responds for a live job")

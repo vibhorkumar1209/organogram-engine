@@ -39,6 +39,10 @@ interface HistoryRun {
   gemini_pricing_is_estimate: boolean
 }
 
+interface SelectableDept { id: string; label: string; level: string; people: number }
+interface SelectableExec { id: string; label: string; title: string; department: string }
+interface Selectable { departments: SelectableDept[]; executives: SelectableExec[] }
+
 interface HistoryEntry {
   id:          string
   companyName: string
@@ -360,6 +364,19 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
+
+  // ── Company-first flow ──────────────────────────────────────────────
+  // A chart now starts from identity (name + domain + HQ), which seeds the
+  // Board of Directors / Executive Management search. Only once that
+  // leadership chart exists does the user pick where a roster belongs.
+  const [companyName, setCompanyName]   = useState('')
+  const [hqLocation, setHqLocation]     = useState('')
+  const [selectOpen, setSelectOpen]     = useState(false)
+  const [selectable, setSelectable]     = useState<Selectable | null>(null)
+  const [selectedIds, setSelectedIds]   = useState<string[]>([])
+  const [ingestUrl, setIngestUrl]       = useState('')
+  const [ingestBusy, setIngestBusy]     = useState(false)
+  const [ingestNote, setIngestNote]     = useState('')
 
   // ── History state ──────────────────────────────────────────────────
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
@@ -854,12 +871,89 @@ export default function App() {
   }
 
   // ── File upload (CSV · JSON · Excel) ───────────────────────────────
-  const handleUpload = (file: File) =>
-    runIngest(file.name, qs => {
-      const form = new FormData()
-      form.append('file', file)
-      return apiCreate(`/upload${qs}`, { method: 'POST', body: form })
+  // ── Stage 1: start a chart from company identity ──────────────────────
+  const startCompanyChart = () => {
+    const name = companyName.trim()
+    if (name.length < 2) return
+    runIngest(name, () =>
+      apiCreate('/company-chart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: name,
+          domain: companyWebsite.trim(),
+          hq_location: hqLocation.trim(),
+        }),
+      }))
+  }
+
+  // ── Stage 2: what can a roster be attached to ─────────────────────────
+  const openSelection = async () => {
+    setSelectOpen(true)
+    setIngestNote('')
+    try {
+      const res = await apiFetch('/selectable')
+      if (res.ok) setSelectable(await res.json())
+    } catch {
+      setSelectable(null)
+    }
+  }
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
+  // ── Stage 3: ingest a roster into the existing chart ──────────────────
+  // Unlike the initial build this does not re-run the leadership search —
+  // it classifies the new people, merges anyone already in the chart, and
+  // reloads the tree.
+  const ingestIntoChart = async (label: string, send: (qs: string) => Promise<Response>) => {
+    const jobId = activeJobIdRef.current
+    if (!jobId) return
+    setIngestBusy(true)
+    setIngestNote(`Ingesting ${label}…`)
+    try {
+      const scope = selectedIds.length ? `&scope=${encodeURIComponent(selectedIds.join(','))}` : ''
+      const res = await send(`?job_id=${encodeURIComponent(jobId)}${scope}`)
+      if (!res.ok) {
+        const text = await res.text()
+        let detail = text
+        try { detail = JSON.parse(text).detail ?? text } catch {}
+        throw new Error(detail)
+      }
+      const data = await res.json()
+      const c = data.ingested ?? {}
+      setIngestNote(
+        `Added ${c.added ?? 0}` +
+        (c.merged ? `, merged ${c.merged} already in the chart` : '') +
+        '.')
+      setSelectOpen(false)
+      setSelectedIds([])
+      // Refresh the sidebar counts too — without this the People/Departments
+      // figures kept showing the pre-ingest numbers even though the chart had
+      // grown, which reads as "nothing happened".
+      if (data.stats) setStats(data.stats)
+      await loadDeptStructure(data.stats, industry, 'upload', toUsage(data.usage), jobId)
+    } catch (e: any) {
+      setIngestNote(e?.message ?? 'Ingest failed.')
+    } finally {
+      setIngestBusy(false)
+    }
+  }
+
+  const ingestFile = (file: File) =>
+    ingestIntoChart(file.name, qs => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return fetch(`${API}/ingest${qs}`, { method: 'POST', body: fd })
     })
+
+  const ingestFromUrl = () => {
+    const url = ingestUrl.trim()
+    if (!url) return
+    ingestIntoChart(url, qs =>
+      fetch(`${API}/ingest${qs}&source_url=${encodeURIComponent(url)}`, { method: 'POST' }))
+  }
 
   // ── Paste JSON ─────────────────────────────────────────────────────
   // Accepts a bare array or an object wrapping it — {"items": [...]},
@@ -880,8 +974,10 @@ export default function App() {
     }
     setJsonError('')
     setJsonDialog(false)
-    runIngest('pasted JSON', qs =>
-      apiCreate(`/upload-json${qs}`, {
+    // Pasted rosters go INTO the current chart — the company-first flow means
+    // a chart already exists by the time anyone has people to add.
+    ingestIntoChart('pasted JSON', qs =>
+      fetch(`${API}/ingest-json${qs}`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    text,
@@ -1000,7 +1096,9 @@ export default function App() {
     e.preventDefault()
     setDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file) handleUpload(file)
+    if (!file) return
+    if (activeJobIdRef.current) ingestFile(file)
+    else setStatusMsg('Enter a company name first — the chart starts from the company.')
   }
 
   // ── Embedded demo (offline fallback) ──────────────────────────────
@@ -1091,7 +1189,9 @@ export default function App() {
 
         {/* Upload */}
         <button
-          onClick={() => fileInputRef.current?.click()}
+          onClick={openSelection}
+          disabled={!activeJobIdRef.current}
+          title="Choose a department or executive, then add people to it"
           style={{
             background: '#E63946', border: 'none', borderRadius: 7,
             padding: '5px 12px', color: '#ffffff', fontSize: 11, cursor: 'pointer',
@@ -1104,19 +1204,23 @@ export default function App() {
             <polyline points="17 8 12 3 7 8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          Upload Data
+          Add People
         </button>
         <input
           ref={fileInputRef}
           type="file"
           accept=".csv,.json,.xlsx,.xls"
           style={{ display: 'none' }}
-          onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])}
+          onChange={e => {
+            const f = e.target.files?.[0]
+            e.target.value = ''            // allow re-picking the same file
+            if (f) ingestFile(f)
+          }}
         />
 
         <button
           onClick={() => { setJsonText(''); setJsonError(''); setJsonDialog(true) }}
-          title="Paste a JSON roster instead of uploading a file"
+          title="Paste a JSON roster to add people to this chart"
           style={{
             background: 'transparent', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7,
             padding: '5px 10px', color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
@@ -1485,31 +1589,75 @@ export default function App() {
             </div>
           )}
 
-          {/* Idle state */}
+          {/* Idle state — company identity starts the chart */}
           {status === 'idle' && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 16,
+              alignItems: 'center', justifyContent: 'center', gap: 14,
             }}>
-              <div style={{ fontSize: 48, opacity: 0.08, color: '#0c3649' }}>⬡</div>
-              <div style={{ color: '#627184', fontSize: 14 }}>Drop a file or click "Demo"</div>
-              {/* Company website input for BOD/EM enrichment */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <div style={{ fontSize: 40, opacity: 0.08, color: '#0c3649' }}>⬡</div>
+              <div style={{ color: '#00204d', fontSize: 15, fontWeight: 600 }}>
+                Start with the company
+              </div>
+              <div style={{ color: '#627184', fontSize: 12, maxWidth: 380, textAlign: 'center' }}>
+                We search the company’s own site for its Board of Directors and
+                Executive Management, then you choose where to add the rest.
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
                 <input
                   type="text"
-                  placeholder="Company website (optional) — e.g. morganstanley.com"
-                  value={companyWebsite}
-                  onChange={e => setCompanyWebsite(e.target.value)}
+                  autoFocus
+                  placeholder="Company name — e.g. 3M Company"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') startCompanyChart() }}
                   style={{
-                    width: 340, padding: '6px 12px',
+                    width: 360, padding: '8px 12px',
                     background: '#f5f9fb', border: '1px solid #dde8ed',
-                    borderRadius: 6, color: '#00204d', fontSize: 12,
-                    outline: 'none',
+                    borderRadius: 6, color: '#00204d', fontSize: 13, outline: 'none',
                   }}
                 />
-                <div style={{ fontSize: 11, color: '#bad4dc' }}>
-                  Used to fetch Board of Directors &amp; Executive Management from the company website
+                <input
+                  type="text"
+                  placeholder="Company domain — e.g. 3m.com"
+                  value={companyWebsite}
+                  onChange={e => setCompanyWebsite(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') startCompanyChart() }}
+                  style={{
+                    width: 360, padding: '8px 12px',
+                    background: '#f5f9fb', border: '1px solid #dde8ed',
+                    borderRadius: 6, color: '#00204d', fontSize: 13, outline: 'none',
+                  }}
+                />
+                <input
+                  type="text"
+                  placeholder="HQ location — e.g. St. Paul, Minnesota"
+                  value={hqLocation}
+                  onChange={e => setHqLocation(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') startCompanyChart() }}
+                  style={{
+                    width: 360, padding: '8px 12px',
+                    background: '#f5f9fb', border: '1px solid #dde8ed',
+                    borderRadius: 6, color: '#00204d', fontSize: 13, outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={startCompanyChart}
+                  disabled={companyName.trim().length < 2}
+                  style={{
+                    width: 386, padding: '9px 12px', marginTop: 2,
+                    background: companyName.trim().length < 2 ? '#c8d6dd' : '#E63946',
+                    border: 'none', borderRadius: 7, color: '#ffffff',
+                    fontSize: 13, fontWeight: 600,
+                    cursor: companyName.trim().length < 2 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Build Board &amp; Executive chart
+                </button>
+                <div style={{ fontSize: 11, color: '#93a7b4', textAlign: 'center' }}>
+                  Domain and HQ are optional but make the search far more accurate.
                 </div>
               </div>
             </div>
@@ -1535,6 +1683,161 @@ export default function App() {
               Click the org › to expand departments&nbsp;·&nbsp;
               Click a department › to view executives&nbsp;·&nbsp;
               Scroll / pinch to zoom
+            </div>
+          )}
+
+          {/* Add-people panel: pick a scope, then choose a source */}
+          {selectOpen && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(0,32,77,0.35)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40,
+            }}
+              onClick={() => { if (!ingestBusy) setSelectOpen(false) }}
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  width: 560, maxHeight: '78vh', overflowY: 'auto',
+                  background: '#ffffff', borderRadius: 10, padding: 20,
+                  boxShadow: '0 12px 40px rgba(0,32,77,0.25)',
+                }}
+              >
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#00204d' }}>
+                  Add people to the chart
+                </div>
+                <div style={{ fontSize: 12, color: '#627184', marginTop: 4, marginBottom: 14 }}>
+                  Pick the departments or executives this roster belongs to, then choose a
+                  source. Anyone already in the chart is merged, not duplicated.
+                </div>
+
+                {selectable === null && (
+                  <div style={{ fontSize: 12, color: '#93a7b4' }}>Loading targets…</div>
+                )}
+
+                {selectable && selectable.executives.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
+                                  color: '#93a7b4', marginBottom: 6 }}>
+                      Executives &amp; board
+                    </div>
+                    {selectable.executives.map(e => (
+                      <label key={e.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+                        borderRadius: 5, cursor: 'pointer',
+                        background: selectedIds.includes(e.id) ? '#eef6fa' : 'transparent',
+                      }}>
+                        <input type="checkbox" checked={selectedIds.includes(e.id)}
+                               onChange={() => toggleSelected(e.id)} />
+                        <span style={{ fontSize: 12, color: '#00204d', fontWeight: 500 }}>{e.label}</span>
+                        <span style={{ fontSize: 11, color: '#93a7b4' }}>{e.title}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {selectable && selectable.departments.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
+                                  color: '#93a7b4', marginBottom: 6 }}>
+                      Departments
+                    </div>
+                    {selectable.departments.map(d => (
+                      <label key={d.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+                        borderRadius: 5, cursor: 'pointer',
+                        background: selectedIds.includes(d.id) ? '#eef6fa' : 'transparent',
+                      }}>
+                        <input type="checkbox" checked={selectedIds.includes(d.id)}
+                               onChange={() => toggleSelected(d.id)} />
+                        <span style={{ fontSize: 12, color: '#00204d' }}>{d.label}</span>
+                        <span style={{ fontSize: 11, color: '#93a7b4' }}>{d.people} people</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {selectable
+                  && selectable.departments.length === 0
+                  && selectable.executives.length === 0 && (
+                  <div style={{ fontSize: 12, color: '#627184', marginBottom: 12 }}>
+                    No departments or executives yet — the leadership search may still be
+                    running. You can still add a roster; it will be classified as usual.
+                  </div>
+                )}
+
+                <div style={{ borderTop: '1px solid #e7eef2', paddingTop: 12 }}>
+                  <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
+                                color: '#93a7b4', marginBottom: 8 }}>
+                    Source
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      disabled={ingestBusy}
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        background: '#E63946', border: 'none', borderRadius: 7,
+                        padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 600,
+                        cursor: ingestBusy ? 'wait' : 'pointer',
+                      }}
+                    >
+                      Upload CSV / Excel / JSON
+                    </button>
+                    <button
+                      disabled={ingestBusy}
+                      onClick={() => { setJsonText(''); setJsonError(''); setJsonDialog(true) }}
+                      style={{
+                        background: 'transparent', border: '1px solid #dde8ed', borderRadius: 7,
+                        padding: '7px 12px', color: '#00204d', fontSize: 12,
+                        cursor: ingestBusy ? 'wait' : 'pointer',
+                      }}
+                    >
+                      Paste JSON
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    <input
+                      type="text"
+                      placeholder="…or pull from an API URL returning JSON or CSV"
+                      value={ingestUrl}
+                      onChange={e => setIngestUrl(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') ingestFromUrl() }}
+                      style={{
+                        flex: 1, padding: '7px 10px', background: '#f5f9fb',
+                        border: '1px solid #dde8ed', borderRadius: 6,
+                        color: '#00204d', fontSize: 12, outline: 'none',
+                      }}
+                    />
+                    <button
+                      disabled={ingestBusy || !ingestUrl.trim()}
+                      onClick={ingestFromUrl}
+                      style={{
+                        background: 'transparent', border: '1px solid #dde8ed', borderRadius: 6,
+                        padding: '7px 12px', color: '#00204d', fontSize: 12,
+                        cursor: ingestBusy || !ingestUrl.trim() ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Fetch
+                    </button>
+                  </div>
+                </div>
+
+                {ingestNote && (
+                  <div style={{ fontSize: 12, color: '#00204d', marginTop: 12 }}>{ingestNote}</div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button
+                    disabled={ingestBusy}
+                    onClick={() => setSelectOpen(false)}
+                    style={{
+                      background: 'transparent', border: '1px solid #dde8ed', borderRadius: 6,
+                      padding: '6px 14px', color: '#627184', fontSize: 12, cursor: 'pointer',
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1617,7 +1920,7 @@ export default function App() {
                 fontSize: 12, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              Build org chart
+              Add to chart
             </button>
           </div>
         </div>

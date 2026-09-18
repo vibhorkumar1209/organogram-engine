@@ -1099,13 +1099,16 @@ async def _ingest_records(records: list[dict],
         "job_city", "job_country", "job_country_code",
     })
 
+    # A company-first chart has no file, so there are no columns to be missing.
+    # Reporting them made the new flow open with a warning about a file the
+    # user never supplied.
     missing: list[str] = []
-    if not has_name:    missing.append("Name (FirstName+LastName or FullName)")
-    if not has_title:   missing.append("Designation / JobTitle")
-    if not has_company: missing.append("Company")
+    if records and not has_name:    missing.append("Name (FirstName+LastName or FullName)")
+    if records and not has_title:   missing.append("Designation / JobTitle")
+    if records and not has_company: missing.append("Company")
     # Location and LinkedInURL are strongly recommended but not blocking
-    if not has_location:  missing.append("Location / city / country")
-    if not has_linkedin:  missing.append("LinkedInURL")
+    if records and not has_location:  missing.append("Location / city / country")
+    if records and not has_linkedin:  missing.append("LinkedInURL")
 
     return {
         "status": "ok",
