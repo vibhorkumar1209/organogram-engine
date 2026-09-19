@@ -1293,13 +1293,55 @@ _FUNCTION_HINT_MAP: dict[str, str] = {
 # INTERNAL HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+_NON_WORD_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _norm_for_match(text: str) -> str:
+    """Lowercase, punctuation to spaces, padded so keywords match whole words.
+
+    Matching keywords as bare substrings let short ones fire inside ordinary
+    words: "cto" inside "dire(cto)r" scored Engineering 100 on EVERY title
+    containing "Director", so "Director of Sales" classified as Engineering.
+    "coo" inside "coordinator", "it" inside "security"/"quality"/"architect",
+    "pr" inside "president" and "ui" inside "recruiter" did the same.
+    Padding both sides means `" cto " in " director "` is False while
+    `" cto " in " cto of engineering "` is True.
+    """
+    return " " + _NON_WORD_RE.sub(" ", str(text or "").lower()).strip() + " "
+
+
 def _score(text: str, rules: list[tuple[int, str]]) -> int:
-    """Sum scores for all keyword matches in text."""
+    """Sum scores for every keyword matching *text* on word boundaries.
+
+    Accepts raw or already-normalised text so existing callers keep working.
+    """
+    padded = text if text.startswith(" ") and text.endswith(" ") else _norm_for_match(text)
     total = 0
     for weight, kw in rules:
-        if kw in text:
+        if _KW_PADDED.get(kw, _norm_for_match(kw)) in padded:
             total += weight
     return total
+
+
+# Padded form of every scoring keyword, built once: _score runs for every
+# department on every record, so normalising keywords per call would be
+# thousands of redundant regex substitutions per upload.
+_KW_PADDED: dict[str, str] = {}
+
+
+def _build_keyword_cache() -> None:
+    for _dept, _rules in _DEPT_SCORE_RULES:
+        for _w, _kw in _rules:
+            if _kw not in _KW_PADDED:
+                _KW_PADDED[_kw] = _norm_for_match(_kw)
+    for _dept, _subs in _SUB_DEPT_KEYWORDS.items():
+        for _sub, _kws in _subs:
+            for _kw in _kws:
+                if _kw not in _KW_PADDED:
+                    _KW_PADDED[_kw] = _norm_for_match(_kw)
+
+
+_build_keyword_cache()
 
 
 def _classify_dept(
@@ -1362,10 +1404,14 @@ def _classify_dept(
 
 
 def _classify_sub_dept(dept_primary: str, title: str, headline: str) -> str:
-    """Return the best matching sub-department label, or '' if none."""
-    combined = (title + " " + headline).lower()
+    """Return the best matching sub-department label, or '' if none.
+
+    Word-boundary matched for the same reason as _score: bare substrings let
+    short keywords fire inside unrelated words.
+    """
+    combined = _norm_for_match(f"{title} {headline}")
     for sub_dept, keywords in _SUB_DEPT_KEYWORDS.get(dept_primary, []):
-        if any(kw in combined for kw in keywords):
+        if any(_KW_PADDED.get(kw, _norm_for_match(kw)) in combined for kw in keywords):
             return sub_dept
     return ""
 
