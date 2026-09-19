@@ -77,11 +77,80 @@ ok(r.status_code == 422, "company-chart: rejects a company name that is too shor
 ok(body.get("canonical_missing") == [],
    "company-chart: no missing-column warning when there is no file")
 
-# ── Stage 2: selectable targets ─────────────────────────────────────────────
+# ── Stage 2: selectable targets — Executive Management only ─────────────────
 sel = client.get("/selectable", params={"job_id": job})
 ok(sel.status_code == 200, "selectable: responds for a live job")
 ok("departments" in sel.json() and "executives" in sel.json(),
    "selectable: returns departments and executives")
+
+
+def _seed_leadership(job_id, people):
+    """Inject people the way the leadership search does, so /selectable sees
+    what production would: the ingest path buckets EVP/SVP titles into
+    functional departments instead, which is not what this stage reads."""
+    import uuid as _uuid
+    from inference_logic import ClassifiedRecord
+    dag = A._JOBS[job_id].dag
+    for name, title, dept, layer in people:
+        dag.insert_person(ClassifiedRecord(
+            id="llm_" + _uuid.uuid4().hex[:8], full_name=name, designation=title,
+            company="Acme Corp", linkedin_url="", location="", country="",
+            sector="Private", region="Global HQ", layer=layer, dept_primary=dept,
+            dept_secondary="", dept_tertiary="", nlp_confidence=0.9,
+            nlp_industry="llm", nlp_method="llm_leadership_web"))
+    dag.repair_governance_edges()
+
+
+em_job = _new_chart("Split Co", "split.example", "Berlin").json()["job_id"]
+_seed_leadership(em_job, [
+    ("Dana Boardman", "Independent Director", S.BOARD_DEPT, 2),
+    ("Ravi Chair", "Chair of the Board", S.BOARD_DEPT, 0),
+    ("Robin Apex", "Chairman and Chief Executive Officer", S.EXEC_DEPT, 1),
+    ("Fin Tanaka", "Executive Vice President, Finance and Chief Financial Officer",
+     S.EXEC_DEPT, 1),
+    ("Hana Ruiz", "Executive Vice President, Human Resources", S.EXEC_DEPT, 1),
+    ("Omar Diaz", "Executive Vice President, Core Diagnostics", S.EXEC_DEPT, 1),
+    ("Lena Vogt", "Senior Vice President, Structural Heart", S.EXEC_DEPT, 1),
+])
+sel = client.get("/selectable", params={"job_id": em_job}).json()
+exec_names = [e["label"] for e in sel["executives"]]
+dept_by_exec = {e["label"]: e["department"] for e in sel["executives"]}
+
+ok("Dana Boardman" not in exec_names and "Ravi Chair" not in exec_names,
+   "selectable: board members are NOT offered for ingestion")
+ok(len(exec_names) == 5, f"selectable: all 5 Executive Management members listed (got {len(exec_names)})")
+ok(dept_by_exec.get("Fin Tanaka") == "Finance & Accounting",
+   "split: CFO runs Finance & Accounting")
+ok(dept_by_exec.get("Hana Ruiz") == "Human Resources",
+   "split: HR executive runs Human Resources")
+ok(dept_by_exec.get("Omar Diaz") == "Core Diagnostics",
+   "split: business-unit executive runs that unit, not a generic bucket")
+ok(dept_by_exec.get("Lena Vogt") == "Structural Heart",
+   "split: second business unit kept distinct")
+ok(dept_by_exec.get("Robin Apex") == "",
+   "split: the CEO runs the company, so has no single department")
+
+dept_labels = [d["label"] for d in sel["departments"]]
+ok(len(dept_labels) == 4, f"split: four departments offered (got {len(dept_labels)})")
+ok(S.BOARD_DEPT not in dept_labels and S.EXEC_DEPT not in dept_labels,
+   "split: the BOD/EM panels are not themselves ingestion targets")
+heads = {d["label"]: d.get("head_name") for d in sel["departments"]}
+ok(heads.get("Finance & Accounting") == "Fin Tanaka",
+   "split: each department records the executive who runs it")
+
+# The derived departments are real nodes, so a roster classified into one
+# lands under it rather than creating a parallel department.
+fin_id = next(d["id"] for d in sel["departments"] if d["label"] == "Finance & Accounting")
+r = client.post("/ingest-json", params={"job_id": em_job, "scope": fin_id}, json=[
+    {"full_name": "Pia Lindqvist", "job_title": "Director of Financial Planning",
+     "company": "Acme Corp"},
+    {"full_name": "Sam Oduya", "job_title": "Senior Accountant", "company": "Acme Corp"},
+])
+ok(r.status_code == 200, "split: roster ingested against a derived department")
+after_sel = client.get("/selectable", params={"job_id": em_job}).json()
+fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accounting")
+ok(fin["people"] >= 1,
+   f"split: ingested people counted under the department (got {fin['people']})")
 
 # ── Stage 3: ingest a roster, scoped to a selection ─────────────────────────
 roster = [
@@ -173,8 +242,8 @@ ok(r.status_code == 422, "ingest: no file and no URL is an error")
 # ── Scope is accepted and echoed (a hint, not a hard parent) ────────────────
 sel = client.get("/selectable", params={"job_id": job}).json()
 ok(len(sel["departments"]) > 0, "selectable: departments appear once people exist")
-ok(any(e["department"] == S.EXEC_DEPT for e in sel["executives"]),
-   "selectable: executives list includes Executive Management")
+ok(all(e["department"] != S.EXEC_DEPT for e in sel["executives"]),
+   "selectable: an executive's department is the function they run, not the panel")
 scope_ids = ",".join(d["id"] for d in sel["departments"][:2])
 r = client.post("/ingest-json", params={"job_id": job, "scope": scope_ids},
                 json=[{"full_name": "Noor Haddad", "job_title": "Head of Legal",

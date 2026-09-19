@@ -42,6 +42,9 @@ from structural_engine import (
     build_from_records, OrganogramDAG, OrganogramDB,
     _enrich_with_llm_leadership,
     add_records_to_dag,
+    split_executive_departments,
+    _exec_department,
+    _dept_node_id,
     BOARD_DEPT,
     EXEC_DEPT,
     _inject_knowledge_leadership,
@@ -1758,44 +1761,78 @@ async def company_chart(payload: CompanyChartRequest,
 @app.get("/selectable")
 def selectable_targets(job_id: str = Query(...)):
     """
-    Departments and executives a roster can be ingested against.
+    What a roster can be ingested against: Executive Management only.
 
-    The second stage of the flow: once BOD/EM exist, the user picks one or
-    more of these before uploading. Selection is a scope hint — the classifier
-    still decides each person's department — so this is deliberately a flat,
-    cheap listing rather than the full tree.
+    Board members are deliberately excluded — a director does not run a part
+    of the company, so there is no team to ingest beneath them. Each executive
+    is returned with the department they run, and those departments are
+    selectable in their own right, so a roster can be attached either to the
+    person or to their function.
     """
-    dag, _db = _require_dag(job_id)
+    dag, db = _require_dag(job_id)
+
+    # Derive each executive's department the first time this is asked for.
+    created = split_executive_departments(dag)
+    if created:
+        db.upsert_dag(dag)
 
     def _parent_dept(node_id: str) -> str:
-        """A person's department comes from the edge to their dept node, not
-        from metadata — people carry designation/company, never dept_primary."""
         for parent in dag.G.predecessors(node_id):
             if str(dag.G.nodes[parent].get("node_type", "")).startswith("dept"):
                 return dag.G.nodes[parent].get("label", "")
         return ""
 
-    departments, executives = [], []
+    executives = []
+    exec_depts: dict[str, dict] = {}
     for nid in dag.G.nodes:
         attrs = dag.G.nodes[nid]
-        ntype = str(attrs.get("node_type", ""))
-        label = attrs.get("label", "")
-        if ntype.startswith("dept"):
-            people = sum(1 for kid in dag.G.successors(nid)
-                         if dag.G.nodes[kid].get("node_type") == "person")
-            departments.append({
-                "id": nid, "label": label, "level": ntype, "people": people,
+        if attrs.get("node_type") != "person":
+            continue
+        if _parent_dept(nid) != EXEC_DEPT:
+            continue                      # Executive Management only
+        meta = attrs.get("metadata", {}) or {}
+        title = meta.get("designation", "")
+        dept = _exec_department(title)
+        executives.append({
+            "id": nid,
+            "label": attrs.get("label", ""),
+            "title": title,
+            "department": dept,
+            "department_id": _dept_node_id(dept) if dept else "",
+        })
+        if dept:
+            exec_depts.setdefault(dept, {
+                "id": _dept_node_id(dept), "label": dept,
+                "head_name": attrs.get("label", ""), "head_title": title,
+                "people": 0,
             })
-        elif ntype == "person":
-            dept = _parent_dept(nid)
-            if dept in (BOARD_DEPT, EXEC_DEPT):
-                executives.append({
-                    "id": nid, "label": label,
-                    "title": (attrs.get("metadata", {}) or {}).get("designation", ""),
-                    "department": dept,
-                })
-    departments.sort(key=lambda d: (d["level"], d["label"]))
-    executives.sort(key=lambda e: (e["department"], e["label"]))
+
+    # Headcount under each derived department, counting the whole subtree.
+    # People are not direct children of a department: the engine inserts ghost
+    # layer nodes ("Director / Head", "Senior Contributor") between them, so
+    # counting only direct successors reported every department as empty.
+    def _subtree_people(root_id: str) -> int:
+        if root_id not in dag.G:
+            return 0
+        seen: set[str] = set()
+        stack = [root_id]
+        total = 0
+        while stack:
+            nid = stack.pop()
+            for kid in dag.G.successors(nid):
+                if kid in seen:
+                    continue
+                seen.add(kid)
+                if dag.G.nodes[kid].get("node_type") == "person":
+                    total += 1
+                stack.append(kid)
+        return total
+
+    for dept in exec_depts.values():
+        dept["people"] = _subtree_people(dept["id"])
+
+    executives.sort(key=lambda e: (e["department"] or "~", e["label"]))
+    departments = sorted(exec_depts.values(), key=lambda d: d["label"])
     return {"job_id": job_id, "departments": departments, "executives": executives}
 
 

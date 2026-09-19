@@ -39,8 +39,14 @@ interface HistoryRun {
   gemini_pricing_is_estimate: boolean
 }
 
-interface SelectableDept { id: string; label: string; level: string; people: number }
-interface SelectableExec { id: string; label: string; title: string; department: string }
+interface SelectableDept {
+  id: string; label: string; people: number
+  head_name?: string; head_title?: string
+}
+interface SelectableExec {
+  id: string; label: string; title: string
+  department: string; department_id: string
+}
 interface Selectable { departments: SelectableDept[]; executives: SelectableExec[] }
 
 interface HistoryEntry {
@@ -1706,8 +1712,9 @@ export default function App() {
                   Add people to the chart
                 </div>
                 <div style={{ fontSize: 12, color: '#627184', marginTop: 4, marginBottom: 14 }}>
-                  Pick the departments or executives this roster belongs to, then choose a
-                  source. Anyone already in the chart is merged, not duplicated.
+                  Pick the executives or their departments this roster belongs to, then
+                  choose a source. Board members are not listed — a director does not run
+                  a team. Anyone already in the chart is merged, not duplicated.
                 </div>
 
                 {selectable === null && (
@@ -1715,21 +1722,25 @@ export default function App() {
                 )}
 
                 {selectable && selectable.executives.length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
+                  <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
                                   color: '#93a7b4', marginBottom: 6 }}>
-                      Executives &amp; board
+                      Executive Management
                     </div>
                     {selectable.executives.map(e => (
                       <label key={e.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+                        display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 6px',
                         borderRadius: 5, cursor: 'pointer',
                         background: selectedIds.includes(e.id) ? '#eef6fa' : 'transparent',
                       }}>
                         <input type="checkbox" checked={selectedIds.includes(e.id)}
                                onChange={() => toggleSelected(e.id)} />
                         <span style={{ fontSize: 12, color: '#00204d', fontWeight: 500 }}>{e.label}</span>
-                        <span style={{ fontSize: 11, color: '#93a7b4' }}>{e.title}</span>
+                        <span style={{ fontSize: 11, color: '#93a7b4', flex: 1 }}>{e.title}</span>
+                        <span style={{ fontSize: 11, color: e.department ? '#2a7ea1' : '#c3ced6',
+                                       whiteSpace: 'nowrap' }}>
+                          {e.department || 'runs the company'}
+                        </span>
                       </label>
                     ))}
                   </div>
@@ -1739,29 +1750,25 @@ export default function App() {
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
                                   color: '#93a7b4', marginBottom: 6 }}>
-                      Departments
+                      Their departments
                     </div>
                     {selectable.departments.map(d => (
                       <label key={d.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+                        display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 6px',
                         borderRadius: 5, cursor: 'pointer',
                         background: selectedIds.includes(d.id) ? '#eef6fa' : 'transparent',
                       }}>
                         <input type="checkbox" checked={selectedIds.includes(d.id)}
                                onChange={() => toggleSelected(d.id)} />
                         <span style={{ fontSize: 12, color: '#00204d' }}>{d.label}</span>
-                        <span style={{ fontSize: 11, color: '#93a7b4' }}>{d.people} people</span>
+                        <span style={{ fontSize: 11, color: '#93a7b4', flex: 1 }}>
+                          {d.head_name ? `led by ${d.head_name}` : ''}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#93a7b4' }}>
+                          {d.people} {d.people === 1 ? 'person' : 'people'}
+                        </span>
                       </label>
                     ))}
-                  </div>
-                )}
-
-                {selectable
-                  && selectable.departments.length === 0
-                  && selectable.executives.length === 0 && (
-                  <div style={{ fontSize: 12, color: '#627184', marginBottom: 12 }}>
-                    No departments or executives yet — the leadership search may still be
-                    running. You can still add a roster; it will be classified as usual.
                   </div>
                 )}
 

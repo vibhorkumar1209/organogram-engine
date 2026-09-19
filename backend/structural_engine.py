@@ -2463,6 +2463,182 @@ def _existing_person_index(dag: "OrganogramDAG") -> dict[str, str]:
     return index
 
 
+# ─────────────────────────────────────────────
+# EXECUTIVE → DEPARTMENT SPLIT
+#
+# Every Executive Management member owns a part of the company. Deriving that
+# department up front gives the user something concrete to ingest a roster
+# against, and gives the ingested people a parent to report to.
+# ─────────────────────────────────────────────
+
+# Functional C-suite roles map to the canonical department they run.
+_FUNCTIONAL_DEPT_BY_ROLE: dict[str, str] = {
+    "cfo":      "Finance & Accounting",
+    "cto":      "Engineering",
+    "cio":      "Information Technology",
+    "chro":     "Human Resources",
+    "cmo":      "Marketing",
+    "clo":      "Legal, Risk & Compliance",
+    "coo":      "Operations",
+}
+
+# Words that mean the phrase is a function, not a business unit.
+_FUNCTION_WORDS_RE = re.compile(
+    r"\b(finance|financial|account|legal|counsel|compliance|risk|human resources|people"
+    r"|talent|marketing|communications|technology|information|digital|engineering"
+    r"|operations|supply chain|procurement|strategy|corporate development|audit"
+    r"|treasur|tax|security|sustainability|quality|regulatory|medical affairs"
+    r"|research|development|manufacturing|sales|commercial)\b",
+    re.IGNORECASE,
+)
+
+# Rank prefixes to strip before reading what a title is actually about.
+_RANK_PREFIX_RE = re.compile(
+    r"^\s*(?:executive|senior|sr\.?|group|divisional|deputy|global|corporate)?\s*"
+    r"(?:vice\s+president|president|vp|evp|svp|officer|head|director|chief)\b[\s,&-]*"
+    r"(?:and\s+)?(?:group\s+president[\s,&-]*)?",
+    re.IGNORECASE,
+)
+
+
+_SMALL_WORDS = {"and", "of", "the", "for", "in", "to", "a", "an", "&"}
+
+
+def _titlecase_dept(name: str) -> str:
+    """Title-case a department name without mangling acronyms or connectors.
+
+    str.title() turns "Global Marketing and External Affairs" into
+    "... And ..." and "U.S. Nutrition" into "U.S. Nutrition" -> "U.S. Nutrition"
+    is fine but "IT" becomes "It".
+    """
+    words = name.split()
+    out: list[str] = []
+    for i, w in enumerate(words):
+        stripped = w.strip(".,&")
+        if stripped.isupper() and len(stripped) <= 4:
+            out.append(w)                       # acronym: IT, U.S., EMEA, R&D
+        elif i > 0 and w.lower() in _SMALL_WORDS:
+            out.append(w.lower())
+        else:
+            out.append(w[:1].upper() + w[1:] if w else w)
+    return " ".join(out)
+
+
+def _exec_department(title: str) -> str:
+    """
+    The department an executive runs, or "" for the apex (CEO / Chair).
+
+    Two kinds of executive title need different handling. A functional one
+    ("Chief Financial Officer") names a department directly. A business-unit
+    one ("Executive Vice President, Core Diagnostics") names the unit — and
+    running that through the generic classifier produced "Corporate
+    Communications & Public Affairs", which is simply wrong. For those the
+    unit itself IS the department, which is both truthful and more useful.
+    """
+    raw = str(title or "").strip()
+    if not raw:
+        return ""
+    if _is_ceo(raw) or _is_board_chairman(raw):
+        return ""                      # the apex owns the whole company
+
+    try:
+        from llm_fallback import _role_keys
+        for role in sorted(_role_keys(raw)):
+            if role in _FUNCTIONAL_DEPT_BY_ROLE:
+                return _FUNCTIONAL_DEPT_BY_ROLE[role]
+    except Exception:
+        pass
+
+    # Business unit: whatever the title qualifies itself with.
+    tail = ""
+    m = re.search(r",\s*(.+)$", raw)
+    if m:
+        tail = m.group(1)
+    else:
+        m = re.search(r"\bof\s+(.+)$", raw, flags=re.IGNORECASE)
+        if m:
+            tail = m.group(1)
+    tail = re.sub(r"\s+and\s+(?:chief|secretary|general counsel).*$", "", tail,
+                  flags=re.IGNORECASE).strip(" ,&-")
+    tail = _RANK_PREFIX_RE.sub("", tail).strip(" ,&-")
+
+    if tail and 2 < len(tail) <= 60:
+        if _FUNCTION_WORDS_RE.search(tail):
+            # A function named in the tail ("Finance and Chief Financial
+            # Officer") — let the canonical taxonomy own it. Layer 3, not 1:
+            # at layer 1 the taxonomy maps every C-suite title back to
+            # "Executive Management", which is the panel, not a department.
+            return _canonical_dept(_titlecase_dept(tail), 3)
+        return _titlecase_dept(tail)
+
+    # No qualifier at all: fall back to the taxonomy on the whole title.
+    stripped = _RANK_PREFIX_RE.sub("", raw).strip(" ,&-")
+    if stripped and _FUNCTION_WORDS_RE.search(stripped):
+        return _canonical_dept(_titlecase_dept(stripped), 3)
+    return ""
+
+
+def split_executive_departments(dag: "OrganogramDAG") -> int:
+    """
+    Create a department node for each Executive Management member.
+
+    The executive stays in the Executive Management panel — they are still an
+    executive — and their department is added as a real node carrying who runs
+    it, so a roster can be ingested against either. Returns how many
+    departments were created.
+    """
+    created = 0
+    for nid in list(dag.G.nodes):
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") != "person":
+            continue
+        if _person_department(dag, nid) != EXEC_DEPT:
+            continue
+        meta = attrs.get("metadata", {}) or {}
+        dept_name = _exec_department(meta.get("designation", ""))
+        if not dept_name:
+            continue
+        dept_id = _dept_node_id(dept_name)
+        if dept_id not in dag.G:
+            dag.G.add_node(
+                dept_id, node_id=dept_id, node_type="dept_primary", label=dept_name,
+                layer=1, sector="", color="", is_ghost=0,
+                metadata={"dept_primary": dept_name},
+            )
+            if "root_global" in dag.G:
+                dag.G.add_edge("root_global", dept_id)
+            created += 1
+        # Record who runs it so the UI can show "Finance & Accounting — Raj Patel".
+        dmeta = dict(dag.G.nodes[dept_id].get("metadata", {}))
+        dmeta["head_name"] = attrs.get("label", "")
+        dmeta["head_node_id"] = nid
+        dmeta["head_title"] = meta.get("designation", "")
+        dag.G.nodes[dept_id]["metadata"] = dmeta
+    if created:
+        logger.info("Split Executive Management into %d department(s)", created)
+    return created
+
+
+def _dept_node_id(dept_name: str) -> str:
+    """Id for a department node, using the DAG's own helper.
+
+    Reimplementing this drifted: the DAG replaces each non-alphanumeric
+    character individually, so "Finance & Accounting" is
+    "dept__finance___accounting" (three underscores), while a collapsing
+    regex produced "dept__finance_accounting" — a second, parallel node that
+    ingested people never landed in.
+    """
+    return OrganogramDAG._node_id(None, "dept", dept_name)
+
+
+def _person_department(dag: "OrganogramDAG", node_id: str) -> str:
+    """The label of the department node a person hangs from."""
+    for parent in dag.G.predecessors(node_id):
+        if str(dag.G.nodes[parent].get("node_type", "")).startswith("dept"):
+            return dag.G.nodes[parent].get("label", "")
+    return ""
+
+
 def add_records_to_dag(
     dag: "OrganogramDAG",
     records: list[dict],
