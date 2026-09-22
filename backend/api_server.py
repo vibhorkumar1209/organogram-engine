@@ -1791,7 +1791,6 @@ def selectable_targets(job_id: str = Query(...)):
         return ""
 
     executives = []
-    exec_depts: dict[str, dict] = {}
     for nid in dag.G.nodes:
         attrs = dag.G.nodes[nid]
         if attrs.get("node_type") != "person":
@@ -1808,12 +1807,26 @@ def selectable_targets(job_id: str = Query(...)):
             "department": dept,
             "department_id": _dept_node_id(dept) if dept else "",
         })
-        if dept:
-            exec_depts.setdefault(dept, {
-                "id": _dept_node_id(dept), "label": dept,
-                "head_name": attrs.get("label", ""), "head_title": title,
+
+    # Departments are read from the chart — every department branching off
+    # Executive Management — not rebuilt from the executives. The core set is
+    # created whether or not the leadership search found someone to run it, so
+    # deriving this list from executives alone hid most of it.
+    exec_depts: dict[str, dict] = {}
+    em_id = _dept_node_id(EXEC_DEPT)
+    if em_id in dag.G:
+        for kid in dag.G.successors(em_id):
+            kattrs = dag.G.nodes[kid]
+            if not str(kattrs.get("node_type", "")).startswith("dept"):
+                continue
+            kmeta = kattrs.get("metadata", {}) or {}
+            label = kattrs.get("label", "")
+            exec_depts[label] = {
+                "id": kid, "label": label,
+                "head_name": kmeta.get("head_name", ""),
+                "head_title": kmeta.get("head_title", ""),
                 "people": 0,
-            })
+            }
 
     # Headcount under each derived department, counting the whole subtree.
     # People are not direct children of a department: the engine inserts ghost

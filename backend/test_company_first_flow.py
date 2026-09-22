@@ -167,13 +167,45 @@ ok(em_node is not None, "branch: Executive Management is in the tree")
 branch_labels = [c.get("label") for c in (em_node.get("children") or [])] if em_node else []
 ok("Finance & Accounting" in branch_labels,
    f"branch: departments hang off Executive Management (got {branch_labels})")
+
+# Executive Management must appear ONCE. Giving it a second parent edge made
+# the chart draw it twice — a tree renders a node once per parent.
+_dag = A._JOBS[em_job].dag
+_em_nodes = [n for n in _dag.G.nodes if _dag.G.nodes[n].get("label") == S.EXEC_DEPT]
+ok(len(_em_nodes) == 1, f"branch: one Executive Management node (got {len(_em_nodes)})")
+ok(len(list(_dag.G.predecessors(_em_nodes[0]))) == 1,
+   "branch: Executive Management has exactly one parent")
+
+# The core departments appear whether or not an executive was found to run
+# them — a company has an IT function even if its leadership page named no CTO.
+_core_labels = [d["label"] for d in
+                client.get("/selectable", params={"job_id": em_job}).json()["departments"]]
+for _expected in ["Information Technology", "Human Resources", "Marketing",
+                  "Sales & Business Development", "Operations", "Engineering",
+                  "Finance & Accounting", "Product Management"]:
+    ok(_expected in _core_labels, f"core: {_expected} offered as a department")
+ok("Core Diagnostics" in _core_labels,
+   "core: a business unit an executive runs is offered alongside the core set")
+ok(not any(l in (S.BOARD_DEPT, S.EXEC_DEPT) for l in _core_labels),
+   "core: neither panel is offered as a department")
+_headed = {d["label"]: d.get("head_name") for d in
+           client.get("/selectable", params={"job_id": em_job}).json()["departments"]}
+ok(_headed.get("Finance & Accounting") == "Fin Tanaka",
+   "core: a department an executive runs still records its head")
+ok(_headed.get("Sustainability") in ("", None),
+   "core: a department with no executive has no head")
 ok(dept_by_exec.get("Lena Vogt") == "Structural Heart",
    "split: second business unit kept distinct")
 ok(dept_by_exec.get("Robin Apex") == "",
    "split: the CEO runs the company, so has no single department")
 
 dept_labels = [d["label"] for d in sel["departments"]]
-ok(len(dept_labels) == 4, f"split: four departments offered (got {len(dept_labels)})")
+# The core set is always offered, plus any business unit an executive runs,
+# so the count is the core list plus those units — not one per executive.
+ok(len(dept_labels) >= 15,
+   f"split: the core department set is offered (got {len(dept_labels)})")
+ok("Core Diagnostics" in dept_labels and "Structural Heart" in dept_labels,
+   "split: both business units kept distinct alongside the core set")
 ok(S.BOARD_DEPT not in dept_labels and S.EXEC_DEPT not in dept_labels,
    "split: the BOD/EM panels are not themselves ingestion targets")
 heads = {d["label"]: d.get("head_name") for d in sel["departments"]}

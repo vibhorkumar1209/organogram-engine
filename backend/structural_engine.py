@@ -2600,6 +2600,29 @@ def _business_unit_from_title(title: str) -> str:
     return ""
 
 
+def _core_departments() -> list[str]:
+    """The departments a company is expected to have, from the canonical map.
+
+    Sourced from classifier.py's own constants rather than a second hardcoded
+    list, so the two cannot drift apart. Only the universal ones: the
+    industry-specific departments (Investment Banking, Actuarial, Underwriting,
+    Claims …) would be noise on a company that has none of them.
+
+    These are shown even when no executive was found for them — a company has
+    an IT function whether or not its leadership page named a CTO, and the
+    user needs somewhere to put that roster.
+    """
+    try:
+        import classifier as _c
+        return [
+            _c.DEPT_FIN, _c.DEPT_HR, _c.DEPT_LRC, _c.DEPT_IT, _c.DEPT_ENG,
+            _c.DEPT_RD, _c.DEPT_PM, _c.DEPT_MKT, _c.DEPT_SALES, _c.DEPT_CS,
+            _c.DEPT_OPS, _c.DEPT_STR, _c.DEPT_COMM, _c.DEPT_FAC, _c.DEPT_SUS,
+        ]
+    except Exception:
+        return []
+
+
 def split_executive_departments(dag: "OrganogramDAG") -> int:
     """
     Create a department node for each Executive Management member.
@@ -2610,6 +2633,9 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
     departments were created.
     """
     created = 0
+
+    # Which department each executive runs, so a head can be attached below.
+    head_of: dict[str, tuple[str, str, str]] = {}   # dept -> (node_id, name, title)
     for nid in list(dag.G.nodes):
         attrs = dag.G.nodes[nid]
         if attrs.get("node_type") != "person":
@@ -2618,6 +2644,16 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
             continue
         meta = attrs.get("metadata", {}) or {}
         dept_name = _exec_department(meta.get("designation", ""))
+        if dept_name:
+            head_of.setdefault(
+                dept_name, (nid, attrs.get("label", ""), meta.get("designation", "")))
+
+    # The core set always appears; anything an executive runs that is not in it
+    # (a business unit such as Core Diagnostics) is appended.
+    core = _core_departments()
+    dept_names = core + [d for d in head_of if d not in core]
+
+    for dept_name in dept_names:
         if not dept_name:
             continue
         dept_id = _dept_node_id(dept_name)
@@ -2632,6 +2668,12 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
         # exist BECAUSE an executive runs them, so the chart should read
         # "Executive Management -> Finance & Accounting -> the finance team".
         em_id = _dept_node_id(EXEC_DEPT)
+        if dept_id in (em_id, _dept_node_id(BOARD_DEPT)):
+            # Never re-parent a panel. Giving Executive Management a second
+            # parent (root_global, alongside Board of Management) is what made
+            # it render twice in the chart — a tree draws a node once per
+            # parent edge.
+            continue
         parent = em_id if em_id in dag.G else "root_global"
         if parent in dag.G and not dag.G.has_edge(parent, dept_id):
             for stale in list(dag.G.predecessors(dept_id)):
@@ -2639,12 +2681,12 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
                         or stale == "root_global":
                     dag.G.remove_edge(stale, dept_id)
             dag.G.add_edge(parent, dept_id)
-        # Record who runs it so the UI can show "Finance & Accounting — Raj Patel".
-        dmeta = dict(dag.G.nodes[dept_id].get("metadata", {}))
-        dmeta["head_name"] = attrs.get("label", "")
-        dmeta["head_node_id"] = nid
-        dmeta["head_title"] = meta.get("designation", "")
-        dag.G.nodes[dept_id]["metadata"] = dmeta
+        # Record who runs it, when an executive was found for it.
+        head = head_of.get(dept_name)
+        if head:
+            dmeta = dict(dag.G.nodes[dept_id].get("metadata", {}))
+            dmeta["head_node_id"], dmeta["head_name"], dmeta["head_title"] = head
+            dag.G.nodes[dept_id]["metadata"] = dmeta
     if created:
         logger.info("Split Executive Management into %d department(s)", created)
     return created
