@@ -1137,7 +1137,17 @@ class OrganogramDAG:
             layer = 2
 
         if dept_p == "Board of Management":
-            if _is_ceo(designation) and not _is_board_chairman(designation):
+            # The leadership search decides who sits on the board, and it puts
+            # a dual-role CEO in BOTH arrays deliberately. Overruling it here
+            # sent the board copy to Executive Management too, so one person
+            # appeared twice in that panel — and it caught directors whose
+            # title merely mentions a C-suite role they held ELSEWHERE
+            # ("Former Chief Marketing Officer, NFL"), moving a non-executive
+            # director into Executive Management.
+            _trust_dept = rec.nlp_method in (
+                "llm_leadership_web", "llm_leadership_ai", "upload_leadership")
+            if (not _trust_dept
+                    and _is_ceo(designation) and not _is_board_chairman(designation)):
                 # Executive director who is also CEO → Executive Management
                 dept_p = "Executive Management"
                 layer  = 2 if _is_regional_exec(designation) else 1

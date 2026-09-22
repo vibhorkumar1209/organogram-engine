@@ -226,6 +226,53 @@ fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accou
 ok(fin["people"] >= 1,
    f"split: ingested people counted under the department (got {fin['people']})")
 
+# ── A dual-role CEO and a director with an outside C-suite past ─────────────
+# Both were reported from a live NVIDIA chart: Jensen Huang listed twice under
+# Executive Management, and Dawn Hudson — an NVIDIA director whose title
+# describes her career at the NFL and PepsiCo — listed as an NVIDIA executive.
+# One cause: insert_person moved a board member into Executive Management
+# whenever their title mentioned a C-suite role, overruling the leadership
+# search that had just placed them.
+dual_job = _new_chart("Dual Role Co", "dual.example", "Santa Clara").json()["job_id"]
+_seed_leadership(dual_job, [
+    ("Jensen Huang", "Co-founder, President and Chief Executive Officer", S.EXEC_DEPT, 1),
+    ("Jensen Huang", "Founder, President, and Chief Executive Officer", S.BOARD_DEPT, 0),
+    ("Dawn Hudson",
+     "Former Chief Marketing Officer, National Football League & Former CEO "
+     "Pepsi-Cola North America", S.BOARD_DEPT, 2),
+    ("Michael Kagan", "Chief Technology Officer", S.EXEC_DEPT, 1),
+])
+dual_sel = client.get("/selectable", params={"job_id": dual_job}).json()
+dual_names = [e["label"] for e in dual_sel["executives"]]
+ok(dual_names.count("Jensen Huang") == 1,
+   f"dual: the CEO appears once in Executive Management (got {dual_names.count('Jensen Huang')})")
+ok("Dawn Hudson" not in dual_names,
+   "dual: a director whose title names an outside C-suite role stays off the exec panel")
+ok("Michael Kagan" in dual_names, "dual: real executives still listed")
+
+_dual_dag = A._JOBS[dual_job].dag
+_where = {}
+for _nid in _dual_dag.G.nodes:
+    if _dual_dag.G.nodes[_nid].get("node_type") != "person":
+        continue
+    _lbl = _dual_dag.G.nodes[_nid].get("label", "")
+    for _p in _dual_dag.G.predecessors(_nid):
+        if str(_dual_dag.G.nodes[_p].get("node_type", "")).startswith("dept"):
+            _where.setdefault(_lbl, []).append(_dual_dag.G.nodes[_p].get("label", ""))
+ok(sorted(_where.get("Jensen Huang", [])) == [S.BOARD_DEPT, S.EXEC_DEPT],
+   f"dual: the CEO sits in both panels, once each (got {_where.get('Jensen Huang')})")
+ok(_where.get("Dawn Hudson") == [S.BOARD_DEPT],
+   f"dual: the director sits only on the board (got {_where.get('Dawn Hudson')})")
+
+# An ordinary uploaded row with a board-sounding title must still be kept out
+# of the panels — the guard that protects them is unchanged.
+_csv_job = _new_chart("CSV Guard Co", "csv.example", "X").json()["job_id"]
+client.post("/ingest-json", params={"job_id": _csv_job}, json=[
+    {"full_name": "Pat Ordinary", "job_title": "Chief of Staff", "company": "CSV Guard Co"}])
+_csv_sel = client.get("/selectable", params={"job_id": _csv_job}).json()
+ok("Pat Ordinary" not in [e["label"] for e in _csv_sel["executives"]],
+   "dual: an ordinary roster row does not reach Executive Management")
+
 # ── Stage 3: ingest a roster, scoped to a selection ─────────────────────────
 roster = [
     {"full_name": "Ana Silva", "job_title": "Chair of the Board", "company": "Acme Corp"},
