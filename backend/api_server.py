@@ -567,10 +567,27 @@ def _infer_org_name(records: list[dict]) -> str:
     return ""
 
 
+# When this process booted — with the commit, it tells a verification run
+# whether it is talking to the build it just pushed.
+_PROCESS_STARTED_AT = time.time()
+
+
 @app.get("/ping")
 def ping():
-    """Lightweight wake-up probe — keeps Render from cold-starting on first upload."""
-    return {"status": "ok"}
+    """Lightweight wake-up probe — keeps Render from cold-starting on first upload.
+
+    Also reports which build is serving. Without this, a verification run that
+    lands mid-deploy is indistinguishable from a failing fix, which has cost
+    several debugging cycles: RENDER_GIT_COMMIT is set by Render on every
+    deploy and is free to read.
+    """
+    commit = os.environ.get("RENDER_GIT_COMMIT", "")
+    return {
+        "status": "ok",
+        "commit": commit[:7] if commit else "local",
+        "started_at": _PROCESS_STARTED_AT,
+        "uptime_s": round(time.time() - _PROCESS_STARTED_AT, 1),
+    }
 
 # ─── Per-org in-memory state ──────────────────
 # One process now serves many orgs in parallel, each keyed by a client-minted
@@ -1184,10 +1201,22 @@ async def leadership_ready(job_id: str = Query(...)):
     # Return latest industry from root node (may have been updated by background task)
     root_meta = dag.G.nodes.get("root_global", {}).get("metadata", {})
     industry  = root_meta.get("industry", "")
+    # How many departments hang off Executive Management right now. The split
+    # runs during enrichment, so this says whether it actually took effect —
+    # previously the only way to tell was to fetch /tree and count, and calling
+    # /selectable first silently created them, masking the answer.
+    em_branches = 0
+    _em_id = _dept_node_id(EXEC_DEPT)
+    if _em_id in dag.G:
+        em_branches = sum(
+            1 for kid in dag.G.successors(_em_id)
+            if str(dag.G.nodes[kid].get("node_type", "")).startswith("dept"))
+
     return {
         "ready":            ready,
         "board_count":      board_count,
         "exec_count":       exec_count,
+        "em_branches":      em_branches,
         "industry":         industry,
         "enrichment_done":  session.enrichment_done,  # True once background task finished
         "usage":            session.usage_tracker.summary(),
