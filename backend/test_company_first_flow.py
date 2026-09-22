@@ -233,12 +233,12 @@ ok(fin["people"] >= 1,
 # were attached to the ROOT. EM was then created moments later by the
 # uploaded-data fallback, leaving it in the chart with no branches — the exact
 # symptom reported, and invisible to a test that seeded EM members first.
-def _branches_for(people):
+def _branches_for(roster):
     import uuid as _u
     from structural_engine import OrganogramDAG as _D, split_executive_departments as _sp
     from inference_logic import ClassifiedRecord as _R
     dag = _D(company_name="Thin Co")
-    for _n, _t, _d, _l in people:
+    for _n, _t, _d, _l in roster:
         dag.insert_person(_R(
             id="llm_" + _u.uuid4().hex[:8], full_name=_n, designation=_t,
             company="Thin Co", linkedin_url="", location="", country="",
@@ -257,13 +257,15 @@ def _branches_for(people):
     return kids, root_depts
 
 
-for _label, _people in [
+# NB: not named _people — that is the module-level helper, and shadowing it
+# here broke every later call to it with "'list' object is not callable".
+for _label, _roster in [
     ("nobody found at all", []),
     ("one person in a functional department", [("A", "Software Engineer", "Engineering", 5)]),
     ("one director, no executives", [("B", "Independent Director", S.BOARD_DEPT, 2)]),
     ("one executive, no directors", [("A", "Chief Technology Officer", S.EXEC_DEPT, 1)]),
 ]:
-    _kids, _root = _branches_for(_people)
+    _kids, _root = _branches_for(_roster)
     ok(_kids >= 15,
        f"thin: departments branch from Executive Management — {_label} (got {_kids})")
     ok(_root <= 2,
