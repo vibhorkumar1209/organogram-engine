@@ -1012,6 +1012,18 @@ class OrganogramDAG:
             "metadata":  {"dept_primary": dept_p},
         })
         self._ensure_edge(parent_id, dp_id)
+
+        # The governance spine must hold exactly one parent edge. Executive
+        # Management is parented to root when it is created before Board of
+        # Management exists; once BOD appears, the next executive inserted
+        # attached EM under BOD as well, leaving EM with two parents — and a
+        # tree draws a node once per parent, so Executive Management rendered
+        # twice. Whichever parent is correct now, drop the other.
+        if dp_lower in self._EM_NAMES or dp_lower in self._BOD_NAMES:
+            for stale in list(self.G.predecessors(dp_id)):
+                if stale != parent_id:
+                    self.G.remove_edge(stale, dp_id)
+
         leaf = dp_id
 
         # ── Secondary dept (skip if empty or same as primary) ───────────

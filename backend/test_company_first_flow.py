@@ -226,6 +226,44 @@ fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accou
 ok(fin["people"] >= 1,
    f"split: ingested people counted under the department (got {fin['people']})")
 
+# ── Executive Management renders once, whatever the insertion order ─────────
+# It is parented to root when created before Board of Management exists; once
+# BOD appeared, the next executive inserted attached it under BOD as well,
+# leaving two parent edges. A tree draws a node once per parent, so the chart
+# showed two Executive Management cards. Order EXEC, BOARD, EXEC triggers it.
+import itertools as _it
+from structural_engine import OrganogramDAG as _DAG
+from inference_logic import ClassifiedRecord as _CR
+import uuid as _uu
+
+
+def _spine_parents(order):
+    dag = _DAG(company_name="Spine Co")
+    for name, title, dept, layer in order:
+        dag.insert_person(_CR(
+            id="llm_" + _uu.uuid4().hex[:8], full_name=name, designation=title,
+            company="Spine Co", linkedin_url="", location="", country="",
+            sector="Private", region="Global HQ", layer=layer, dept_primary=dept,
+            dept_secondary="", dept_tertiary="", nlp_confidence=0.9,
+            nlp_industry="llm", nlp_method="llm_leadership_web"))
+    em = dag._node_id("dept", "Executive Management")
+    bod = dag._node_id("dept", "Board of Management")
+    return (len(list(dag.G.predecessors(em))) if em in dag.G else 0,
+            len(list(dag.G.predecessors(bod))) if bod in dag.G else 0)
+
+
+_specs = [("E1", "Chief Technology Officer", S.EXEC_DEPT, 1),
+          ("E2", "Chief Financial Officer", S.EXEC_DEPT, 1),
+          ("B1", "Independent Director", S.BOARD_DEPT, 2),
+          ("B2", "Chair of the Board", S.BOARD_DEPT, 0)]
+_violations = [p for p in _it.permutations(_specs)
+               if _spine_parents(p) != (1, 1)]
+ok(not _violations,
+   f"spine: one parent edge for both panels across all 24 insertion orders "
+   f"({len(_violations)} bad)")
+ok(_spine_parents((_specs[0], _specs[2], _specs[1])) == (1, 1),
+   "spine: the EXEC, BOARD, EXEC order that caused the duplicate is clean")
+
 # ── A dual-role CEO and a director with an outside C-suite past ─────────────
 # Both were reported from a live NVIDIA chart: Jensen Huang listed twice under
 # Executive Management, and Dawn Hudson — an NVIDIA director whose title
