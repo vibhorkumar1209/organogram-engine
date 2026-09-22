@@ -383,6 +383,7 @@ export default function App() {
   const [ingestUrl, setIngestUrl]       = useState('')
   const [ingestBusy, setIngestBusy]     = useState(false)
   const [ingestNote, setIngestNote]     = useState('')
+  const [ingestTarget, setIngestTarget] = useState('')
 
   // ── History state ──────────────────────────────────────────────────
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
@@ -894,9 +895,13 @@ export default function App() {
   }
 
   // ── Stage 2: what can a roster be attached to ─────────────────────────
-  const openSelection = async () => {
+  const openSelection = async (preselect?: OrgNode) => {
     setSelectOpen(true)
     setIngestNote('')
+    // Clicking a department in the chart pre-selects it, so the roster lands
+    // where the user was already looking.
+    setSelectedIds(preselect?.node_id ? [preselect.node_id] : [])
+    setIngestTarget(preselect?.label ?? '')
     try {
       const res = await apiFetch('/selectable')
       if (res.ok) setSelectable(await res.json())
@@ -1194,24 +1199,9 @@ export default function App() {
         <SearchBar allNodes={allNodes} onFocus={handleSearchFocus} />
 
         {/* Upload */}
-        <button
-          onClick={openSelection}
-          disabled={!activeJobIdRef.current}
-          title="Choose a department or executive, then add people to it"
-          style={{
-            background: '#E63946', border: 'none', borderRadius: 7,
-            padding: '5px 12px', color: '#ffffff', fontSize: 11, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', flexShrink: 0,
-            fontWeight: 600,
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          Add People
-        </button>
+        {/* Adding people is done from a department in the chart, not here:
+            a roster belongs to the executive who owns it. Click Executive
+            Management to see its departments, then a department to add to it. */}
         <input
           ref={fileInputRef}
           type="file"
@@ -1709,12 +1699,13 @@ export default function App() {
                 }}
               >
                 <div style={{ fontSize: 15, fontWeight: 600, color: '#00204d' }}>
-                  Add people to the chart
+                  {ingestTarget ? `Add people to ${ingestTarget}` : 'Add people to the chart'}
                 </div>
                 <div style={{ fontSize: 12, color: '#627184', marginTop: 4, marginBottom: 14 }}>
-                  Pick the executives or their departments this roster belongs to, then
-                  choose a source. Board members are not listed — a director does not run
-                  a team. Anyone already in the chart is merged, not duplicated.
+                  {ingestTarget
+                    ? 'Selected below. Adjust if this roster spans more than one area, then choose a source.'
+                    : 'Pick the executives or their departments this roster belongs to, then choose a source.'}
+                  {' '}Anyone already in the chart is merged, not duplicated.
                 </div>
 
                 {selectable === null && (
@@ -1850,6 +1841,11 @@ export default function App() {
 
           {/* ExecPanel — overlays right side of chart */}
           <ExecPanel
+            onAddPeople={
+              panelDept && panelDept.label !== 'Board of Management'
+                ? (dept) => openSelection(dept)
+                : undefined
+            }
             deptNode={panelDept}
             executives={panelExecs}
             totalCount={panelTotal}

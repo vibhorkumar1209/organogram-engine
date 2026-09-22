@@ -2528,12 +2528,19 @@ def _exec_department(title: str) -> str:
     """
     The department an executive runs, or "" for the apex (CEO / Chair).
 
-    Two kinds of executive title need different handling. A functional one
-    ("Chief Financial Officer") names a department directly. A business-unit
-    one ("Executive Vice President, Core Diagnostics") names the unit — and
-    running that through the generic classifier produced "Corporate
-    Communications & Public Affairs", which is simply wrong. For those the
-    unit itself IS the department, which is both truthful and more useful.
+    The canonical Department/Designation taxonomy owns this decision. Deriving
+    a name from the title text instead produced departments called "Commercial
+    Officer", "Operations Officer" and "People Officer" — a job title is not a
+    department. The taxonomy already maps every functional C-suite title
+    correctly: Chief Commercial Officer to Sales & Business Development, Chief
+    Operations Officer to Operations, Chief People Officer to Human Resources.
+
+    The one case the taxonomy cannot answer is a business-unit executive
+    ("Executive Vice President, Core Diagnostics"). It reports that itself, by
+    falling back to Operations with confidence 0.3 and method
+    "job_function_fallback". Only then is the unit's own name used, which keeps
+    Abbott's eight business units distinct instead of collapsing them all into
+    one Operations department.
     """
     raw = str(title or "").strip()
     if not raw:
@@ -2541,40 +2548,55 @@ def _exec_department(title: str) -> str:
     if _is_ceo(raw) or _is_board_chairman(raw):
         return ""                      # the apex owns the whole company
 
+    result = None
     try:
-        from llm_fallback import _role_keys
-        for role in sorted(_role_keys(raw)):
-            if role in _FUNCTIONAL_DEPT_BY_ROLE:
-                return _FUNCTIONAL_DEPT_BY_ROLE[role]
-    except Exception:
-        pass
+        from classifier import classify as _classify_title
+        result = _classify_title(job_title=raw, linkedin_headline="",
+                                 job_function="", job_level="", industry="")
+    except Exception as exc:
+        logger.debug("Exec department classification failed for %r: %s", raw, exc)
 
-    # Business unit: whatever the title qualifies itself with.
+    taxonomy_answered = (
+        result is not None
+        and result.dept_primary
+        and result.method != "job_function_fallback"
+        and result.confidence >= 0.5
+    )
+    if taxonomy_answered and result.dept_primary not in (BOARD_DEPT, EXEC_DEPT):
+        return result.dept_primary
+
+    # The taxonomy has no match: this names a business unit, so the unit is
+    # the department.
+    unit = _business_unit_from_title(raw)
+    if unit and unit not in (BOARD_DEPT, EXEC_DEPT):
+        return unit
+    # Never offer a panel as a department, and never invent one from a scrap of
+    # a title — "Chief of Staff" is not the head of a "Staff" department.
+    fallback = result.dept_primary if result is not None else ""
+    return "" if fallback in (BOARD_DEPT, EXEC_DEPT) else fallback
+
+
+def _business_unit_from_title(title: str) -> str:
+    """The business unit an executive's title qualifies itself with, or "".
+
+    "Executive Vice President, Core Diagnostics" -> "Core Diagnostics"
+    "Group President, Consumer"                  -> "Consumer"
+    """
     tail = ""
-    m = re.search(r",\s*(.+)$", raw)
+    m = re.search(r",\s*(.+)$", title)
     if m:
         tail = m.group(1)
     else:
-        m = re.search(r"\bof\s+(.+)$", raw, flags=re.IGNORECASE)
+        m = re.search(r"\bof\s+(.+)$", title, flags=re.IGNORECASE)
         if m:
             tail = m.group(1)
     tail = re.sub(r"\s+and\s+(?:chief|secretary|general counsel).*$", "", tail,
                   flags=re.IGNORECASE).strip(" ,&-")
     tail = _RANK_PREFIX_RE.sub("", tail).strip(" ,&-")
-
-    if tail and 2 < len(tail) <= 60:
-        if _FUNCTION_WORDS_RE.search(tail):
-            # A function named in the tail ("Finance and Chief Financial
-            # Officer") — let the canonical taxonomy own it. Layer 3, not 1:
-            # at layer 1 the taxonomy maps every C-suite title back to
-            # "Executive Management", which is the panel, not a department.
-            return _canonical_dept(_titlecase_dept(tail), 3)
+    _GENERIC_TAIL = {"staff", "office", "the company", "company", "group",
+                     "business", "operations officer", "administration"}
+    if tail and 2 < len(tail) <= 60 and tail.lower() not in _GENERIC_TAIL:
         return _titlecase_dept(tail)
-
-    # No qualifier at all: fall back to the taxonomy on the whole title.
-    stripped = _RANK_PREFIX_RE.sub("", raw).strip(" ,&-")
-    if stripped and _FUNCTION_WORDS_RE.search(stripped):
-        return _canonical_dept(_titlecase_dept(stripped), 3)
     return ""
 
 
@@ -2605,9 +2627,18 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
                 layer=1, sector="", color="", is_ghost=0,
                 metadata={"dept_primary": dept_name},
             )
-            if "root_global" in dag.G:
-                dag.G.add_edge("root_global", dept_id)
             created += 1
+        # Branch from Executive Management, not the root: these departments
+        # exist BECAUSE an executive runs them, so the chart should read
+        # "Executive Management -> Finance & Accounting -> the finance team".
+        em_id = _dept_node_id(EXEC_DEPT)
+        parent = em_id if em_id in dag.G else "root_global"
+        if parent in dag.G and not dag.G.has_edge(parent, dept_id):
+            for stale in list(dag.G.predecessors(dept_id)):
+                if str(dag.G.nodes[stale].get("node_type", "")).startswith("dept") \
+                        or stale == "root_global":
+                    dag.G.remove_edge(stale, dept_id)
+            dag.G.add_edge(parent, dept_id)
         # Record who runs it so the UI can show "Finance & Accounting — Raj Patel".
         dmeta = dict(dag.G.nodes[dept_id].get("metadata", {}))
         dmeta["head_name"] = attrs.get("label", "")

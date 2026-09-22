@@ -125,6 +125,48 @@ ok(dept_by_exec.get("Hana Ruiz") == "Human Resources",
    "split: HR executive runs Human Resources")
 ok(dept_by_exec.get("Omar Diaz") == "Core Diagnostics",
    "split: business-unit executive runs that unit, not a generic bucket")
+
+# A job title is not a department. These previously became departments called
+# "Commercial Officer", "Operations Officer" and "People Officer"; they must
+# map through the canonical Department/Designation taxonomy instead.
+for title, expect in [
+    ("Chief Commercial Officer", "Sales & Business Development"),
+    ("Chief Operations Officer", "Operations"),
+    ("Chief People Officer", "Human Resources"),
+    ("Chief Operating Officer", "Operations"),
+    ("Chief Revenue Officer", "Sales & Business Development"),
+    ("Chief Product Officer", "Product Management"),
+    ("Chief Data Officer", "Information Technology"),
+    ("Chief Risk Officer", "Legal, Risk & Compliance"),
+    ("Chief Customer Officer", "Customer Success & Service"),
+    ("Chief Sustainability Officer", "Sustainability"),
+]:
+    got = S._exec_department(title)
+    ok(got == expect, f"taxonomy: {title} -> {got}")
+ok(not any(S._exec_department(t).lower().endswith("officer")
+           for t in ["Chief Commercial Officer", "Chief Operations Officer",
+                     "Chief People Officer", "Chief Security Officer"]),
+   "taxonomy: no department is named after a job title")
+
+# Executive Management branches into those departments in the chart itself.
+em_tree = client.get("/tree", params={"job_id": em_job, "dept_only": "true"}).json()
+
+
+def _find(node, label):
+    if node.get("label") == label:
+        return node
+    for kid in node.get("children") or []:
+        hit = _find(kid, label)
+        if hit:
+            return hit
+    return None
+
+
+em_node = _find(em_tree if "label" in em_tree else em_tree.get("tree", em_tree), S.EXEC_DEPT)
+ok(em_node is not None, "branch: Executive Management is in the tree")
+branch_labels = [c.get("label") for c in (em_node.get("children") or [])] if em_node else []
+ok("Finance & Accounting" in branch_labels,
+   f"branch: departments hang off Executive Management (got {branch_labels})")
 ok(dept_by_exec.get("Lena Vogt") == "Structural Heart",
    "split: second business unit kept distinct")
 ok(dept_by_exec.get("Robin Apex") == "",

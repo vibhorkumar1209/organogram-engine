@@ -1048,6 +1048,14 @@ async def _ingest_records(records: list[dict],
             # and uploaded CSV executives (CEO, CFO, etc. allowed through during
             # initial build).  Remove the CSV ones from any panel that has real
             # web data so uploaded data never pollutes enriched leadership panels.
+            # Split Executive Management into the departments its members run,
+            # so the chart branches as soon as enrichment finishes rather than
+            # waiting for someone to call /selectable.
+            try:
+                split_executive_departments(dag)
+            except Exception as _se:
+                _log.warning("Executive department split failed for '%s': %s", co_name, _se)
+
             purged = purge_csv_from_enriched_panels(dag)
             if purged:
                 _log.info("Purged %d CSV-uploaded nodes from web-enriched EM/BOD for '%s'",

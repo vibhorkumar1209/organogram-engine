@@ -11,6 +11,9 @@ interface Props {
   onClose:     () => void
   apiBase?:    string
   companyName?: string
+  /** Opens the add-people flow scoped to this department. Omitted when the
+   *  department cannot take a roster (the Board panel). */
+  onAddPeople?: (dept: OrgNode) => void
 }
 
 // Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
@@ -520,7 +523,7 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────
-export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '' }) => {
+export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '', onAddPeople }) => {
   const isOpen = deptNode !== null
   const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] ?? deptNode.color ?? '#3491E8') : '#3491E8'
 
@@ -795,6 +798,25 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
                 Save
+              </button>
+            )}
+            {onAddPeople && deptNode && (
+              <button
+                onClick={() => onAddPeople(deptNode)}
+                title={`Add people to ${deptNode.label} from CSV, Excel, JSON or an API`}
+                style={{
+                  background: '#E63946', border: 'none', borderRadius: 6,
+                  padding: '4px 10px', color: '#ffffff', fontSize: 11,
+                  fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add people
               </button>
             )}
             <button onClick={onClose} style={{
