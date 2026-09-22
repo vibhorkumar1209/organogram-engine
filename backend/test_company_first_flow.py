@@ -226,6 +226,65 @@ fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accou
 ok(fin["people"] >= 1,
    f"split: ingested people counted under the department (got {fin['people']})")
 
+# ── A failing leadership search must not skip everything after it ───────────
+# _enrich_with_llm_leadership injects people and THEN does more work of its
+# own. When that tail raised, one surrounding try meant the department split
+# never ran and the chart was never persisted — while the people already
+# injected made the job look enriched. The live NVIDIA chart showed exactly
+# that: 9 directors, 10 executives, and zero departments under EM.
+import structural_engine as _se_mod
+
+_orig_enrich = A._enrich_with_llm_leadership
+_orig_split = A.split_executive_departments
+_split_calls = {"n": 0}
+
+
+def _boom(dag, classified, company_name, domain=""):
+    """Inject leadership, then fail — exactly how the real tail broke."""
+    import uuid as _u
+    from inference_logic import ClassifiedRecord as _R
+    for _n, _t in [("Kagan Test", "Chief Technology Officer"),
+                   ("Kress Test", "Chief Financial Officer")]:
+        dag.insert_person(_R(
+            id="llm_" + _u.uuid4().hex[:8], full_name=_n, designation=_t,
+            company=company_name, linkedin_url="", location="", country="",
+            sector="Private", region="Global HQ", layer=1,
+            dept_primary=_se_mod.EXEC_DEPT, dept_secondary="", dept_tertiary="",
+            nlp_confidence=0.9, nlp_industry="llm", nlp_method="llm_leadership_web"))
+    dag.repair_governance_edges()
+    raise RuntimeError("LinkedIn backfill blew up")
+
+
+def _counting_split(dag):
+    _split_calls["n"] += 1
+    return _orig_split(dag)
+
+
+A._enrich_with_llm_leadership = _boom
+A.split_executive_departments = _counting_split
+try:
+    boom_job = _new_chart("Boom Co", "boom.example", "X").json()["job_id"]
+finally:
+    A._enrich_with_llm_leadership = _orig_enrich
+    A.split_executive_departments = _orig_split
+
+ok(_split_calls["n"] >= 1,
+   "resilience: the department split still ran after the search raised")
+_boom_dag = A._JOBS[boom_job].dag
+_boom_em = _boom_dag._node_id("dept", "Executive Management")
+_boom_depts = [k for k in _boom_dag.G.successors(_boom_em)
+               if str(_boom_dag.G.nodes[k].get("node_type", "")).startswith("dept")] \
+    if _boom_em in _boom_dag.G else []
+ok(len(_boom_depts) >= 15,
+   f"resilience: departments exist despite the failure (got {len(_boom_depts)})")
+_boom_people = [n for n in _boom_dag.G.nodes
+                if _boom_dag.G.nodes[n].get("node_type") == "person"]
+ok(len(_boom_people) >= 2,
+   "resilience: people the search injected before failing are kept")
+_boom_sel = client.get("/selectable", params={"job_id": boom_job}).json()
+ok(len(_boom_sel["departments"]) >= 15,
+   "resilience: those departments are selectable without a second split call")
+
 # ── Executive Management renders once, whatever the insertion order ─────────
 # It is parented to root when created before Board of Management exists; once
 # BOD appeared, the next executive inserted attached it under BOD as well,

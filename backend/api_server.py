@@ -1041,35 +1041,55 @@ async def _ingest_records(records: list[dict],
             except Exception:
                 pass
             _log.info("Background enrichment starting for '%s' (domain=%s)", co_name, domain)
-            _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
+            # Each step is guarded on its own. The leadership search injects
+            # people and THEN does work of its own (LinkedIn backfill); when
+            # that tail raised, the single surrounding try meant everything
+            # below was skipped — the department split never ran, and the chart
+            # was never written to the database — while the people it had
+            # already injected made the job look successfully enriched.
+            try:
+                _enrich_with_llm_leadership(dag, classified, co_name, domain=domain)
+            except Exception as _ee:
+                _log.warning("Leadership search failed for '%s' (keeping whatever it "
+                             "injected): %s\n%s", co_name, _ee, traceback.format_exc())
+
+            # Split Executive Management into the departments its members run,
+            # so the chart branches as soon as enrichment finishes rather than
+            # waiting for someone to call /selectable.
+            try:
+                created = split_executive_departments(dag)
+                _log.info("Executive department split for '%s': %d created", co_name, created)
+            except Exception as _se:
+                _log.warning("Executive department split failed for '%s': %s\n%s",
+                             co_name, _se, traceback.format_exc())
 
             # ── Purge CSV people from panels that web scraping already filled ──
             # After web enrichment, EM/BOD may contain both web-scraped executives
             # and uploaded CSV executives (CEO, CFO, etc. allowed through during
             # initial build).  Remove the CSV ones from any panel that has real
             # web data so uploaded data never pollutes enriched leadership panels.
-            # Split Executive Management into the departments its members run,
-            # so the chart branches as soon as enrichment finishes rather than
-            # waiting for someone to call /selectable.
             try:
-                split_executive_departments(dag)
-            except Exception as _se:
-                _log.warning("Executive department split failed for '%s': %s", co_name, _se)
-
-            purged = purge_csv_from_enriched_panels(dag)
-            if purged:
-                _log.info("Purged %d CSV-uploaded nodes from web-enriched EM/BOD for '%s'",
-                          purged, co_name)
+                purged = purge_csv_from_enriched_panels(dag)
+                if purged:
+                    _log.info("Purged %d CSV-uploaded nodes from web-enriched EM/BOD for '%s'",
+                              purged, co_name)
+            except Exception as _pe:
+                _log.warning("Panel purge failed for '%s': %s", co_name, _pe)
 
             # ── Uploaded-data fallback ────────────────────────────────────────
             # If web scraping found no (or thin) BOD/EM data, promote the most
             # senior people from the uploaded CSV into those panels so the chart
             # is never left with empty leadership sections.
-            promoted = promote_uploaded_to_leadership(dag, classified, co_name)
-            if promoted:
-                _log.info("Uploaded-fallback: %d people promoted to BOD/EM for '%s'",
-                          promoted, co_name)
+            try:
+                promoted = promote_uploaded_to_leadership(dag, classified, co_name)
+                if promoted:
+                    _log.info("Uploaded-fallback: %d people promoted to BOD/EM for '%s'",
+                              promoted, co_name)
+            except Exception as _pr:
+                _log.warning("Uploaded-fallback failed for '%s': %s", co_name, _pr)
 
+            # Persist whatever we ended up with. This previously sat behind
+            # every step above, so one failure lost the whole enriched chart.
             db.upsert_dag(dag)
             _log.info("Background enrichment complete for '%s'", co_name)
         except Exception as exc:
