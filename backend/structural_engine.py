@@ -2656,6 +2656,21 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
     """
     created = 0
 
+    # Executive Management must exist before anything can branch from it.
+    # It is only created when someone is placed in it, so a company whose
+    # leadership search returned nobody for that panel had no EM node — and
+    # every department was then attached to the root instead. The panel was
+    # sometimes created moments later (by the uploaded-data fallback), leaving
+    # it visible in the chart with no branches at all, which is exactly what
+    # the live NVIDIA chart showed. ensure_department is the engine's own
+    # routine, so EM lands under Board of Management when that exists.
+    em_id = _dept_node_id(EXEC_DEPT)
+    if em_id not in dag.G:
+        try:
+            dag.ensure_department("Global HQ", "", EXEC_DEPT, "", "")
+        except Exception as exc:
+            logger.warning("Could not create the Executive Management panel: %s", exc)
+
     # Which department each executive runs, so a head can be attached below.
     head_of: dict[str, tuple[str, str, str]] = {}   # dept -> (node_id, name, title)
     for nid in list(dag.G.nodes):

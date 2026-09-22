@@ -226,6 +226,49 @@ fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accou
 ok(fin["people"] >= 1,
    f"split: ingested people counted under the department (got {fin['people']})")
 
+# ── Departments branch from EM even when the search finds almost nobody ─────
+# Executive Management is only created when someone is placed in it. A live
+# NVIDIA run returned 0 directors and 1 executive who landed in a functional
+# department, so no EM node existed when the split ran and all 15 departments
+# were attached to the ROOT. EM was then created moments later by the
+# uploaded-data fallback, leaving it in the chart with no branches — the exact
+# symptom reported, and invisible to a test that seeded EM members first.
+def _branches_for(people):
+    import uuid as _u
+    from structural_engine import OrganogramDAG as _D, split_executive_departments as _sp
+    from inference_logic import ClassifiedRecord as _R
+    dag = _D(company_name="Thin Co")
+    for _n, _t, _d, _l in people:
+        dag.insert_person(_R(
+            id="llm_" + _u.uuid4().hex[:8], full_name=_n, designation=_t,
+            company="Thin Co", linkedin_url="", location="", country="",
+            sector="Private", region="Global HQ", layer=_l, dept_primary=_d,
+            dept_secondary="", dept_tertiary="", nlp_confidence=0.9,
+            nlp_industry="llm", nlp_method="llm_leadership_web"))
+    dag.repair_governance_edges()
+    _sp(dag)
+    _em = dag._node_id("dept", S.EXEC_DEPT)
+    if _em not in dag.G:
+        return -1, -1
+    kids = sum(1 for k in dag.G.successors(_em)
+               if str(dag.G.nodes[k].get("node_type", "")).startswith("dept"))
+    root_depts = sum(1 for k in dag.G.successors("root_global")
+                     if str(dag.G.nodes[k].get("node_type", "")).startswith("dept"))
+    return kids, root_depts
+
+
+for _label, _people in [
+    ("nobody found at all", []),
+    ("one person in a functional department", [("A", "Software Engineer", "Engineering", 5)]),
+    ("one director, no executives", [("B", "Independent Director", S.BOARD_DEPT, 2)]),
+    ("one executive, no directors", [("A", "Chief Technology Officer", S.EXEC_DEPT, 1)]),
+]:
+    _kids, _root = _branches_for(_people)
+    ok(_kids >= 15,
+       f"thin: departments branch from Executive Management — {_label} (got {_kids})")
+    ok(_root <= 2,
+       f"thin: departments are not dumped on the root — {_label} (root has {_root})")
+
 # ── A failing leadership search must not skip everything after it ───────────
 # _enrich_with_llm_leadership injects people and THEN does more work of its
 # own. When that tail raised, one surrounding try meant the department split
