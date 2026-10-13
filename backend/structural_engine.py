@@ -2832,6 +2832,9 @@ def resolve_leadership_linkedin(dag: "OrganogramDAG", company_name: str,
             dag.G.nodes[nid]["metadata"] = meta
     summary = {"searched": len(results), "found": found,
                "not_found": len(results) - found, "provided": provided}
+    # Say WHY nothing was searched — a bare zero looks like "nobody found".
+    if people and not results and not os.environ.get("PARALLEL_API_KEY"):
+        summary["skipped"] = "PARALLEL_API_KEY not set"
     logger.info("LinkedIn for '%s': %s", company_name, summary)
     return summary
 

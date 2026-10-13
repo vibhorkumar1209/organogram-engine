@@ -936,9 +936,11 @@ export default function App() {
           }
           clearInterval(pollTimer)
           const li = pd.linkedin ?? {}
-          const liNote = li.searched
-            ? ` · 🔗 LinkedIn ${li.found}/${li.searched} matched`
-            : ''
+          const liNote = li.skipped
+            ? ' · 🔗 LinkedIn search not configured'
+            : li.searched
+              ? ` · 🔗 LinkedIn ${li.found}/${li.searched} matched`
+              : ''
           setLeadershipNote(`✅ Found ${found}${liNote}`)
           // Profiles were written after the chart loaded. The chart itself is
           // unchanged (no reload, no refit) — drop the cached executives so

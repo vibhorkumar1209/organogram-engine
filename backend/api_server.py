@@ -3301,6 +3301,7 @@ async def debug_leadership(company: str = "Wells Fargo", domain: str = "wellsfar
         "env": {
             "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY")),
             "GEMINI_API_KEY":    bool(os.environ.get("GEMINI_API_KEY")),
+            "PARALLEL_API_KEY":  bool(os.environ.get("PARALLEL_API_KEY")),  # LinkedIn search
         },
         "source_chars": {
             "wikipedia": len(wiki),
