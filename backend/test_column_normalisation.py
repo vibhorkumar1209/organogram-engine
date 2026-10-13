@@ -22,6 +22,8 @@ import logging
 logging.disable(logging.CRITICAL)
 
 import api_server as A
+# api_server loads .env; the LinkedIn step must not make paid searches here.
+os.environ["PARALLEL_API_KEY"] = ""
 
 fails: list[str] = []
 

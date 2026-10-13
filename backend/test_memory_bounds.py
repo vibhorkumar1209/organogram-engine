@@ -29,6 +29,8 @@ def ok(cond, msg):
 
 
 import api_server as A
+# api_server loads .env; the LinkedIn step must not make paid searches here.
+os.environ["PARALLEL_API_KEY"] = ""
 from fastapi import HTTPException
 from structural_engine import build_from_records
 

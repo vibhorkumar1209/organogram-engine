@@ -4,6 +4,7 @@ import type { OrgNode, Stats } from './types'
 import { OrgChart } from './components/OrgChart'
 import { SearchBar } from './components/SearchBar'
 import { ExecPanel } from './components/ExecPanel'
+import { LinkedInTable, type LinkedInReport } from './components/LinkedInTable'
 
 const API = (import.meta.env.VITE_API_URL || '/api').trim()
 
@@ -367,6 +368,12 @@ export default function App() {
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
   // Total person count for the open dept (may exceed panelExecs.length when paginated)
   const [panelTotal, setPanelTotal] = useState<number>(0)
+  // The poll runs in a long-lived interval; it reads the open panel from here.
+  const panelDeptRef = useRef<OrgNode | null>(null)
+  useEffect(() => { panelDeptRef.current = panelDept }, [panelDept])
+
+  // LinkedIn profiles of Board + Executive Management, as a table.
+  const [linkedInReport, setLinkedInReport] = useState<LinkedInReport | 'loading' | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
@@ -411,6 +418,34 @@ export default function App() {
     if (!jobId) return fetch(`${API}${path}`, opts)   // no active job — let the backend's 422 surface
     const sep = path.includes('?') ? '&' : '?'
     return fetch(`${API}${path}${sep}job_id=${encodeURIComponent(jobId)}`, opts)
+  }
+
+  // Re-read the open panel's people — LinkedIn profiles arrive after the
+  // chart loads, and a panel opened before then would otherwise stay stale.
+  function refreshOpenPanel() {
+    const dept = panelDeptRef.current
+    if (!dept) return
+    apiFetch(`/executives?dept_id=${encodeURIComponent(dept.node_id)}&limit=200`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!d || d.loaded === false || panelDeptRef.current?.node_id !== dept.node_id) return
+        const people = ((d.executives ?? []) as Record<string, any>[])
+          .filter(p => p.node_id)
+          .map(p => toPersonNode(p, dept.color))
+        setPanelExecs(people)
+        setPanelTotal(d.total ?? people.length)
+        const entryId = activeEntryIdRef.current
+        if (entryId) updateExecCache(entryId, dept.node_id, people)
+      })
+      .catch(() => {})
+  }
+
+  function openLinkedInReport() {
+    setLinkedInReport('loading')
+    apiFetch('/linkedin-report')
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
+      .then(d => setLinkedInReport(d))
+      .catch(() => setLinkedInReport(null))
   }
 
   // Patch a history entry's stored job_id — used when restoring a demo entry
@@ -499,6 +534,16 @@ export default function App() {
           ? { ...e, execCache: { ...e.execCache, [deptId]: people } }
           : e
       )
+      persistHistory(next)
+      return next
+    })
+  }, [])
+
+  // Forget a history entry's cached executives — they predate a change the
+  // server has since made (LinkedIn profiles arrive after the chart).
+  const clearExecCache = useCallback((entryId: string) => {
+    setHistory(prev => {
+      const next = prev.map(e => e.id === entryId ? { ...e, execCache: {} } : e)
       persistHistory(next)
       return next
     })
@@ -832,12 +877,19 @@ export default function App() {
       // Board of Directors and Executive Management panels populate.
       setLeadershipNote('🔍 Searching for Board & Executive leadership online…')
       let pollCount = 0
-      const MAX_POLLS = 30  // 30 × 10s = 5 minutes (Parallel.AI needs up to 160s)
+      // Exhaustive sites take ~4 minutes to enrich, then LinkedIn profiles
+      // take about another minute — 48 × 10s = 8 minutes.
+      const MAX_POLLS = 48
+      // Stages already reflected in the chart, so each reloads it once.
+      let shownPeople = false
+      let shownDepartments = false
       const pollTimer = setInterval(async () => {
         pollCount++
         if (pollCount > MAX_POLLS) {
           clearInterval(pollTimer)
-          setLeadershipNote('⚠ Leadership search timed out — add a company website URL and re-upload to retry.')
+          setLeadershipNote(shownDepartments
+            ? '⚠ LinkedIn profile search timed out — the chart is complete without them.'
+            : '⚠ Leadership search timed out — add a company website URL and re-upload to retry.')
           return
         }
         try {
@@ -851,16 +903,48 @@ export default function App() {
           // Usage climbs across polls as background enrichment makes more
           // Claude/Gemini calls — patch it into the active history entry live.
           if (activeEntryIdRef.current) updateUsage(activeEntryIdRef.current, toUsage(pd.usage))
-          if (pd.ready) {
-            clearInterval(pollTimer)
-            setLeadershipNote(`✅ Found ${pd.board_count} board members · ${pd.exec_count} executives`)
-            // Quietly reload the tree — BOD/EM nodes now exist in the DAG.
-            // Same backend job as the original upload, just re-synced.
-            await loadDeptStructure(data.stats, pd.industry || data.industry || '', 'upload', toUsage(pd.usage), activeJobIdRef.current)
-          } else if (pd.enrichment_done) {
+          const liveStats = pd.stats ?? data.stats
+          const reload = () => {
+            setStats(liveStats)
+            return loadDeptStructure(liveStats, pd.industry || data.industry || '', 'upload', toUsage(pd.usage), activeJobIdRef.current)
+          }
+          const found = `${pd.board_count} board members · ${pd.exec_count} executives`
+
+          // `ready` flips as soon as the first leader is injected — the
+          // departments under Executive Management are built AFTER that, so
+          // stopping here (as this poll used to) showed a chart without them.
+          if (!pd.enrichment_done) {
+            if (pd.ready && !shownPeople) {
+              shownPeople = true
+              setLeadershipNote(`🔍 Found ${found} — building departments…`)
+              await reload()
+            }
+            return
+          }
+          if (!pd.ready) {
             clearInterval(pollTimer)
             setLeadershipNote('ℹ No public leadership data found — add company website URL and re-upload to retry')
+            return
           }
+          if (!shownDepartments) {
+            shownDepartments = true
+            await reload()
+          }
+          if (!pd.linkedin_done) {
+            setLeadershipNote(`✅ Found ${found} · 🔗 matching LinkedIn profiles…`)
+            return
+          }
+          clearInterval(pollTimer)
+          const li = pd.linkedin ?? {}
+          const liNote = li.searched
+            ? ` · 🔗 LinkedIn ${li.found}/${li.searched} matched`
+            : ''
+          setLeadershipNote(`✅ Found ${found}${liNote}`)
+          // Profiles were written after the chart loaded. The chart itself is
+          // unchanged (no reload, no refit) — drop the cached executives so
+          // panels re-read them, and refresh whichever one is open.
+          if (activeEntryIdRef.current) clearExecCache(activeEntryIdRef.current)
+          refreshOpenPanel()
         } catch { clearInterval(pollTimer) }
       }, 10_000)
 
@@ -1605,7 +1689,7 @@ export default function App() {
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Company name — e.g. 3M Company"
+                  placeholder="Organisation — company, ministry, university, NGO…"
                   value={companyName}
                   onChange={e => setCompanyName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') startCompanyChart() }}
@@ -1617,7 +1701,7 @@ export default function App() {
                 />
                 <input
                   type="text"
-                  placeholder="Company domain — e.g. 3m.com"
+                  placeholder="Website or page URL — e.g. 3m.com, hec.edu/en/qatar"
                   value={companyWebsite}
                   onChange={e => setCompanyWebsite(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') startCompanyChart() }}
@@ -1852,12 +1936,26 @@ export default function App() {
             onClose={() => { setPanelDept(null); setPanelExecs(null); setPanelTotal(0) }}
             apiBase={API}
             companyName={deptTree?.label ?? ''}
+            onShowLinkedIn={
+              panelDept && ['Board of Management', 'Executive Management'].includes(panelDept.label)
+                ? openLinkedInReport
+                : undefined
+            }
           />
         </div>
       </>
       )}
       </div>
     </div>
+
+    {linkedInReport && (
+      <LinkedInTable
+        report={linkedInReport === 'loading' ? null : linkedInReport}
+        companyName={deptTree?.label ?? ''}
+        onRefresh={openLinkedInReport}
+        onClose={() => setLinkedInReport(null)}
+      />
+    )}
 
     {/* ── Export layer-selection dialog ───────────────────────────────── */}
     {jsonDialog && createPortal(

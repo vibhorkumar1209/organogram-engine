@@ -43,6 +43,7 @@ from structural_engine import (
     _enrich_with_llm_leadership,
     add_records_to_dag,
     split_executive_departments,
+    resolve_leadership_linkedin,
     _exec_department,
     _dept_node_id,
     BOARD_DEPT,
@@ -604,6 +605,10 @@ class JobSession:
     db: OrganogramDB
     classified_records: list = field(default_factory=list)
     enrichment_done: bool = False
+    # LinkedIn profiles are resolved after the chart is ready; these say
+    # whether that has finished and what it found.
+    linkedin_done: bool = False
+    linkedin_summary: dict = field(default_factory=dict)
     last_accessed_at: float = field(default_factory=time.time)
     db_path: str = ""
     company_name: str = ""
@@ -792,7 +797,7 @@ def _try_reload_job(job_id: str) -> None:
             if restored_dag and restored_dag.G.number_of_nodes() > 1:
                 _JOBS[job_id] = JobSession(
                     dag=restored_dag, db=restored_db,
-                    classified_records=[], enrichment_done=True,
+                    classified_records=[], enrichment_done=True, linkedin_done=True,
                     last_accessed_at=time.time(), db_path=path,
                     company_name=getattr(restored_dag, "company_name", ""),
                 )
@@ -814,7 +819,7 @@ def _try_reload_job(job_id: str) -> None:
         restored_db.upsert_dag(restored_dag)
         _JOBS[job_id] = JobSession(
             dag=restored_dag, db=restored_db,
-            classified_records=[], enrichment_done=True,
+            classified_records=[], enrichment_done=True, linkedin_done=True,
             last_accessed_at=time.time(), db_path=path,
             company_name=restored_dag.company_name,
         )
@@ -1053,6 +1058,9 @@ async def _ingest_records(records: list[dict],
                 from llm_fallback import _LEADERSHIP_CACHE
                 cache_key = f"{co_name.strip().lower()}|{(domain or '').strip().lower()}"
                 removed = _LEADERSHIP_CACHE.pop(cache_key, None)
+                # Variants keyed with a site URL / location too.
+                for _k in [k for k in _LEADERSHIP_CACHE if k.startswith(cache_key + "|")]:
+                    removed = _LEADERSHIP_CACHE.pop(_k, None) or removed
                 if removed is not None:
                     _log.info("Cleared stale cache for '%s' before enrichment", co_name)
             except Exception:
@@ -1122,6 +1130,28 @@ async def _ingest_records(records: list[dict],
                 history_store.record_job_completed(
                     job_id, dag, _root_meta.get("industry", ""), _session.usage_tracker.summary()
                 )
+
+        # ── LinkedIn profiles for Board + Executive Management ───────────
+        # After enrichment_done, so the chart and its departments appear
+        # without waiting on ~a minute of profile searches. Saved again when
+        # done so a reload gets the profiles too.
+        _session = _JOBS.get(job_id)
+        try:
+            summary = resolve_leadership_linkedin(dag, co_name, domain)
+            if _session is not None:
+                _session.linkedin_summary = summary
+            db.upsert_dag(dag)
+            if _session is not None:
+                _root_meta = dag.G.nodes.get("root_global", {}).get("metadata", {})
+                history_store.record_job_completed(
+                    job_id, dag, _root_meta.get("industry", ""),
+                    _session.usage_tracker.summary())
+        except Exception as _le:
+            _log.warning("LinkedIn resolution failed for '%s': %s\n%s",
+                         co_name, _le, traceback.format_exc())
+        finally:
+            if _session is not None:
+                _session.linkedin_done = True
 
     if background_tasks is not None:
         background_tasks.add_task(_run_enrichment, job_id, dag, classified, company_name, domain, db)
@@ -1219,6 +1249,11 @@ async def leadership_ready(job_id: str = Query(...)):
         "em_branches":      em_branches,
         "industry":         industry,
         "enrichment_done":  session.enrichment_done,  # True once background task finished
+        "linkedin_done":    session.linkedin_done,
+        "linkedin":         session.linkedin_summary,
+        # The chart grows during enrichment; the stats the upload returned
+        # describe the empty starting chart.
+        "stats":            dag.stats(),
         "usage":            session.usage_tracker.summary(),
     }
 
@@ -1240,7 +1275,7 @@ async def load_demo():
         records, company_name="AutoPrime Motors", db_path=db_path
     )
     _JOBS[job_id] = JobSession(
-        dag=dag, db=db, classified_records=classified, enrichment_done=True,
+        dag=dag, db=db, classified_records=classified, enrichment_done=True, linkedin_done=True,
         last_accessed_at=time.time(), db_path=db_path, company_name="AutoPrime Motors",
         usage_tracker=tracker,
     )
@@ -1780,6 +1815,23 @@ def _clean_domain(raw: str) -> str:
     return value[4:] if value.startswith("www.") else value
 
 
+def _site_url(raw: str) -> str:
+    """The full page the user gave, when it is more than a bare domain.
+
+    'hec.edu/en/qatar' or 'https://qatar.exed.hec.edu/about-us' point at one
+    entity or one page; reducing them to a domain threw that away.
+    """
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value):
+        value = "https://" + value
+    m = re.match(r"^(https?)://([^/?#]+)(/[^?#]*)?", value)
+    if not m or not m.group(3) or m.group(3) in ("", "/"):
+        return ""
+    return f"{m.group(1).lower()}://{m.group(2).lower()}{m.group(3)}"
+
+
 @app.post("/company-chart")
 async def company_chart(payload: CompanyChartRequest,
                         background_tasks: BackgroundTasks = None):
@@ -1795,6 +1847,7 @@ async def company_chart(payload: CompanyChartRequest,
         raise HTTPException(status_code=422,
                             detail="Company name is required to start a chart.")
     domain = _clean_domain(payload.domain)
+    site_url = _site_url(payload.domain)
     hq = str(payload.hq_location or "").strip()
 
     result = await _ingest_records([], [], [], company_name, domain, background_tasks)
@@ -1809,6 +1862,8 @@ async def company_chart(payload: CompanyChartRequest,
             meta["hq_location"] = hq
         if domain:
             meta["domain"] = domain
+        if site_url:
+            meta["site_url"] = site_url
         session.dag.G.nodes["root_global"]["metadata"] = meta
     result["hq_location"] = hq
     result["domain"] = domain
@@ -2058,6 +2113,83 @@ async def ingest_json_into_chart(
     _validate_job_id(job_id)
     selected = [s for s in (scope or "").split(",") if s.strip()]
     return _apply_ingest(job_id, _records_from_payload(payload), selected)
+
+
+def _linkedin_rows(dag) -> list[dict]:
+    """One row per Board / Executive Management member, with their profile."""
+    from structural_engine import _person_department, _name_key
+    company = (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}).get(
+        "company_name", "") or getattr(dag, "company_name", "") or ""
+    rows: dict[str, dict] = {}
+    for nid, attrs in dag.G.nodes(data=True):
+        if attrs.get("node_type") != "person":
+            continue
+        panel = _person_department(dag, nid)
+        if panel not in (BOARD_DEPT, EXEC_DEPT):
+            continue
+        meta = attrs.get("metadata", {}) or {}
+        name = attrs.get("label", "")
+        key = _name_key(name)
+        role = "Board of Directors" if panel == BOARD_DEPT else "Executive Management"
+        title = meta.get("designation", "")
+        if key in rows:
+            # An executive chair: one row naming both seats.
+            row = rows[key]
+            if role not in row["Panel"]:
+                row["Panel"] += f" + {role}"
+                row["Expected Title/Role"] = " / ".join(
+                    t for t in (row["Expected Title/Role"], title) if t)
+            continue
+        matched = " — ".join(t for t in (meta.get("linkedin_matched_name", ""),
+                                         meta.get("linkedin_matched_title", "")) if t)
+        conf = meta.get("linkedin_confidence", "") or ("Not searched" if not meta.get("linkedin_url") else "")
+        rows[key] = {
+            "Full Name": name,
+            "Expected Title/Role": title,
+            "Company": meta.get("company", "") or company,
+            "LinkedIn Profile URL": meta.get("linkedin_url", "") or "Not Found",
+            "Confidence Level": conf,
+            "Matched Name and Title on LinkedIn": matched,
+            "Panel": role,
+            "Department": meta.get("leads_department", ""),
+            "node_id": nid,
+        }
+    order = {"Board of Directors": 0}
+    return sorted(rows.values(), key=lambda r: (order.get(r["Panel"].split(" + ")[0], 1),
+                                                r["Full Name"]))
+
+
+_LINKEDIN_COLUMNS = ["Full Name", "Expected Title/Role", "Company", "LinkedIn Profile URL",
+                     "Confidence Level", "Matched Name and Title on LinkedIn"]
+
+
+@app.get("/linkedin-report")
+def linkedin_report(job_id: str = Query(...)):
+    """
+    LinkedIn profiles for every Board and Executive Management member, as rows
+    and as a ready-to-paste markdown table. Confidence is High / Medium / Low /
+    Not Found, or "Provided" for a URL that came from the user's own data.
+    """
+    if not _dag_loaded(job_id):
+        return {"loaded": False, "rows": [], "markdown": ""}
+    dag, _ = _require_dag(job_id)
+    rows = _linkedin_rows(dag)
+
+    def cell(v: str) -> str:
+        return str(v or "").replace("|", "\\|").replace("\n", " ")
+
+    md = ["| " + " | ".join(_LINKEDIN_COLUMNS) + " |",
+          "|" + "|".join(["---"] * len(_LINKEDIN_COLUMNS)) + "|"]
+    md += ["| " + " | ".join(cell(r[c]) for c in _LINKEDIN_COLUMNS) + " |" for r in rows]
+    session = _JOBS.get(job_id)
+    return {
+        "loaded": True,
+        "rows": rows,
+        "columns": _LINKEDIN_COLUMNS,
+        "markdown": "\n".join(md),
+        "linkedin_done": session.linkedin_done if session else True,
+        "summary": session.linkedin_summary if session else {},
+    }
 
 
 @app.get("/executives")

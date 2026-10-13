@@ -1927,18 +1927,39 @@ def _is_csuite(title: str) -> bool:
     return True
 
 
+# Heads of organisations that aren't companies: a ministry is run by its
+# Minister, an agency by its Director-General, a school by its Dean, a
+# university by its Rector or Chancellor. Only when the title IS the head
+# role — "Dean of Students" or "Dean of Faculty" run a function, not the
+# school, and "Minister of Finance" heading a ministry is still its apex.
+_ORG_HEAD_RE = re.compile(
+    r"^(?:the\s+)?(?:dean|rector|chancellor|minister|director[\s-]+general"
+    r"|secretary[\s-]+general|permanent\s+secretary|governor|mayor"
+    r"|(?:chief\s+)?commissioner)\b"
+    r"(?!\s+(?:of|for)\s+(?:students?|faculty|admissions?|academic|research|graduate"
+    r"|undergraduate|studies|programs?|programmes?|the\s+faculty|state\b))",
+    re.IGNORECASE)
+
+
 def _is_ceo(title: str) -> bool:
     """
     Return True when *title* is the CEO / apex of Executive Management.
-    Covers: CEO, Chief Executive Officer, (Group) President, Group MD.
+    Covers: CEO, Chief Executive Officer, (Group) President, Group MD, and the
+    head of a public body or school (Minister, Director-General, Dean, Rector…).
     Excludes Deputy/Vice/Assistant CEO.
     """
     t = title.lower().strip()
-    if any(exc in t for exc in ("deputy", "vice", "assistant", "associate")):
+    # In UK-style universities the Vice-Chancellor runs the institution (the
+    # Chancellor is ceremonial) — unless it is a Pro- or Deputy Vice-Chancellor.
+    if re.search(r"^(?:president\s+and\s+)?vice[\s-]+chancellor\b", t):
+        return True
+    # Whole words: "under" must not catch "Co-founder and CEO".
+    if re.search(r"\b(?:deputy|vice|assistant|associate|under|pro)\b", t):
         return False
     return bool(re.search(r"\bchief\s+executive\b|\bceo\b", t)) or \
            bool(re.search(r"^(?:group\s+)?president$", t)) or \
-           bool(re.search(r"^(?:group\s+)?managing\s+director$", t))
+           bool(re.search(r"^(?:group\s+)?managing\s+director$", t)) or \
+           bool(_ORG_HEAD_RE.search(t))
 
 
 # Geographic terms that signal a regional/country scope in an exec title.
@@ -2257,8 +2278,18 @@ def _enrich_with_llm_leadership(
             _MAX_ENRICH_COMPANIES, _MAX_ENRICH_COMPANIES + skipped, skipped, company_name,
         )
 
+    # What the user told us about the organisation beyond its domain: the exact
+    # page they pointed at and where it is. Both steer the search to the right
+    # entity when a domain hosts several (HEC Paris vs HEC Paris in Qatar).
+    root_meta = (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {})
+    site_url = str(root_meta.get("site_url", "") or "")
+    location = str(root_meta.get("hq_location", "") or "")
+
     for co, ctx in companies.items():
-        leadership = llm_fetch_leadership(co, domain=domain if co == company_name else "")
+        own = co == company_name
+        leadership = llm_fetch_leadership(
+            co, domain=domain if own else "",
+            site_url=site_url if own else "", location=location if own else "")
         region = ctx["region"]
         sector = ctx["sector"]
 
@@ -2303,8 +2334,6 @@ def _enrich_with_llm_leadership(
         # injected_dept_keys tracks (name_key, dept) to prevent true duplicates
         # while allowing the same person to appear in both BOD and EM.
         injected_dept_keys: set[tuple[str, str]] = set()
-        # Track newly injected nodes that still need a LinkedIn URL after upload + Gemini response
-        missing_linkedin: list[dict] = []
 
         for layer, name, title, dept_primary, sub_role, person_region, li_from_gemini in injections:
             key = _name_key(name)
@@ -2325,12 +2354,8 @@ def _enrich_with_llm_leadership(
                         meta["nlp_method"] = "llm_leadership_web"
                         if sub_role:
                             meta["board_sub_role"] = sub_role
-                        # Upgrade LinkedIn URL if we now have one and the node didn't
-                        resolved_li = (li_from_gemini
-                                       or uploaded_linkedin.get(key, "")
-                                       or meta.get("linkedin_url", ""))
-                        if resolved_li:
-                            meta["linkedin_url"] = resolved_li
+                        if source == "web" and li_from_gemini:
+                            meta["linkedin_site_url"] = li_from_gemini
                         dag.G.nodes[nid]["metadata"] = meta
                         ai_only_keys.discard(key)
                         break
@@ -2345,9 +2370,13 @@ def _enrich_with_llm_leadership(
 
             injected_dept_keys.add(dept_key)
 
-            # ── Resolve LinkedIn URL ──────────────────────────────────────────
-            # Priority: Gemini response → uploaded CSV data → batch search (below)
-            linkedin = li_from_gemini or uploaded_linkedin.get(key, "")
+            # ── LinkedIn URL ──────────────────────────────────────────────────
+            # Only a URL from the user's own upload is taken as given. One the
+            # leadership extraction produced is a candidate for
+            # resolve_leadership_linkedin to verify — read off the company's
+            # own pages it is good evidence; from model knowledge it is not.
+            linkedin = uploaded_linkedin.get(key, "")
+            site_li = li_from_gemini if source == "web" else ""
 
             person_uid = f"llm_{uuid.uuid4().hex[:12]}"
             try:
@@ -2373,33 +2402,14 @@ def _enrich_with_llm_leadership(
                 # Attach board sub-role for ExecPanel committee badge display
                 if sub_role and person_uid in dag.G:
                     dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
-                # Queue for batch LinkedIn search if still no URL
-                if not linkedin:
-                    missing_linkedin.append({"name": name, "title": title, "node_id": person_uid})
+                if person_uid in dag.G:
+                    pmeta = dag.G.nodes[person_uid]["metadata"]
+                    if linkedin:
+                        pmeta["linkedin_source"] = "uploaded"
+                    if site_li:
+                        pmeta["linkedin_site_url"] = site_li
             except Exception as _exc:
                 logger.warning("Failed to inject leadership person %s: %s", name, _exc)
-
-        # ── Batch LinkedIn search for injected people still missing a URL ─────
-        # One Gemini call covers all people at this company simultaneously.
-        gemini_key = os.environ.get("GEMINI_API_KEY", "")
-        if gemini_key and missing_linkedin:
-            try:
-                from llm_fallback import _gemini_search_linkedin_batch
-                found_li = _gemini_search_linkedin_batch(missing_linkedin, co, gemini_key)
-                if found_li:
-                    for item in missing_linkedin:
-                        li_key = _name_key(item["name"])
-                        url = found_li.get(li_key, "")
-                        if url and item["node_id"] in dag.G:
-                            meta = dict(dag.G.nodes[item["node_id"]].get("metadata", {}))
-                            meta["linkedin_url"] = url
-                            dag.G.nodes[item["node_id"]]["metadata"] = meta
-                    logger.info(
-                        "LinkedIn batch resolved %d / %d missing profiles for '%s'",
-                        len(found_li), len(missing_linkedin), co,
-                    )
-            except Exception as _le:
-                logger.warning("LinkedIn batch search failed for '%s': %s", co, _le)
 
     # ── Guarantee BOD node always exists ─────────────────────────────────
     # BOD is only created when board members are found.  If web + LLM returned
@@ -2575,6 +2585,13 @@ def _exec_department(title: str) -> str:
         from classifier import classify as _classify_title
         result = _classify_title(job_title=raw, linkedin_headline="",
                                  job_function="", job_level="", industry="")
+        # "Chief Operating and Administrative Officer" is a Chief Operating
+        # Officer with a second remit; the joined form matches no keyword.
+        joined = re.match(r"^chief\s+(\w+)\s+(?:and|&)\s+\w+\s+officer\b", raw, re.I)
+        if joined and (result is None or result.method == "job_function_fallback"):
+            result = _classify_title(job_title=f"Chief {joined.group(1)} Officer",
+                                     linkedin_headline="", job_function="",
+                                     job_level="", industry="")
     except Exception as exc:
         logger.debug("Exec department classification failed for %r: %s", raw, exc)
 
@@ -2592,10 +2609,13 @@ def _exec_department(title: str) -> str:
     unit = _business_unit_from_title(raw)
     if unit and unit not in (BOARD_DEPT, EXEC_DEPT):
         return unit
-    # Never offer a panel as a department, and never invent one from a scrap of
-    # a title — "Chief of Staff" is not the head of a "Staff" department.
-    fallback = result.dept_primary if result is not None else ""
-    return "" if fallback in (BOARD_DEPT, EXEC_DEPT) else fallback
+    # Neither the taxonomy nor a business unit names anything: this person
+    # runs no department. The classifier's last resort is a 0.3-confidence
+    # Operations guess, and taking it put "Co-founder and NVIDIA Fellow" at
+    # the head of Operations — ahead of the actual EVP of Operations. Never
+    # invent one from a scrap of a title either: "Chief of Staff" is not the
+    # head of a "Staff" department.
+    return ""
 
 
 def _business_unit_from_title(title: str) -> str:
@@ -2673,6 +2693,7 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
 
     # Which department each executive runs, so a head can be attached below.
     head_of: dict[str, tuple[str, str, str]] = {}   # dept -> (node_id, name, title)
+    leads: dict[str, str] = {}                        # executive node -> dept
     for nid in list(dag.G.nodes):
         attrs = dag.G.nodes[nid]
         if attrs.get("node_type") != "person":
@@ -2682,6 +2703,7 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
         meta = attrs.get("metadata", {}) or {}
         dept_name = _exec_department(meta.get("designation", ""))
         if dept_name:
+            leads[nid] = dept_name
             head_of.setdefault(
                 dept_name, (nid, attrs.get("label", ""), meta.get("designation", "")))
 
@@ -2724,9 +2746,94 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
             dmeta = dict(dag.G.nodes[dept_id].get("metadata", {}))
             dmeta["head_node_id"], dmeta["head_name"], dmeta["head_title"] = head
             dag.G.nodes[dept_id]["metadata"] = dmeta
+    # Every executive carries the department they run — not just the first
+    # one found for it — so the Executive Management panel can show it against
+    # each officer and offer it for adding people. Two executives can run one
+    # department (a CFO and a Treasurer both land in Finance).
+    for nid, dept_name in leads.items():
+        dept_id = _dept_node_id(dept_name)
+        if nid in dag.G and dept_id in dag.G:
+            meta = dict(dag.G.nodes[nid].get("metadata", {}) or {})
+            meta["leads_department"], meta["leads_department_id"] = dept_name, dept_id
+            dag.G.nodes[nid]["metadata"] = meta
     if created:
         logger.info("Split Executive Management into %d department(s)", created)
     return created
+
+
+def resolve_leadership_linkedin(dag: "OrganogramDAG", company_name: str,
+                                domain: str = "", only_missing: bool = True) -> dict:
+    """
+    Attach a verified LinkedIn profile — or an explicit Not Found — to every
+    Board of Directors and Executive Management member.
+
+    A URL the user uploaded is kept as given. Everyone else is searched and
+    judged by linkedin_resolver, which accepts a profile only when its own
+    name, headline and employer agree with the person. A person in both panels
+    (an executive chair) is searched once and both nodes get the answer.
+
+    Returns {"searched", "found", "not_found", "provided"}.
+    """
+    from linkedin_resolver import resolve_people
+
+    hq = (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}).get("hq_location", "")
+    groups: dict[str, list[str]] = {}          # person key -> node ids
+    people: dict[str, dict] = {}
+    provided = 0
+    for nid in list(dag.G.nodes):
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") != "person":
+            continue
+        panel = _person_department(dag, nid)
+        if panel not in (BOARD_DEPT, EXEC_DEPT):
+            continue
+        meta = dict(attrs.get("metadata", {}) or {})
+        if meta.get("linkedin_url") and meta.get("linkedin_source") in (None, "", "uploaded"):
+            # Supplied by the user's own data: theirs to vouch for.
+            if meta.get("linkedin_source") != "uploaded":
+                meta.update(linkedin_source="uploaded", linkedin_confidence="Provided",
+                            linkedin_matched_name="", linkedin_matched_title="")
+                dag.G.nodes[nid]["metadata"] = meta
+            provided += 1
+            continue
+        if only_missing and meta.get("linkedin_confidence"):
+            continue
+        name = attrs.get("label", "")
+        key = _name_key(name)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(nid)
+        entry = people.setdefault(key, {
+            "key": key, "name": name, "title": meta.get("designation", ""),
+            "kind": "board" if panel == BOARD_DEPT else "executive",
+            "site_linkedin": meta.get("linkedin_site_url", ""),
+        })
+        # An executive chair is judged as an executive: their own headline
+        # is this company's role, which is the stronger check.
+        if panel == EXEC_DEPT:
+            entry.update(kind="executive", title=meta.get("designation", "") or entry["title"])
+
+    results = resolve_people(list(people.values()), company_name, domain, hq)
+    found = 0
+    for key, res in results.items():
+        if res.get("linkedin_url"):
+            found += 1
+        for nid in groups.get(key, []):
+            if nid not in dag.G:
+                continue
+            meta = dict(dag.G.nodes[nid].get("metadata", {}) or {})
+            meta.update(
+                linkedin_url=res.get("linkedin_url", ""),
+                linkedin_confidence=res.get("confidence", ""),
+                linkedin_matched_name=res.get("matched_name", ""),
+                linkedin_matched_title=res.get("matched_title", ""),
+                linkedin_source=res.get("source", ""),
+            )
+            dag.G.nodes[nid]["metadata"] = meta
+    summary = {"searched": len(results), "found": found,
+               "not_found": len(results) - found, "provided": provided}
+    logger.info("LinkedIn for '%s': %s", company_name, summary)
+    return summary
 
 
 def _dept_node_id(dept_name: str) -> str:
@@ -2837,6 +2944,13 @@ def _enrich_existing_node(dag: "OrganogramDAG", node_id: str, rec) -> None:
         value = str(getattr(rec, field, "") or "").strip()
         if value and not str(meta.get(key, "") or "").strip():
             meta[key] = value
+    # A profile URL in the user's own data outranks one found by search: the
+    # search could only infer it, the user knows it.
+    uploaded_li = str(getattr(rec, "linkedin_url", "") or "").strip()
+    if uploaded_li and meta.get("linkedin_source") != "uploaded":
+        meta.update(linkedin_url=uploaded_li, linkedin_source="uploaded",
+                    linkedin_confidence="Provided", linkedin_matched_name="",
+                    linkedin_matched_title="")
     sources = set(meta.get("sources", []) or [])
     sources.add("upload")
     meta["sources"] = sorted(sources)

@@ -14,6 +14,8 @@ interface Props {
   /** Opens the add-people flow scoped to this department. Omitted when the
    *  department cannot take a roster (the Board panel). */
   onAddPeople?: (dept: OrgNode) => void
+  /** Opens the LinkedIn profile table (Board and Executive Management). */
+  onShowLinkedIn?: () => void
 }
 
 // Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
@@ -248,6 +250,43 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
   return [{ person: ceo, reports: subTree, isLast: true }]
 }
 
+// ── LinkedIn link + how sure the match is ─────────────────────────────
+const LI_CONFIDENCE: Record<string, { fg: string; bg: string; border: string; tip: string }> = {
+  High:     { fg: '#047857', bg: '#ecfdf5', border: '#a7f3d0', tip: 'Name, company and leadership title all match' },
+  Medium:   { fg: '#b45309', bg: '#fffbeb', border: '#fde68a', tip: 'Name and company match; title not confirmed' },
+  Low:      { fg: '#c2410c', bg: '#fff7ed', border: '#fed7aa', tip: 'Likely, but the company could not be confirmed — check before use' },
+  Provided: { fg: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tip: 'From your uploaded data' },
+}
+
+const LinkedInBadge: React.FC<{ meta?: Record<string, unknown> }> = ({ meta }) => {
+  const url  = String(meta?.linkedin_url ?? '')
+  const conf = String(meta?.linkedin_confidence ?? '')
+  if (!url) {
+    if (conf !== 'Not Found') return null
+    return (
+      <span title="No LinkedIn profile could be verified for this person"
+        style={{ fontSize: 8, color: '#94a3b8' }}>
+        in · not found
+      </span>
+    )
+  }
+  const st = LI_CONFIDENCE[conf] ?? LI_CONFIDENCE.Provided
+  const matched = [meta?.linkedin_matched_name, meta?.linkedin_matched_title]
+    .filter(Boolean).map(String).join(' — ')
+  return (
+    <a href={url} target="_blank" rel="noreferrer"
+      title={`${conf ? conf + ' confidence: ' : ''}${st.tip}${matched ? `\nOn LinkedIn: ${matched}` : ''}`}
+      onClick={e => e.stopPropagation()}
+      style={{
+        fontSize: 8, fontWeight: 600, color: st.fg, background: st.bg,
+        border: `1px solid ${st.border}`, borderRadius: 3, padding: '1px 5px',
+        textDecoration: 'none', whiteSpace: 'nowrap',
+      }}>
+      in ↗{conf && conf !== 'Provided' ? ` ${conf}` : ''}
+    </a>
+  )
+}
+
 // ── Person row ────────────────────────────────────────────────────────
 const INFERRED_REPORT_NOTE =
   'Reporting line inferred — no intermediate manager found in the data at the expected seniority level. ' +
@@ -262,7 +301,9 @@ const PersonRow: React.FC<{
   onToggle:    (id: string) => void
   collapsed:   Set<string>
   onReport?:   (person: OrgNode) => void
-}> = ({ node, depth, isLast, parentLines, color, onToggle, collapsed, onReport }) => {
+  /** Executive Management only: add people to the department this person runs. */
+  onAddPeople?: (dept: OrgNode) => void
+}> = ({ node, depth, isLast, parentLines, color, onToggle, collapsed, onReport, onAddPeople }) => {
   const p      = node.person
   const pColor = nodeColor(p, color)
   const hasReports = node.reports.length > 0
@@ -377,6 +418,38 @@ const PersonRow: React.FC<{
               </div>
             )
           })()}
+          {/* The department this executive runs — click to add its people */}
+          {p.metadata?.leads_department && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
+              <span
+                title={`${p.label} leads ${String(p.metadata.leads_department)}`}
+                style={{
+                  fontSize: 8.5, color: '#00204d', background: '#e8f1fb',
+                  border: '1px solid #b9d3f0', borderRadius: 3, padding: '1px 6px',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 190,
+                }}>
+                ▸ {String(p.metadata.leads_department)}
+              </span>
+              {onAddPeople && p.metadata?.leads_department_id && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation()
+                    onAddPeople({
+                      node_id: String(p.metadata!.leads_department_id),
+                      label:   String(p.metadata!.leads_department),
+                    } as OrgNode)
+                  }}
+                  title={`Add people to ${String(p.metadata.leads_department)} from CSV, Excel, JSON or an API`}
+                  style={{
+                    fontSize: 8.5, fontWeight: 600, color: '#E63946', background: '#fff5f5',
+                    border: '1px solid #f5c2c6', borderRadius: 3, padding: '0 6px',
+                    cursor: 'pointer', lineHeight: '14px', whiteSpace: 'nowrap',
+                  }}>
+                  + Add people
+                </button>
+              )}
+            </div>
+          )}
           {/* Footer: region + location + linkedin + pay + source */}
           <div style={{ display: 'flex', gap: 7, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {p.metadata?.region && (
@@ -390,13 +463,7 @@ const PersonRow: React.FC<{
                 📍 {String(p.metadata.location).split(',')[0]}
               </span>
             )}
-            {p.metadata?.linkedin_url && (
-              <a href={String(p.metadata.linkedin_url)} target="_blank" rel="noreferrer"
-                style={{ fontSize: 8.5, color: '#0c3649', textDecoration: 'none' }}
-                onClick={e => e.stopPropagation()}>
-                in ↗
-              </a>
-            )}
+            <LinkedInBadge meta={p.metadata} />
             {p.metadata?.pay && (
               <span style={{ fontSize: 8, color: '#627184' }}>
                 💰{(Number(p.metadata.pay) / 1_000_000).toFixed(1)}M
@@ -479,6 +546,7 @@ const PersonRow: React.FC<{
           onToggle={onToggle}
           collapsed={collapsed}
           onReport={onReport}
+          onAddPeople={onAddPeople}
         />
       ))}
     </>
@@ -502,6 +570,10 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
     Region:            String(p.metadata?.region   ?? ''),
     Location:          String(p.metadata?.location ?? ''),
     'LinkedIn URL':    String(p.metadata?.linkedin_url ?? ''),
+    'LinkedIn Confidence': String(p.metadata?.linkedin_confidence ?? ''),
+    'Matched on LinkedIn': [p.metadata?.linkedin_matched_name, p.metadata?.linkedin_matched_title]
+                             .filter(Boolean).map(String).join(' — '),
+    'Leads Department': String(p.metadata?.leads_department ?? ''),
     Source:            String(p.metadata?.nlp_method ?? '').includes('web')
                          ? 'Company Website'
                          : String(p.metadata?.nlp_method ?? '').includes('llm_leadership')
@@ -523,7 +595,7 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────
-export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '', onAddPeople }) => {
+export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '', onAddPeople, onShowLinkedIn }) => {
   const isOpen = deptNode !== null
   const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] ?? deptNode.color ?? '#3491E8') : '#3491E8'
 
@@ -747,8 +819,10 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
         borderBottom: `1px solid ${color}22`,
         background: '#f5f9fb',
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Wraps so the actions drop below the title instead of squeezing
+            "Executive Management" down to "Execu…". */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 200px', minWidth: 0 }}>
             <div style={{
               fontSize: 9, color: '#627184', letterSpacing: 1.2,
               textTransform: 'uppercase', marginBottom: 4,
@@ -779,7 +853,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
             {executives && executives.length > 0 && (
               <button
                 onClick={() => downloadExecsCSV(deptNode?.label ?? 'executives', executives)}
@@ -798,6 +872,20 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
                 Save
+              </button>
+            )}
+            {onShowLinkedIn && executives && executives.length > 0 && (
+              <button
+                onClick={onShowLinkedIn}
+                title="LinkedIn profiles of the Board and Executive Management, with match confidence"
+                style={{
+                  background: 'none', border: '1px solid #b9d3f0',
+                  borderRadius: 5, padding: '3px 8px',
+                  color: '#0a66c2', fontSize: 9, cursor: 'pointer',
+                  fontWeight: 700, letterSpacing: 0.3, whiteSpace: 'nowrap',
+                }}
+              >
+                in LinkedIn
               </button>
             )}
             {onAddPeople && deptNode && (
@@ -982,6 +1070,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
                   onToggle={toggleCollapse}
                   collapsed={collapsed}
                   onReport={apiBase ? setReportPerson : undefined}
+                  onAddPeople={isEM ? onAddPeople : undefined}
                 />
               ))}
             </div>

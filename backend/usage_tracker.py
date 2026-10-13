@@ -43,6 +43,13 @@ class UsageTracker:
             "cost_usd": cost,
         })
 
+    def record_cost(self, service: str, model: str, cost_usd: float) -> None:
+        """A call billed per request rather than per token (Parallel search)."""
+        self.calls.append({
+            "service": service, "model": model,
+            "input_tokens": 0, "output_tokens": 0, "cost_usd": cost_usd,
+        })
+
     def summary(self) -> dict:
         has_gemini = any(c["service"] == "gemini" for c in self.calls)
         return {
@@ -68,3 +75,10 @@ def record_usage(service: str, model: str, input_tokens: int, output_tokens: int
     tracker = _current.get()
     if tracker is not None:
         tracker.record(service, model, input_tokens, output_tokens)
+
+
+def record_cost(service: str, model: str, cost_usd: float) -> None:
+    """Per-request cost; no-op if no tracker is bound."""
+    tracker = _current.get()
+    if tracker is not None:
+        tracker.record_cost(service, model, cost_usd)

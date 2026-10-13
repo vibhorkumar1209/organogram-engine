@@ -20,6 +20,8 @@ logging.disable(logging.CRITICAL)
 from fastapi.testclient import TestClient
 
 import api_server as A
+# api_server loads .env; the LinkedIn step must not make paid searches here.
+os.environ["PARALLEL_API_KEY"] = ""
 import structural_engine as S
 
 fails: list[str] = []

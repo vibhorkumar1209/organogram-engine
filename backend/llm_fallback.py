@@ -483,8 +483,12 @@ def _is_js_shell(html: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_FROM_WEB = """\
-You are a corporate intelligence assistant. Extract every person explicitly \
-named in the source text as a board member, executive, or senior leader.
+You are an organisational intelligence assistant. The organisation may be a \
+company, a government ministry or agency, a public-sector body, a state-owned \
+enterprise, a university or business school, a hospital, an NGO or a \
+foundation. Extract every person explicitly named in the source text as a \
+member of its governing board, its leadership / executive team, or its senior \
+leadership.
 
 Return ONE valid JSON object — no prose, no markdown:
 
@@ -525,11 +529,14 @@ MEDIUM — name inferred from multiple signals (heading + nearby text)
 LOW — name mentioned once, title uncertain
 
 PLACEMENT:
-board — everyone listed under Board of Directors / Supervisory Board / Board \
-of Trustees, regardless of title: Chairman, Vice-Chairman, Managing Director \
-(when on board), Executive Director, Non-Executive Director, Independent \
-Director, Nominee Director, Lead Director. Include committee memberships if \
-mentioned.
+board — everyone listed under the GOVERNING body, regardless of title: Board \
+of Directors, Supervisory Board, Board of Trustees, Board of Governors, \
+Governing Board / Body / Council, University Council or Senate (governing), \
+Board of Commissioners, Steering Board: Chairman, Vice-Chairman, Managing \
+Director (when on board), Executive Director, Non-Executive Director, \
+Independent Director, Nominee Director, Lead Director, Trustee, Governor, \
+Council Member. Include committee memberships if mentioned. Members of a purely \
+ADVISORY board or council are NOT the governing board — leave them out.
 
 executives — EVERY person explicitly listed as a member of the Executive \
 Committee, Operating Committee, Management Committee, Executive Leadership \
@@ -540,10 +547,29 @@ Commercial Officer, Group President — AND ALSO any EVP, Senior EVP, or \
 business head who appears on the same committee listing page. If the source \
 says "Operating Committee" or "Executive Team" and lists 14 people, put ALL \
 14 in executives.
+Outside companies the same tier goes by other names — put these in executives \
+too: anyone listed under "Leadership Team", "Senior Leadership Team", \
+"Management Team", "Executive Board", "Management Board", "Cabinet", \
+"Rectorate", "Dean's Office", "Office of the President"; and heads of the \
+organisation and their deputies: Minister, Deputy / Assistant Minister, \
+Secretary-General, Permanent Secretary, Under-Secretary, Director-General, \
+Deputy Director-General, Commissioner, Governor (of a central bank or \
+authority), Chief Executive, Managing Director, Executive Director (as head), \
+President / Vice-President, Rector / Vice-Rector, Chancellor / \
+Vice-Chancellor, Provost, Dean, Associate / Deputy Dean, Executive Director, \
+Chief Operating & Administrative Officer, Chief Growth Officer, Registrar.
 
 senior_leadership — EVPs, SVPs, VPs, Business Heads, Country Heads, Plant \
 Heads, Division Heads, Group Heads, Regional Heads named in the source who \
-are NOT already listed in executives above.
+are NOT already listed in executives above. In the public sector and \
+academia: Directors of departments / directorates, Assistant \
+Under-Secretaries, Heads of Department, Associate Deans, Program Directors \
+who manage a unit.
+
+NOT LEADERSHIP — leave out: academic chairs and professorships held as a \
+research title ("X Chair in Purposeful Leadership", "Professor of Strategy"), \
+faculty lists, students, alumni, event speakers, people quoted in news, and \
+leaders of OTHER organisations mentioned on the page.
 
 RULES:
 - Include ONLY people explicitly named in the text — do not infer or invent.
@@ -558,10 +584,13 @@ RULES:
 Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 
 _SYSTEM_FROM_KNOWLEDGE = """\
-You are a corporate intelligence assistant with knowledge of public companies.
+You are an organisational intelligence assistant with knowledge of public \
+companies, governments, public-sector bodies, universities and NGOs.
 
-Return the current Board of Directors and C-Suite Executive Management for the \
-named company based on your training knowledge. Only include people currently \
+Return the current governing board (Board of Directors / Trustees / Governors) \
+and executive leadership (C-Suite, or the organisation's head — Minister, \
+Director-General, Secretary-General, President, Dean, Rector — and their \
+leadership team) for the named organisation based on your training knowledge. Only include people currently \
 serving — exclude anyone described as former, retired, ex-, or emeritus.
 
 Schema:
@@ -597,6 +626,12 @@ _GEMINI_URL_SIGNAL = {
     "management", "investor", "officers", "oversight", "about",
     "team", "people", "who-we-are", "whoweare", "our-company", "company",
     "committee", "senior", "bio", "profile", "bod", "trustees", "council",
+    # Government, public sector, universities, non-profits
+    "dean", "deans", "minister", "ministers", "ministry", "rector", "rectorate",
+    "president", "presidency", "chancellor", "provost", "secretary-general",
+    "director-general", "officials", "cabinet", "organisation", "organization",
+    "structure", "org-chart", "administration", "governors", "commissioners",
+    "a-propos", "qui-sommes-nous", "equipe", "gouvernance", "ueber-uns",
     # Non-English corporate-governance conventions
     "vorstand", "aufsichtsrat", "geschaeftsleitung", "direccion", "directorio",
     "junta", "consejo", "conseil", "administration", "dirigeants",
@@ -655,8 +690,57 @@ _LEADERSHIP_FETCH_PATHS = [
     "/en/about/governance",
     "/en/governance/board-of-directors",
     "/en/corporate-governance",
+    # ── Government, public sector, universities, non-profits ───────────────────
+    "/about/leadership-team",
+    "/about-us/leadership-team",
+    "/about-us/our-leadership",
+    "/senior-leadership",
+    "/senior-leadership-team",
+    "/leadership-and-governance",
+    "/about/governance",
+    "/board-of-trustees",
+    "/about/board-of-trustees",
+    "/governing-board",
+    "/board-of-governors",
+    "/council",
+    "/administration",
+    "/about/administration",
+    "/office-of-the-president",
+    "/president",
+    "/about/president",
+    "/dean",
+    "/deans-office",
+    "/about/dean",
+    "/the-minister",
+    "/minister",
+    "/about/minister",
+    "/about-us/minister",
+    "/senior-officials",
+    "/organisational-structure",
+    "/organizational-structure",
+    "/about/organisational-structure",
+    "/about/organizational-structure",
+    "/about-us/organizational-structure",
+    "/about-us/organisational-structure",
+    "/org-chart",
+    # ── The About page itself: smaller organisations list leaders there ──────
+    "/about-us",
+    "/about",
+    "/en/about-us",
+    "/en/about",
     # ── IR subdomains are tried separately (see _ir_leadership_urls) ───────────
 ]
+
+# Guessed paths that 404 in a row before guessing stops. A site that answers
+# none of the first several dozen conventional spellings does not follow the
+# conventions, and each guess costs a round trip: on qatar.exed.hec.edu the
+# guesses alone spent the entire 180s harvest deadline and found nothing.
+_MAX_GUESS_MISSES = int(os.environ.get("ORGANOGRAM_MAX_GUESS_MISSES", "60"))
+# …and a time limit, because on a slow site 60 misses can still be minutes.
+_GUESS_BUDGET_S = int(os.environ.get("ORGANOGRAM_GUESS_BUDGET_S", "45"))
+# Pages the site's own navigation points at are the likeliest to hold the
+# roster; a slow server gets longer for those than for a guessed path.
+_NAV_FETCH_TIMEOUT = 15
 
 _IR_SUBDOMAINS   = ["investor", "ir", "investors"]
 _IR_GOV_PATHS    = [
@@ -679,7 +763,8 @@ _FETCH_HEADERS = {
 _BIO_LINK_SIGNAL = re.compile(
     r"/(?:bio|bios|biography|profile|profiles|people|person|team|our-team"
     r"|leadership|leader|management|executive|executives|officer|officers"
-    r"|board|director|directors|governance|member|members)(?:[/-]|$)",
+    r"|board|director|directors|governance|member|members"
+    r"|trustee|trustees|council|dean|deans|minister|ministers|officials|leaders)(?:[/-]|$)",
     re.IGNORECASE,
 )
 
@@ -791,6 +876,7 @@ class _Harvester:
         self.dead_hosts: dict[str, int] = {}   # host → consecutive connect failures
         self.learned_prefix: str | None = None   # e.g. "/en-us"
         self.learned_suffix: str | None = None   # e.g. ".html"
+        self.last_html = ""                      # most recent harvested page
 
     @property
     def exhausted(self) -> bool:
@@ -821,7 +907,7 @@ class _Harvester:
             return True
         return False
 
-    def fetch(self, url: str, follow_bios: bool = False) -> bool:
+    def fetch(self, url: str, follow_bios: bool = False, timeout: int = 6) -> bool:
         """
         Fetch one URL and harvest it. True when it yielded content.
 
@@ -851,7 +937,7 @@ class _Harvester:
 
         self.seen.add(url)
         try:
-            html = _get_bounded(url)
+            html = _get_bounded(url, timeout=timeout)
         except Exception as exc:
             self.dead_hosts[host] = self.dead_hosts.get(host, 0) + 1
             logger.debug("Fetch %s: %s", url, exc)
@@ -870,6 +956,7 @@ class _Harvester:
             return False
 
         self.blocks.append(block)
+        self.last_html = html
         # Pages reached as a leadership INDEX (a known governance path, a
         # sitemap leadership URL, a Gemini grounding hit) are the company's own
         # current-roster pages. Names appearing there are corroborated as
@@ -976,6 +1063,10 @@ def _bio_links(html: str, base_url: str) -> list[str]:
         # → /leadership/jane-okonjo card link). The slug check matters: plain
         # title-case nav labels ("Our History", "Core Values") also look like
         # names, and without it they burn the fetch budget on boilerplate.
+        # "/Programs-and-Degrees/Executive-MBA" says "executive" but is a
+        # course page; its admissions staff are not the leadership.
+        if _is_offtopic_url(absolute):
+            continue
         if _BIO_LINK_SIGNAL.search(parsed.path) or (
             allow_person_anchors
             and parsed.path.startswith(f"{base_dir}/")
@@ -987,6 +1078,81 @@ def _bio_links(html: str, base_url: str) -> list[str]:
                 seen.add(absolute)
                 out.append(absolute)
     return out
+
+
+# Where an organisation keeps its people, read from its own navigation. Path
+# guessing only finds corporate conventions; a school, ministry, agency or
+# charity names the page whatever it likes ("About us", "Leadership team",
+# "The Minister", "Organisational structure", "Office of the Dean") — and
+# links it from the homepage. Matched against the link's path AND its text.
+_NAV_STRONG_RE = re.compile(
+    r"\b(?:leadership|leaders|management|governance|board|boards|trustees?|council"
+    r"|executive|executives|directors?|officers|committee|cabinet|senior[- ]officials?"
+    r"|dean|deans|rector|rectorate|chancellor|provost|president|presidency"
+    r"|minister|ministers|secretary[- ]general|director[- ]general|commissioners?"
+    r"|governors|organi[sz]ational[- ]structure|organi[sz]ation[- ]structure"
+    r"|org[- ]chart|our[- ]people|our[- ]team|who[- ]we[- ]are|administration"
+    r"|gouvernance|direction|dirigeants|equipe|vorstand|geschaeftsleitung"
+    r"|junta|consejo|directorio)\b", re.IGNORECASE)
+_NAV_WEAK_RE = re.compile(
+    r"\b(?:about|about[- ]us|aboutus|team|people|a[- ]propos|qui[- ]sommes[- ]nous"
+    r"|ueber[- ]uns|sobre[- ]nosotros|chi[- ]siamo|over[- ]ons|the[- ]school"
+    r"|the[- ]ministry|the[- ]authority|organi[sz]ation)\b", re.IGNORECASE)
+# Big lists of people who are not the leadership, or pages that never hold it.
+_NAV_EXCLUDE_RE = re.compile(
+    r"\b(?:faculty|professors?|staff[- ]directory|students?|alumni|admissions?"
+    r"|programs?|programmes?|courses?|careers?|jobs|vacanc|contact|login|sign[- ]in"
+    r"|apply|donate|shop|privacy|cookies?|terms|events?|news|press|media|blog"
+    r"|calendar|tenders?|procurement|faq|search"
+    # A school's catalogue is full of leadership words: "Executive MBA",
+    # "Healthcare Management", "Emerging Leaders Track".
+    r"|mba|emba|degrees?|masters?|bachelors?|phd|doctorate|certificates?|diplomas?"
+    r"|education|training|academy|track|summer|scholarships?)\b", re.IGNORECASE)
+
+
+def _nav_leadership_links(html: str, base_url: str, limit: int = 8) -> list[tuple[str, bool]]:
+    """
+    Same-host links that probably lead to the leadership, as (url, strong).
+
+    strong = the link names leadership outright ("Leadership Team", "Board of
+    Trustees", "The Minister"); weak = an About page, where smaller
+    organisations list their leaders. Strong links come first.
+    """
+    from urllib.parse import urljoin, urlparse
+
+    base_host = urlparse(base_url).netloc.lower().removeprefix("www.")
+    strong: list[str] = []
+    weak: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'<a\b[^>]*?href=["\']([^"\'#]+)["\'][^>]*>(.*?)</a>',
+                         html, flags=re.DOTALL | re.IGNORECASE):
+        href = m.group(1).strip()
+        if not href or href.lower().startswith(("mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href).split("?")[0]
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https") \
+                or parsed.netloc.lower().removeprefix("www.") != base_host:
+            continue
+        if parsed.path in ("", "/") or absolute in seen or _is_archival(absolute):
+            continue
+        if re.search(r"\.(?:pdf|jpe?g|png|gif|svg|zip|docx?|xlsx?|mp4)$", parsed.path, re.I):
+            continue
+        anchor = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
+        # Judge the link by its own words: the last path segment and the text.
+        label = f"{parsed.path.rstrip('/').rsplit('/', 1)[-1]} {anchor}".replace("-", " ")
+        label = label.replace("_", " ")
+        if _NAV_EXCLUDE_RE.search(label):
+            continue
+        if _NAV_STRONG_RE.search(label):
+            strong.append(absolute)
+        elif _NAV_WEAK_RE.search(label):
+            weak.append(absolute)
+        else:
+            continue
+        seen.add(absolute)
+    return [(u, True) for u in strong][:limit] + \
+        [(u, False) for u in weak][:max(0, limit - len(strong))]
 
 
 def _slug_matches_name(path: str, anchor: str) -> bool:
@@ -1022,10 +1188,40 @@ _SITEMAP_URL_SIGNAL = {
     "board", "governance", "leadership", "director", "executive", "officers",
     "management", "committee", "trustees", "our-people", "our-team",
     "management-team", "executive-team", "leadership-team", "who-we-are",
+    "council", "dean", "minister", "rector", "chancellor", "provost",
+    "president", "secretary-general", "director-general", "senior-officials",
+    "organisational-structure", "organizational-structure", "organisation-structure",
+    "organization-structure", "org-chart", "governors", "commissioners",
+    "gouvernance", "qui-sommes-nous", "equipe-de-direction",
     "vorstand", "aufsichtsrat", "geschaeftsleitung", "direccion", "directorio",
     "junta", "consejo", "conseil", "dirigeants", "consiglio", "bestuur",
     "styrelse", "ledelse", "yonetim",
 }
+
+
+# An organisation's "About us" page itself — where smaller organisations,
+# schools and public bodies list their leadership team (HEC Paris Doha does:
+# the roster is on /about-us and nowhere else). Its sub-pages (history,
+# mission) are not matched.
+_ABOUT_PAGE_RE = re.compile(
+    r"/(?:about|about-us|aboutus|who-we-are|a-propos|qui-sommes-nous|ueber-uns"
+    r"|uber-uns|sobre-nosotros|chi-siamo|over-ons)/?$")
+
+
+# Catalogue and directory pages. At a school, "leadership" and "management"
+# are subjects: hec.edu's search hits were /purposeful-leadership,
+# /innovation-management-and-globalization and faculty department pages, and a
+# professor's endowed chair came back as an executive.
+_OFFTOPIC_URL_RE = re.compile(
+    r"/(?:faculty|faculty-research|programs?|programmes?|courses?|degrees?"
+    r"|admissions?|executive-education|mba|emba|masters?|bachelors?|phd|students?"
+    r"|alumni|events?|careers?|jobs|vacancies|tenders?|services|e-services"
+    r"|publications?|knowledge|insights?|case-stud(?:y|ies))(?:[/-]|$)", re.IGNORECASE)
+
+
+def _is_offtopic_url(url: str) -> bool:
+    from urllib.parse import urlparse
+    return bool(_OFFTOPIC_URL_RE.search(urlparse(url).path))
 
 
 def _sitemap_leadership_urls(domain: str, limit: int = 40) -> list[str]:
@@ -1065,7 +1261,9 @@ def _sitemap_leadership_urls(domain: str, limit: int = 40) -> list[str]:
                 continue
             if len(found) >= limit or loc in seen:
                 continue
-            if any(kw in low for kw in _SITEMAP_URL_SIGNAL):
+            if _is_offtopic_url(loc):
+                continue
+            if any(kw in low for kw in _SITEMAP_URL_SIGNAL) or _ABOUT_PAGE_RE.search(low):
                 seen.add(loc)
                 found.append(loc)
         if allow_children:
@@ -1109,7 +1307,54 @@ def _path_variants(path: str) -> list[str]:
     return out
 
 
-def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None) -> str:
+def _discover_from_navigation(h: "_Harvester", domain: str, seed_url: str = "") -> int:
+    """
+    Follow the organisation's own navigation to its leadership pages.
+
+    Reads the homepage (and a page the user pointed at, when they gave a full
+    URL), fetches the links that name the leadership, and from any About page
+    reached that way follows its leadership links one level further. Returns
+    how many pages were harvested.
+    """
+    hits = 0
+    start_pages: list[tuple[str, str]] = []      # (url, html) to read links from
+    if seed_url:
+        # The page the user named is evidence in its own right.
+        if h.fetch(seed_url, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+            hits += 1
+            start_pages.append((seed_url, h.last_html))
+    for home in (f"https://{domain}/", f"https://www.{domain}/"):
+        if h.exhausted:
+            break
+        try:
+            html = _get_bounded(home, timeout=_NAV_FETCH_TIMEOUT)
+        except Exception:
+            html = None
+        if html:
+            start_pages.append((home, html))
+            break
+
+    weak_pages: list[str] = []
+    for base, html in start_pages:
+        for url, strong in _nav_leadership_links(html, base):
+            if h.exhausted:
+                break
+            if h.fetch(url, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+                hits += 1
+                if not strong:
+                    weak_pages.append(url)
+                    # An About page is often a hub: "About us" → "Leadership".
+                    for sub, sub_strong in _nav_leadership_links(h.last_html, url, limit=4):
+                        if sub_strong and not h.exhausted and h.fetch(
+                                sub, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+                            hits += 1
+    if hits:
+        logger.info("Navigation discovery for '%s': %d page(s)", domain, hits)
+    return hits
+
+
+def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None,
+                             seed_url: str = "") -> str:
     """
     Crawl the company's own site for leadership/governance pages.
 
@@ -1125,6 +1370,12 @@ def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None)
         return ""
 
     h = harvester or _Harvester()
+
+    # 0. The organisation's own navigation. One homepage request says where
+    #    THIS site keeps its people, whatever it calls them — the corporate
+    #    path list below never guessed "/about-us", where HEC Paris Doha lists
+    #    its leadership team.
+    nav_hits = _discover_from_navigation(h, domain, seed_url)
 
     # 1. The sitemap first. It costs one request and names REAL urls, where
     #    guessing costs a request per spelling and usually 404s. On Abbott it
@@ -1142,19 +1393,33 @@ def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None)
     #    Skipped when the sitemap already produced a real harvest, so a site
     #    that told us where its pages are is not then probed with hundreds of
     #    guesses.
-    if sitemap_hits < 2:
+    if sitemap_hits + nav_hits < 2:
+        import time as _time
+        misses = 0
+        guess_until = _time.monotonic() + _GUESS_BUDGET_S
+
+        def _stop() -> bool:
+            return (h.exhausted or misses >= _MAX_GUESS_MISSES
+                    or _time.monotonic() >= guess_until)
+
         for path in _LEADERSHIP_FETCH_PATHS:
-            if h.exhausted:
+            if _stop():
                 break
             for variant in h.path_variants(path):
-                if h.exhausted:
+                if _stop():
                     break
                 if h.fetch(f"https://www.{domain}{variant}", follow_bios=True):
                     h.learn_convention(variant, path)
+                    misses = 0
                     break                 # found this path; stop trying spellings
                 if h.fetch(f"https://{domain}{variant}", follow_bios=True):
                     h.learn_convention(variant, path)
+                    misses = 0
                     break
+                misses += 1
+        if misses >= _MAX_GUESS_MISSES or _time.monotonic() >= guess_until:
+            logger.info("Path guessing stopped for '%s' (%d misses in a row)",
+                        domain, misses)
 
     # 3. IR subdomains (investor.company.com etc.)
     for sub in _IR_SUBDOMAINS:
@@ -1174,10 +1439,24 @@ def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None)
     return ""   # shared harvester — caller owns draining and reading
 
 
+def _subdomain_hosts(urls: list[str], domain: str) -> list[str]:
+    """Distinct subdomains of *domain* among *urls* (www excluded)."""
+    from urllib.parse import urlparse
+    if not domain:
+        return []
+    out: list[str] = []
+    for u in urls:
+        host = urlparse(u).netloc.lower().removeprefix("www.")
+        if host != domain and host.endswith("." + domain) and host not in out:
+            out.append(host)
+    return out
+
+
 def _gemini_discover_leadership_urls(
     company_name: str,
     api_key: str,
     domain: str = "",
+    location: str = "",
 ) -> tuple[list[str], str]:
     """
     Use Gemini 2.0 Flash with Google Search grounding to find Board of Directors
@@ -1203,23 +1482,43 @@ def _gemini_discover_leadership_urls(
     if domain:
         # STRICT SITE-ONLY strategy: four targeted queries locked to the company domain.
         # Gemini grounding will only surface pages from site:{domain} and its subdomains.
+        place = f" {location}" if location else ""
         queries = [
-            # Query 1: leadership / executive / officers pages
-            f'site:{domain} "leadership" OR "executive" OR "officers"',
-            # Query 2: board / governance pages
-            f'site:{domain} "board of directors" OR "governance" OR "directors"',
-            # Query 3: about-us / management / team pages (catches smaller company sites)
-            f'site:{domain} "about us" OR "management" OR "team"',
+            # Query 1: leadership pages. Phrases, not bare "leadership": at a
+            # school or a ministry, leadership and management are subjects.
+            f'site:{domain} "leadership team" OR "executive committee" OR '
+            f'"management team" OR "senior management" OR "officers"',
+            # Query 2: board / governance pages, incl. public-sector boards
+            f'site:{domain} "board of directors" OR "board of trustees" OR '
+            f'"governing board" OR "council" OR "governance"',
+            # Query 3: about-us / team pages (smaller organisations list leaders there)
+            f'site:{domain} "about us" OR "our team" OR "who we are"',
             # Query 4: investor-relations subdomains (ir.domain, investors.domain)
             f'site:investors.{domain} OR site:ir.{domain}',
+            # Query 5: the organisation itself, by name and place. A domain can
+            # host many entities — hec.edu is HEC Paris, while HEC Paris in
+            # Qatar lives on qatar.exed.hec.edu — and heads of public bodies
+            # and schools carry titles a corporate query never asks for.
+            f'site:{domain} "{company_name}"{place} dean OR president OR '
+            f'"director general" OR minister OR "chief executive" OR "managing director"',
         ]
+        if location:
+            # Query 6: open web, for when the entity's own site is a subdomain
+            # or a section the site: filter alone doesn't surface.
+            queries.append(
+                f"Who is on the current leadership team of {company_name} in {location}? "
+                f"List each leader's full name and title (e.g. Dean, Director, President, "
+                f"Minister, Director General, CEO, COO) from the official website.")
     else:
         # No domain — fall back to open-web queries with native-language variants
+        place = f" in {location}" if location else ""
         queries = [
-            (f"Who are the current Board of Directors of {company_name}? "
-             f"List each member's full name and title from the official corporate website."),
-            (f"Who are the executive leadership team members of {company_name}? "
-             f"List each executive's full name and title from the official company website."),
+            (f"Who are the current Board of Directors (or Board of Trustees / governing "
+             f"board) of {company_name}{place}? "
+             f"List each member's full name and title from the official website."),
+            (f"Who are the leadership team members of {company_name}{place} — e.g. CEO, "
+             f"President, Dean, Minister, Director General, Secretary General, COO, CFO? "
+             f"List each leader's full name and title from the official website."),
             # Spanish / French / German fallback for non-English companies
             (f"{company_name} junta directiva directores ejecutivos OR "
              f"{company_name} conseil d'administration dirigeants OR "
@@ -1300,7 +1599,7 @@ def _gemini_discover_leadership_urls(
                     url = chunk.get("web", {}).get("uri", "")
                     if url and url not in seen:
                         if (any(kw in url.lower() for kw in _GEMINI_URL_SIGNAL)
-                                and not _is_archival(url)):
+                                and not _is_archival(url) and not _is_offtopic_url(url)):
                             seen.add(url)
                             all_urls.append(url)
                             logger.info("Gemini grounding URL for '%s': %s", company_name, url)
@@ -1311,123 +1610,12 @@ def _gemini_discover_leadership_urls(
     return all_urls, "\n\n---\n\n".join(all_texts)
 
 
-_LINKEDIN_URL_RE = re.compile(
-    r'https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9_%-]+(?:/[A-Za-z0-9_%-]*)?',
-    re.IGNORECASE,
-)
-
-
-def _gemini_search_linkedin_batch(
-    people: list[dict],
-    company_name: str,
-    api_key: str,
-) -> dict[str, str]:
-    """
-    One Gemini google_search call to find LinkedIn profile URLs for a group of
-    executives/directors at a company.
-
-    people: [{"name": str, "title": str}, ...]
-    Returns: {name_key: "https://www.linkedin.com/in/..."} for those found.
-    name_key = first two words of name, lowercase letters only (matches _name_key).
-    """
-    try:
-        import httpx
-    except ImportError:
-        return {}
-
-    if not people or not api_key:
-        return {}
-
-    people_list = "\n".join(
-        f"- {p['name']}{' (' + p['title'] + ')' if p.get('title') else ''}"
-        for p in people[:25]
-    )
-    query = (
-        f"Find LinkedIn profile URLs for these {company_name} executives and board members. "
-        f"For each person listed below, provide their exact LinkedIn profile URL "
-        f"(linkedin.com/in/...):\n{people_list}"
-    )
-
-    def _norm_key(name: str) -> str:
-        words = re.sub(r"[^a-z ]", "", name.lower()).split()
-        return " ".join(words[:2])
-
-    try:
-        resp = httpx.post(
-            f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
-            params={"key": api_key},
-            json={
-                "contents": [{"parts": [{"text": query}]}],
-                "tools": [{"google_search": {}}],
-                "generationConfig": {"temperature": 0, "maxOutputTokens": 2048},
-            },
-            timeout=45,
-        )
-        if not resp.is_success:
-            logger.warning(
-                "Gemini LinkedIn batch for '%s': HTTP %s", company_name, resp.status_code
-            )
-            return {}
-
-        data = resp.json()
-        um = data.get("usageMetadata", {})
-        from usage_tracker import record_usage
-        record_usage("gemini", _GEMINI_MODEL,
-                      um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
-        result: dict[str, str] = {}
-
-        for candidate in data.get("candidates", []):
-            # ── Source 1: grounding chunk URIs (most reliable — direct LinkedIn URLs) ──
-            grounding = candidate.get("groundingMetadata", {})
-            for chunk in grounding.get("groundingChunks", []):
-                url = chunk.get("web", {}).get("uri", "")
-                if not url or "linkedin.com/in/" not in url.lower():
-                    continue
-                url_slug = url.split("/in/")[-1].split("/")[0].lower()
-                for p in people:
-                    key = _norm_key(p["name"])
-                    if key in result:
-                        continue
-                    name_parts = key.split()
-                    if (len(name_parts) >= 2
-                            and name_parts[0] in url_slug
-                            and name_parts[-1] in url_slug):
-                        result[key] = url
-                        logger.info("LinkedIn grounding chunk %s → %s", p["name"], url)
-                    elif len(name_parts) >= 1 and name_parts[-1] in url_slug:
-                        result[key] = url
-                        logger.info("LinkedIn slug surname match %s → %s", p["name"], url)
-
-            # ── Source 2: LinkedIn URLs embedded in generated text ─────────────────
-            parts = candidate.get("content", {}).get("parts", [])
-            text = " ".join(pt.get("text", "") for pt in parts if "text" in pt)
-            for m in _LINKEDIN_URL_RE.finditer(text):
-                url = m.group(0)
-                context = text[max(0, m.start() - 200): m.start() + 200].lower()
-                for p in people:
-                    key = _norm_key(p["name"])
-                    if key in result:
-                        continue
-                    name_parts = key.split()
-                    if all(part in context for part in name_parts):
-                        result[key] = url
-                        logger.info("LinkedIn text context %s → %s", p["name"], url)
-
-        logger.info(
-            "Gemini LinkedIn batch for '%s': found %d / %d profiles",
-            company_name, len(result), len(people),
-        )
-        return result
-
-    except Exception as exc:
-        logger.warning("Gemini LinkedIn batch failed for '%s': %s", company_name, exc)
-        return {}
-
-
 def _gemini_fetch_leadership(
     company_name: str,
     domain: str,
     api_key: str,
+    site_url: str = "",
+    location: str = "",
 ) -> dict:
     """
     Two-phase Gemini pipeline for structured leadership extraction.
@@ -1453,7 +1641,7 @@ def _gemini_fetch_leadership(
 
     # ── Phase A: Research via Google Search grounding ─────────────────────────
     discovered_urls, grounded_text = _gemini_discover_leadership_urls(
-        company_name, api_key, domain=domain
+        company_name, api_key, domain=domain, location=location
     )
 
     # ── Phase A supplemental: fetch discovered URLs + known static paths ──────
@@ -1468,7 +1656,7 @@ def _gemini_fetch_leadership(
         # which is how three sitting 3M directors went missing from live runs
         # while being present in a local crawl of the same domain.
         if domain:
-            _fetch_static_leadership(domain, harvester=harvester)
+            _fetch_static_leadership(domain, harvester=harvester, seed_url=site_url)
 
         # Then the URLs Gemini grounding discovered, following one level of
         # bio links from each — these cover sites whose paths we can't guess.
@@ -1476,6 +1664,13 @@ def _gemini_fetch_leadership(
             if harvester.exhausted:
                 break
             harvester.fetch(u, follow_bios=True)
+
+        # A search hit on a SUBDOMAIN usually means the entity lives there
+        # (qatar.exed.hec.edu under hec.edu): read that site's navigation too.
+        for host in _subdomain_hosts(discovered_urls, domain)[:2]:
+            if harvester.exhausted:
+                break
+            _discover_from_navigation(harvester, host)
 
         # Bios last, so every index page is captured before drilling into people
         harvester.drain_bios()
@@ -1573,6 +1768,40 @@ def _gemini_fetch_leadership(
     return result
 
 
+def _site_only_leadership(company_name: str, domain: str, site_url: str = "") -> dict:
+    """Leadership from the organisation's own site alone, extracted by Claude."""
+    harvester = _Harvester()
+    try:
+        _fetch_static_leadership(domain, harvester=harvester, seed_url=site_url)
+        harvester.drain_bios()
+    except Exception as exc:
+        logger.warning("Site-only harvest failed for '%s': %s", company_name, exc)
+    text = harvester.text()
+    info = {"pages": len(harvester.fetched), "chars": len(text),
+            "urls": harvester.fetched[:40], "mode": "site_only"}
+    if not text:
+        return {"board": [], "executives": [], "_harvest": info,
+                "_error": "no_content_harvested"}
+    partials = []
+    for idx, chunk in enumerate(_chunk_for_synthesis(text), start=1):
+        part = _call_claude(
+            system=_SYSTEM_FROM_WEB,
+            user_msg=(f"Extract the governing board and the leadership / executive team "
+                      f"for {company_name}.\nNO HALLUCINATIONS: only people explicitly "
+                      f"named below.\n\n{chunk}"),
+            label=f"{company_name} site {idx}",
+            source_text=chunk,
+        )
+        if part.get("board") or part.get("executives") or part.get("senior_leadership"):
+            partials.append(part)
+    if not partials:
+        return {"board": [], "executives": [], "_harvest": info, "_error": "no_extraction"}
+    result = _resolve_stale(_merge_leadership(partials), harvester.canonical_text())
+    _strip_internal_fields(result)
+    result["_harvest"] = info
+    return result
+
+
 _CORROBORATE_MAX_CHUNKS = 3   # index pages only — bounds the added cost
 
 
@@ -1597,8 +1826,8 @@ def _corroborate_canonical(company_name: str, canonical_text: str) -> list[dict]
         result = _call_claude(
             system=_SYSTEM_FROM_WEB,
             user_msg=(
-                f"Extract the Board of Directors and Executive Management for "
-                f"{company_name}.\n"
+                f"Extract the governing board (Board of Directors / Trustees / "
+                f"Governors) and the leadership / executive team for {company_name}.\n"
                 f"COMPLETENESS: this is excerpt {idx} of {len(chunks)} from the "
                 f"company's own leadership pages. Extract EVERY person named — "
                 f"a page listing 12 directors must yield 12 entries.\n"
@@ -1670,7 +1899,8 @@ def _gemini_synthesize_chunk(
         f"sourced from {domain}. " if domain else ""
     )
     synthesis_prompt = (
-        f"Extract the Board of Directors and Executive Management for {company_name}.\n\n"
+        f"Extract the governing board (Board of Directors / Trustees / Governors) and "
+        f"the leadership / executive team for {company_name}.\n\n"
         f"{domain_lock}"
         f"NO HALLUCINATIONS: Only include people explicitly named in the text below — "
         f"do NOT invent names or use training knowledge.\n"
@@ -1773,7 +2003,8 @@ def _cache_leadership(key: str, value: dict) -> None:
     _LEADERSHIP_CACHE[key] = value
 
 
-def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
+def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = "",
+                         location: str = "") -> dict:
     """
     Fetch Board of Directors and Executive Management for a company.
 
@@ -1800,6 +2031,10 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         return {"board": [], "executives": []}
 
     cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
+    # A full URL or a location points the search at one entity under a shared
+    # domain, so it is part of what was asked.
+    if site_url or location:
+        cache_key += f"|{site_url.strip().lower()}|{location.strip().lower()}"
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
@@ -1810,7 +2045,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
     # ── Step 1: Gemini primary (Google Search grounding + JSON synthesis) ─────
     if gemini_key:
         logger.info("Step 1 Gemini for '%s'", company_name)
-        result = _gemini_fetch_leadership(company_name, domain, gemini_key)
+        result = _gemini_fetch_leadership(company_name, domain, gemini_key,
+                                          site_url=site_url, location=location)
         gemini_result = result
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
@@ -1819,6 +2055,17 @@ def llm_fetch_leadership(company_name: str, domain: str = "") -> dict:
         logger.info("Gemini returned no leaders for '%s' — falling back to Wikipedia", company_name)
     else:
         logger.debug("GEMINI_API_KEY not set — skipping Gemini for '%s'", company_name)
+
+    # ── Step 1b: the organisation's own site, read by Claude ──────────────────
+    # Without Gemini (no key, or an outage) the site crawl never ran, and the
+    # only remaining source was Wikipedia — which has nothing on most public
+    # bodies, schools and private companies. The crawl needs no search engine.
+    if not gemini_key and anthropic_key and domain:
+        result = _site_only_leadership(company_name, domain, site_url)
+        if result.get("board") or result.get("executives"):
+            result["_source"] = "web"
+            _cache_leadership(cache_key, result)
+            return result
 
     # ── Step 2: Wikipedia + Claude Haiku fallback ─────────────────────────────
     if not anthropic_key:
@@ -2186,11 +2433,28 @@ def _resolve_stale(result: dict, canonical_text: str) -> dict:
     return result
 
 
+def _tidy_name(name: str) -> str:
+    """'DJELLOUL BEKKA' → 'Djelloul Bekka'; 'Joshua KOBB' → 'Joshua Kobb'.
+
+    Sites print names in capitals as styling. Only all-capital words of three or
+    more letters are changed, so initials ("J.P.") and particles stay as given,
+    and so does a name already written in mixed case ("McDew", "de Holan").
+    """
+    def fix(word: str) -> str:
+        letters = re.sub(r"[^A-Za-zÀ-ÿ]", "", word)
+        if len(letters) >= 3 and letters.isupper():
+            return "-".join(p[:1].upper() + p[1:].lower() for p in word.split("-"))
+        return word
+    return " ".join(fix(w) for w in str(name or "").split())
+
+
 def _strip_internal_fields(result: dict) -> None:
     """Remove merge bookkeeping so it never reaches the DAG or the frontend."""
     for section in ("board", "executives", "senior_leadership"):
         for person in result.get(section) or []:
             person.pop("_mentions", None)
+            if person.get("name"):
+                person["name"] = _tidy_name(person["name"])
 
 
 def _prefix_match(aliases: set[str], index: dict[str, int]) -> int | None:
