@@ -249,12 +249,13 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
   const ceo   = topGroup[ceoIdx]
   const peers = topGroup.filter((_, i) => i !== ceoIdx)
 
-  // peers (same layer as CEO) + deeper form the sub-tree under CEO.
-  // buildLayerTree naturally puts peers at root of sub-tree, deeper layers below.
-  const subTree = buildLayerTree([...peers, ...deeper])
-  subTree.forEach((r, i) => { r.isLast = i === subTree.length - 1 })
-
-  return [{ person: ceo, reports: subTree, isLast: true }]
+  // Everyone else reports to the leader directly, most senior first. Nesting
+  // deeper layers under same-layer peers invented reporting lines nobody
+  // published — NVIDIA's EVPs appeared under its co-founder and Fellow simply
+  // because he sorted first among the C-suite.
+  const team = [...peers, ...deeper]
+  const reports = team.map((p, i) => ({ person: p, reports: [], isLast: i === team.length - 1 }))
+  return [{ person: ceo, reports, isLast: true }]
 }
 
 // ── LinkedIn link + how sure the match is ─────────────────────────────
@@ -470,33 +471,34 @@ const PersonRow: React.FC<{
                 📍 {String(p.metadata.location).split(',')[0]}
               </span>
             )}
-            <LinkedInBadge meta={p.metadata} />
             {p.metadata?.pay && (
               <span style={{ fontSize: 8, color: '#627184' }}>
                 💰{(Number(p.metadata.pay) / 1_000_000).toFixed(1)}M
               </span>
             )}
-            {/* Source badge — website vs AI knowledge vs uploaded data */}
-            {(() => {
-              const m = String(p.metadata?.nlp_method ?? '')
-              if (m.includes('web'))
-                return (
-                  <span style={{ fontSize: 8, color: '#059669', background: '#ecfdf5',
-                    borderRadius: 3, padding: '1px 5px', border: '1px solid #a7f3d0',
-                    marginLeft: 'auto' }}>
-                    🌐 Website
-                  </span>
-                )
-              if (m.includes('llm_leadership'))
-                return (
-                  <span style={{ fontSize: 8, color: '#0c3649', background: '#dde8ed',
-                    borderRadius: 3, padding: '1px 5px', border: '1px solid #bad4dc',
-                    marginLeft: 'auto' }}>
-                    ✦ AI Knowledge
-                  </span>
-                )
-              return null
-            })()}
+            {/* Profile links, right-aligned together: LinkedIn next to the
+                source (company website / AI knowledge). */}
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+              <LinkedInBadge meta={p.metadata} />
+              {(() => {
+                const m = String(p.metadata?.nlp_method ?? '')
+                if (m.includes('web'))
+                  return (
+                    <span style={{ fontSize: 8, color: '#059669', background: '#ecfdf5',
+                      borderRadius: 3, padding: '1px 5px', border: '1px solid #a7f3d0' }}>
+                      🌐 Website
+                    </span>
+                  )
+                if (m.includes('llm_leadership'))
+                  return (
+                    <span style={{ fontSize: 8, color: '#0c3649', background: '#dde8ed',
+                      borderRadius: 3, padding: '1px 5px', border: '1px solid #bad4dc' }}>
+                      ✦ AI Knowledge
+                    </span>
+                  )
+                return null
+              })()}
+            </span>
           </div>
         </div>
 

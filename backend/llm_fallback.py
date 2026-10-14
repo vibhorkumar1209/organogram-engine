@@ -801,7 +801,7 @@ def _is_archival(url: str) -> bool:
 _MAX_PAGE_BYTES = int(os.environ.get("ORGANOGRAM_MAX_PAGE_KB", "1024")) * 1024
 
 
-def _get_bounded(url: str, timeout: int = 6) -> str | None:
+def _get_bounded(url: str, timeout: int = 6, final_url: list | None = None) -> str | None:
     """
     GET a page, refusing to hold more than _MAX_PAGE_BYTES of it in memory.
 
@@ -838,6 +838,8 @@ def _get_bounded(url: str, timeout: int = 6) -> str | None:
                 return None
             chunks.append(chunk)
         raw = b"".join(chunks)
+        if final_url is not None:
+            final_url.append(str(resp.url))      # where redirects actually landed
 
     encoding = resp.encoding or "utf-8"
     try:
@@ -877,6 +879,7 @@ class _Harvester:
         self.learned_prefix: str | None = None   # e.g. "/en-us"
         self.learned_suffix: str | None = None   # e.g. ".html"
         self.last_html = ""                      # most recent harvested page
+        self.content_hashes: set[int] = set()    # bodies already harvested
 
     @property
     def exhausted(self) -> bool:
@@ -936,8 +939,9 @@ class _Harvester:
             return False
 
         self.seen.add(url)
+        landed: list = []
         try:
-            html = _get_bounded(url, timeout=timeout)
+            html = _get_bounded(url, timeout=timeout, final_url=landed)
         except Exception as exc:
             self.dead_hosts[host] = self.dead_hosts.get(host, 0) + 1
             logger.debug("Fetch %s: %s", url, exc)
@@ -945,6 +949,17 @@ class _Harvester:
         self.dead_hosts.pop(host, None)
         if html is None:
             return False
+        # Sites that redirect unknown addresses to the homepage made every
+        # guessed path "succeed": pyramidci.com answered all ten guesses under
+        # /about-us/ with its homepage. Asking for a page and getting "/" back
+        # means the page doesn't exist.
+        if landed:
+            from urllib.parse import urlparse as _up
+            asked, got = _up(url).path.rstrip("/"), _up(landed[0]).path.rstrip("/")
+            if asked and asked != got and (
+                    not got or re.fullmatch(r"/[a-z]{2}(?:[-_][a-z]{2})?", got, re.I)):
+                logger.debug("Redirected to the homepage, treating as missing: %s", url)
+                return False
         block = _extract_page_signals(html, url)
         # A JS shell with no structured data is genuinely empty — but one that
         # ships __NEXT_DATA__ or JSON-LD carries the whole leadership roster,
@@ -954,6 +969,12 @@ class _Harvester:
         if _is_js_shell(html) and "[Page:" in block and "[JS Data" not in block \
                 and "[Structured Data" not in block:
             return False
+        # The same body under a different address — a soft 404 served with a
+        # 200, or one page reachable by many spellings — adds nothing.
+        body_hash = hash(re.sub(r"^\[Page:[^\]]*\]", "", block).strip())
+        if body_hash in self.content_hashes:
+            return False
+        self.content_hashes.add(body_hash)
 
         self.blocks.append(block)
         self.last_html = html
@@ -1103,7 +1124,7 @@ _NAV_STRONG_RE = re.compile(
 _NAV_WEAK_RE = re.compile(
     r"\b(?:about|about[- ]us|aboutus|team|people|a[- ]propos|qui[- ]sommes[- ]nous"
     r"|ueber[- ]uns|sobre[- ]nosotros|chi[- ]siamo|over[- ]ons|the[- ]school"
-    r"|the[- ]ministry|the[- ]authority|organi[sz]ation)\b", re.IGNORECASE)
+    r"|the[- ]ministry|the[- ]authority)\b", re.IGNORECASE)
 # Big lists of people who are not the leadership, or pages that never hold it.
 _NAV_EXCLUDE_RE = re.compile(
     r"\b(?:faculty|professors?|staff[- ]directory|students?|alumni|admissions?"
@@ -1229,7 +1250,8 @@ _OFFTOPIC_URL_RE = re.compile(
     r"/(?:faculty|faculty-research|programs?|programmes?|courses?|degrees?"
     r"|admissions?|executive-education|mba|emba|masters?|bachelors?|phd|students?"
     r"|alumni|events?|careers?|jobs|vacancies|tenders?|services|e-services"
-    r"|publications?|knowledge|insights?|case-stud(?:y|ies))(?:[/-]|$)", re.IGNORECASE)
+    r"|publications?|knowledge|insights?|case-?stud(?:y|ies)|success-stories"
+    r"|blogs?|whitepapers?|webinars?)(?:[/-]|$)", re.IGNORECASE)
 
 
 def _is_offtopic_url(url: str) -> bool:

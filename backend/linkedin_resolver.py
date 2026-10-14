@@ -470,8 +470,12 @@ def score_profile(person: dict, prof: dict, f: dict, ctx: dict) -> dict | None:
                           or (f"No title shown · {prof['location']}" if prof["location"] else "")
                           or _snippet(prof["own"])),
         "source": "linkedin_sidebar" if prof.get("sidebar") else "linkedin_search",
+        # A chosen address (/in/jenhsunhuang) over a generated one
+        # (/in/jensen-huang-89a60594): officers of public companies nearly
+        # always have one, impostor and namesake accounts rarely do. Only
+        # breaks ties — it never makes a weak match strong.
         "_rank": (level, exact, not f["exp_conflict"], f["company"] or f["same_role"],
-                  f["role"], f["notable"],
+                  f["role"], _is_vanity(prof["url"]), f["notable"],
                   bool(surname) and surname in prof["url"].lower().replace("-", "")),
     }
 
@@ -512,6 +516,12 @@ def _search(person: dict, company: str, api_key: str, second_pass: bool = False)
         logger.warning("LinkedIn search for '%s': HTTP %s", person["name"], resp.status_code)
         return []
     return resp.json().get("results", []) or []
+
+
+def _is_vanity(url: str) -> bool:
+    """True for a chosen profile address, False for LinkedIn's generated one."""
+    slug = url.rstrip("/").rsplit("/", 1)[-1].lower()
+    return not re.search(r"-[0-9a-f]{6,}$|\d{3,}$", slug)
 
 
 def _hq_phrase(hq: str) -> str:
@@ -560,7 +570,7 @@ def judge(person: dict, results: list[dict], company: str, domain: str = "",
             by_url[site_url] = {
                 "linkedin_url": site_url, "confidence": "Medium",
                 "matched_name": person["name"], "matched_title": "Linked from company website",
-                "source": "company_website", "_rank": (2, True, True, True, False, False, True),
+                "source": "company_website", "_rank": (2, True, True, True, False, True, False, True),
             }
 
     if not by_url:
@@ -568,7 +578,7 @@ def judge(person: dict, results: list[dict], company: str, domain: str = "",
     ranked = sorted(by_url.values(), key=lambda c: c["_rank"], reverse=True)
     best = dict(ranked[0])
     # Two different profiles that fit equally well: say so rather than pick.
-    if len(ranked) > 1 and ranked[1]["_rank"][:6] == best["_rank"][:6]:
+    if len(ranked) > 1 and ranked[1]["_rank"][:7] == best["_rank"][:7]:
         best["confidence"] = "Low"
         best["matched_title"] = (best["matched_title"] + " (another profile fits equally)").strip()
     best["matched_title"] = _clean_title(best["matched_title"])

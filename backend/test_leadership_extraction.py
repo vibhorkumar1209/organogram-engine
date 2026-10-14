@@ -326,7 +326,7 @@ shell_with_data = ('<div id="root"></div><script id="__NEXT_DATA__" type="applic
 empty_shell = '<html><body><div id="root"></div></body></html>'
 pages = {"https://a.com/led": shell_with_data, "https://a.com/empty": empty_shell}
 _orig_get_bounded = L._get_bounded
-L._get_bounded = lambda url, timeout=6: pages.get(url)
+L._get_bounded = lambda url, timeout=6, final_url=None: pages.get(url)
 try:
     h = L._Harvester()
     got_data = h.fetch("https://a.com/led")

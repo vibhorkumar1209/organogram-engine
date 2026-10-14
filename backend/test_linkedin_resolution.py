@@ -102,6 +102,17 @@ r = judge("Jensen Huang", "President and Chief Executive Officer", "executive", 
 ok(r["linkedin_url"].endswith("/jenhsunhuang") and r["confidence"] == "High",
    f"impostor: the real profile wins, outright (got {r['linkedin_url']} {r['confidence']})")
 
+# The same impostor when the search shows nothing damning about it: identical
+# headline, no connection count. The chosen address breaks the tie.
+r = judge("Jensen Huang", "President and Chief Executive Officer", "executive", [
+    res("https://www.linkedin.com/in/jensen-huang-89a60594", "Jensen Huang - Founder and CEO, NVIDIA | LinkedIn",
+        "Founder and CEO, NVIDIA"),
+    res("https://www.linkedin.com/in/jenhsunhuang", "Jensen Huang - Founder and CEO, NVIDIA | LinkedIn",
+        "Founder and CEO, NVIDIA"),
+], company="NVIDIA", domain="nvidia.com")
+ok(r["linkedin_url"].endswith("/jenhsunhuang") and r["confidence"] == "High",
+   f"impostor: a chosen profile address wins a tie with a generated one (got {r['linkedin_url']} {r['confidence']})")
+
 # ── A sidebar names other people's employers: not evidence for this profile ─
 r = judge("Ron Jadin", "Chief Financial Officer", "executive", [
     res("https://www.linkedin.com/in/ron-jadin-1", "Ron Jadin - Grainger | LinkedIn",

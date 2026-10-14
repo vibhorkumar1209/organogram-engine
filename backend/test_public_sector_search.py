@@ -98,7 +98,7 @@ calls = {"n": 0}
 _orig_get = F._get_bounded
 
 
-def _all_404(url, timeout=6):
+def _all_404(url, timeout=6, final_url=None):
     calls["n"] += 1
     return None
 
@@ -113,7 +113,7 @@ ok(calls["n"] <= F._MAX_GUESS_MISSES * 2 + 40,
 
 
 # A page the user pointed at is fetched first and its links followed.
-def _fake_get(url, timeout=6):
+def _fake_get(url, timeout=6, final_url=None):
     pages = {
         "https://hec.edu/en/qatar": '<p>HEC Paris in Qatar</p><a href="/en/qatar/leadership-team">Leadership Team</a>' + "x" * 400,
         "https://hec.edu/en/qatar/leadership-team": "<h2>Leadership Team</h2><p>Jane Roe, Dean</p>" + " " * 10 + "y" * 400,
@@ -127,6 +127,26 @@ F._discover_from_navigation(h, "hec.edu", seed_url="https://hec.edu/en/qatar")
 ok(h.fetched[:2] == ["https://hec.edu/en/qatar", "https://hec.edu/en/qatar/leadership-team"],
    f"seed: the user's page is read first, then its leadership link (got {h.fetched})")
 F._get_bounded = _orig_get
+
+# Unknown addresses redirected to the homepage made every guess "succeed":
+# pyramidci.com answered ten guesses under /about-us/ with its homepage.
+def _redirect_home(url, timeout=6, final_url=None):
+    if final_url is not None:
+        final_url.append("https://pyramidci.com/" if "board" in url else url)
+    return "<p>" + ("Home page " * 60) + "</p>"
+
+
+F._get_bounded = _redirect_home
+h = F._Harvester()
+ok(not h.fetch("https://pyramidci.com/about-us/board-of-directors/"),
+   "guard: a page that redirects to the homepage is treated as missing")
+ok(h.fetch("https://pyramidci.com/about-us/"), "guard: a real page is harvested")
+ok(not h.fetch("https://pyramidci.com/about-us/leadership-x/"),
+   "guard: identical content under a second address is not harvested twice")
+F._get_bounded = _orig_get
+
+ok(F._is_offtopic_url("https://pyramidci.com/casestudy/leading-bank-holding-organization-x/"),
+   "offtopic: case studies are catalogue pages")
 
 ok(F._subdomain_hosts(["https://qatar.exed.hec.edu/about-us", "https://www.hec.edu/en",
                        "https://hec.edu/x", "https://other.org/"], "hec.edu")
