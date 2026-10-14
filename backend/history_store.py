@@ -1,290 +1,274 @@
 """
 Durable, server-wide history of completed org-chart generations.
 
-Backed by Postgres (DATABASE_URL) so history survives a Render redeploy —
-unlike the per-job SQLite files in structural_engine.py, which only survive
-a process restart (see JobSession/_JOBS in api_server.py). Every function
-here degrades to a no-op when DATABASE_URL is unset or unreachable, the same
-way ANTHROPIC_API_KEY/GEMINI_API_KEY already degrade for local dev instead
-of crashing the app.
+Backed by Upstash Redis — what "Vercel KV" became: Vercel retired its own KV
+in December 2024 and provisions Upstash Redis through the Marketplace instead.
+It is reached over its HTTPS REST API, so the backend (on Render) needs no
+database driver, no region pairing and no connection pool.
 
-A new connection is opened and closed per call rather than held open —
-simplest safe option given psycopg2 connections aren't meant to be shared
-across concurrent requests, and call volume here is low (a couple of writes
-per job, one list query per History page load).
+This replaced a Render Postgres that silently disappeared: Render's free
+Postgres expires after 30 days, DATABASE_URL kept pointing at a host that no
+longer existed, and every failure here was a no-op, so an empty history looked
+exactly like "no charts yet". Failures are now recorded and reported by
+status() / GET /history-status.
+
+Configuration (either naming works — the Vercel integration sets KV_*, the
+Upstash console shows UPSTASH_*):
+    KV_REST_API_URL / KV_REST_API_TOKEN
+    UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+
+Layout (all keys under "organogram:" so the store can be shared):
+    organogram:run:{job_id}   JSON summary row (what the History page lists)
+    organogram:snap:{job_id}  gzip+base64 JSON {nodes, edges} — reloads a chart
+    organogram:runs           sorted set of job_ids, score = created_at epoch
 """
 
+import base64
+import gzip
 import json
 import logging
 import os
+import re
+import time
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-_DATABASE_URL = os.environ.get("DATABASE_URL", "")
-_warned_no_db = False
-# The most recent failure, so /history-status can say WHY history is empty
-# instead of every failure looking like "no charts yet".
+_PREFIX = "organogram:"
+_RUNS = _PREFIX + "runs"
+_TIMEOUT = 10
+
+# The most recent failure, so /history-status can say WHY history is empty.
 _last_error: dict = {}
+_warned_unconfigured = False
+
+
+def _config() -> tuple[str, str]:
+    url = os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or ""
+    token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
+    return url.rstrip("/"), token
 
 
 def _note_error(where: str, exc: Exception) -> None:
-    import re as _re
-    import time as _time
-    msg = _re.sub(r"postgres(?:ql)?://\S+", "postgres://***", str(exc))
+    msg = re.sub(r"https://\S+", "https://***", str(exc))          # no URLs/tokens out
     _last_error.clear()
     _last_error.update({"where": where, "error": f"{type(exc).__name__}: {msg[:300]}",
-                        "at": _time.time()})
+                        "at": time.time()})
 
 
-def _connect():
-    """A new psycopg2 connection, or None if unavailable — callers must
-    handle None by skipping the operation."""
-    global _warned_no_db
-    if not _DATABASE_URL:
-        if not _warned_no_db:
-            logger.warning("DATABASE_URL not set — org chart history will not be persisted.")
-            _warned_no_db = True
+def _configured() -> bool:
+    global _warned_unconfigured
+    url, token = _config()
+    if url and token:
+        return True
+    if not _warned_unconfigured:
+        logger.warning("KV_REST_API_URL / KV_REST_API_TOKEN not set — "
+                       "org chart history will not be persisted.")
+        _warned_unconfigured = True
+    return False
+
+
+def _pipeline(commands: list[list]) -> list:
+    """Run Redis commands in one HTTPS round trip; returns each result."""
+    import httpx
+    url, token = _config()
+    resp = httpx.post(f"{url}/pipeline", json=commands, timeout=_TIMEOUT,
+                      headers={"Authorization": f"Bearer {token}"})
+    resp.raise_for_status()
+    out = []
+    for item in resp.json():
+        if isinstance(item, dict) and item.get("error"):
+            raise RuntimeError(f"Redis error: {item['error']}")
+        out.append(item.get("result") if isinstance(item, dict) else item)
+    return out
+
+
+def _cmd(*args):
+    return _pipeline([list(args)])[0]
+
+
+def _iso(epoch: float | None) -> str | None:
+    if not epoch:
         return None
-    try:
-        import psycopg2
-        conn = psycopg2.connect(_DATABASE_URL)
-        conn.autocommit = True
-        return conn
-    except Exception as exc:
-        logger.warning("history_store: could not connect to Postgres: %s", exc)
-        _note_error("connect", exc)
-        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
+
+def _pack(obj) -> str:
+    return base64.b64encode(gzip.compress(json.dumps(obj).encode())).decode()
+
+
+def _unpack(data: str):
+    return json.loads(gzip.decompress(base64.b64decode(data)).decode())
+
+
+# ── Public API (unchanged from the Postgres version) ─────────────────────────
 
 def init_schema() -> None:
-    """Call once at startup. Safe to call repeatedly (IF NOT EXISTS)."""
-    conn = _connect()
-    if conn is None:
+    """Call once at startup. Redis has no schema; this checks the store answers."""
+    if not _configured():
         return
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS chart_runs (
-                    job_id            TEXT PRIMARY KEY,
-                    company_name      TEXT NOT NULL,
-                    industry          TEXT,
-                    source            TEXT NOT NULL,
-                    status            TEXT NOT NULL,
-                    people_count      INT,
-                    dept_count        INT,
-                    board_count       INT,
-                    exec_count        INT,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    completed_at      TIMESTAMPTZ,
-                    input_tokens      INT DEFAULT 0,
-                    output_tokens     INT DEFAULT 0,
-                    cost_usd          NUMERIC(12,6) DEFAULT 0,
-                    gemini_pricing_is_estimate BOOLEAN DEFAULT FALSE,
-                    snapshot          JSONB
-                )
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_chart_runs_status_created
-                    ON chart_runs (status, created_at DESC)
-            """)
-        logger.info("history_store: schema ready")
+        _cmd("PING")
+        logger.info("history_store: KV store reachable")
     except Exception as exc:
-        logger.warning("history_store: schema init failed: %s", exc)
-        _note_error("init_schema", exc)
-    finally:
-        conn.close()
+        logger.warning("history_store: KV store unreachable: %s", exc)
+        _note_error("init", exc)
 
 
 def record_job_created(job_id: str, company_name: str, source: str) -> None:
-    conn = _connect()
-    if conn is None:
+    if not _configured():
         return
+    now = time.time()
+    row = {"job_id": job_id, "company_name": company_name, "industry": None,
+           "source": source, "status": "processing", "people_count": None,
+           "dept_count": None, "board_count": None, "exec_count": None,
+           "created_at": now, "completed_at": None, "input_tokens": 0,
+           "output_tokens": 0, "cost_usd": 0.0, "gemini_pricing_is_estimate": False}
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO chart_runs (job_id, company_name, source, status)
-                VALUES (%s, %s, %s, 'processing')
-                ON CONFLICT (job_id) DO NOTHING
-            """, (job_id, company_name, source))
+        # NX: never overwrite a run that already exists (a retried request).
+        _pipeline([["SET", f"{_PREFIX}run:{job_id}", json.dumps(row), "NX"],
+                   ["ZADD", _RUNS, "NX", str(now), job_id]])
     except Exception as exc:
         logger.warning("history_store: record_job_created failed for '%s': %s", job_id, exc)
         _note_error("record_job_created", exc)
-    finally:
-        conn.close()
+
+
+def _counts(dag) -> dict:
+    people = board = execs = depts = 0
+    for _, attrs in dag.G.nodes(data=True):
+        node_type = attrs.get("node_type")
+        if node_type in ("dept_primary", "dept_secondary", "dept_tertiary"):
+            depts += 1
+            continue
+        if node_type != "person":
+            continue
+        people += 1
+        meta = attrs.get("metadata", {}) or {}
+        if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai", "uploaded_data"):
+            if "Board" in (meta.get("dept_primary", "") or ""):
+                board += 1
+            else:
+                execs += 1
+    return {"people_count": people, "dept_count": depts,
+            "board_count": board, "exec_count": execs}
 
 
 def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict) -> None:
-    """dag: OrganogramDAG. usage_summary: the dict UsageTracker.summary() returns."""
-    conn = _connect()
-    if conn is None:
+    """dag: OrganogramDAG. usage_summary: the dict UsageTracker.summary() returns.
+
+    Called again when LinkedIn profiles arrive after the chart, so it updates
+    the row in place rather than requiring a fresh one.
+    """
+    if not _configured():
         return
     try:
-        people_count = board_count = exec_count = dept_count = 0
-        for _, attrs in dag.G.nodes(data=True):
-            node_type = attrs.get("node_type")
-            if node_type in ("dept_primary", "dept_secondary", "dept_tertiary"):
-                dept_count += 1
-                continue
-            if node_type != "person":
-                continue
-            people_count += 1
-            meta = attrs.get("metadata", {})
-            if meta.get("nlp_method") in ("llm_leadership_web", "llm_leadership_ai", "uploaded_data"):
-                if "Board" in meta.get("dept_primary", ""):
-                    board_count += 1
-                else:
-                    exec_count += 1
-
-        # Build node entries directly from (node_id, attrs) pairs rather than
-        # dag.get_flat_nodes() — that method returns each node's attrs dict
-        # as-is, and at least one node type (board-of-management governance
-        # nodes) doesn't embed its own node_id inside attrs, only relying on
-        # it being the networkx graph key. Mirror the same approach
-        # OrganogramDB.upsert_dag/load_dag already use for exactly this reason.
+        key = f"{_PREFIX}run:{job_id}"
+        existing = _cmd("GET", key)
+        row = json.loads(existing) if existing else {
+            "job_id": job_id, "company_name": getattr(dag, "company_name", "") or "",
+            "source": "upload", "created_at": time.time()}
+        row.update(_counts(dag))
+        row.update({
+            "status": "ready",
+            "industry": industry,
+            "completed_at": time.time(),
+            "input_tokens": usage_summary.get("input_tokens", 0),
+            "output_tokens": usage_summary.get("output_tokens", 0),
+            "cost_usd": float(usage_summary.get("cost_usd", 0) or 0),
+            "gemini_pricing_is_estimate": bool(usage_summary.get("gemini_pricing_is_estimate")),
+        })
+        # Build node entries from (node_id, attrs) pairs rather than
+        # dag.get_flat_nodes() — governance nodes don't embed their own
+        # node_id inside attrs, only the networkx key carries it.
         nodes_out = [{**attrs, "node_id": node_id} for node_id, attrs in dag.G.nodes(data=True)]
-        snapshot = json.dumps({"nodes": nodes_out, "edges": dag.get_edges()})
-
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE chart_runs SET
-                    status = 'ready',
-                    industry = %s,
-                    people_count = %s,
-                    dept_count = %s,
-                    board_count = %s,
-                    exec_count = %s,
-                    completed_at = now(),
-                    input_tokens = %s,
-                    output_tokens = %s,
-                    cost_usd = %s,
-                    gemini_pricing_is_estimate = %s,
-                    snapshot = %s
-                WHERE job_id = %s
-            """, (
-                industry, people_count, dept_count, board_count, exec_count,
-                usage_summary.get("input_tokens", 0),
-                usage_summary.get("output_tokens", 0),
-                usage_summary.get("cost_usd", 0),
-                usage_summary.get("gemini_pricing_is_estimate", False),
-                snapshot,
-                job_id,
-            ))
+        snapshot = _pack({"nodes": nodes_out, "edges": dag.get_edges()})
+        _pipeline([["SET", key, json.dumps(row)],
+                   ["SET", f"{_PREFIX}snap:{job_id}", snapshot],
+                   ["ZADD", _RUNS, str(row.get("created_at") or time.time()), job_id]])
     except Exception as exc:
         logger.warning("history_store: record_job_completed failed for '%s': %s", job_id, exc)
         _note_error("record_job_completed", exc)
-    finally:
-        conn.close()
 
 
 def delete_job(job_id: str) -> None:
-    conn = _connect()
-    if conn is None:
+    if not _configured():
         return
     try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM chart_runs WHERE job_id = %s", (job_id,))
+        _pipeline([["DEL", f"{_PREFIX}run:{job_id}", f"{_PREFIX}snap:{job_id}"],
+                   ["ZREM", _RUNS, job_id]])
     except Exception as exc:
         logger.warning("history_store: delete_job failed for '%s': %s", job_id, exc)
         _note_error("delete_job", exc)
-    finally:
-        conn.close()
+
+
+# How many recent runs to read before filtering — the filters (status, source,
+# search) are applied in Python, which is fine at this app's volume.
+_SCAN_LIMIT = 2000
 
 
 def list_jobs(limit: int = 50, offset: int = 0, source: str = "", q: str = "") -> list[dict]:
-    conn = _connect()
-    if conn is None:
+    if not _configured():
         return []
     try:
-        clauses = ["status = 'ready'"]
-        params: list = []
-        if source:
-            clauses.append("source = %s")
-            params.append(source)
-        if q:
-            clauses.append("company_name ILIKE %s")
-            params.append(f"%{q}%")
-        where = " AND ".join(clauses)
-        params.extend([limit, offset])
-        with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT job_id, company_name, industry, source, status,
-                       people_count, dept_count, board_count, exec_count,
-                       created_at, completed_at, input_tokens, output_tokens,
-                       cost_usd, gemini_pricing_is_estimate
-                FROM chart_runs
-                WHERE {where}
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-            """, params)
-            cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-        for r in rows:
-            r["created_at"]   = r["created_at"].isoformat() if r["created_at"] else None
-            r["completed_at"] = r["completed_at"].isoformat() if r["completed_at"] else None
-            r["cost_usd"]     = float(r["cost_usd"]) if r["cost_usd"] is not None else 0.0
-        return rows
+        ids = _cmd("ZREVRANGE", _RUNS, "0", str(_SCAN_LIMIT - 1)) or []
+        if not ids:
+            return []
+        raw = _cmd("MGET", *[f"{_PREFIX}run:{i}" for i in ids]) or []
+        rows = []
+        needle = (q or "").lower()
+        for item in raw:
+            if not item:
+                continue
+            row = json.loads(item)
+            if row.get("status") != "ready":
+                continue
+            if source and row.get("source") != source:
+                continue
+            if needle and needle not in (row.get("company_name") or "").lower():
+                continue
+            rows.append(row)
+        page = rows[offset: offset + limit]
+        for r in page:
+            r["created_at"] = _iso(r.get("created_at"))
+            r["completed_at"] = _iso(r.get("completed_at"))
+            r["cost_usd"] = float(r.get("cost_usd") or 0.0)
+        return page
     except Exception as exc:
         logger.warning("history_store: list_jobs failed: %s", exc)
         _note_error("list_jobs", exc)
         return []
-    finally:
-        conn.close()
 
 
 def load_snapshot(job_id: str) -> dict | None:
     """Returns {"company_name": ..., "nodes": [...], "edges": [...]} or None."""
-    conn = _connect()
-    if conn is None:
+    if not _configured():
         return None
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT company_name, snapshot FROM chart_runs
-                WHERE job_id = %s AND snapshot IS NOT NULL
-            """, (job_id,))
-            row = cur.fetchone()
-        if not row:
+        row_raw, snap = _pipeline([["GET", f"{_PREFIX}run:{job_id}"],
+                                   ["GET", f"{_PREFIX}snap:{job_id}"]])
+        if not snap:
             return None
-        company_name, snapshot = row
-        if isinstance(snapshot, str):
-            snapshot = json.loads(snapshot)
-        return {"company_name": company_name, **snapshot}
+        row = json.loads(row_raw) if row_raw else {}
+        return {"company_name": row.get("company_name", ""), **_unpack(snap)}
     except Exception as exc:
         logger.warning("history_store: load_snapshot failed for '%s': %s", job_id, exc)
         _note_error("load_snapshot", exc)
         return None
-    finally:
-        conn.close()
 
 
 def status() -> dict:
-    """Why history is or isn't being saved — no credentials in the output."""
-    out: dict = {"configured": bool(_DATABASE_URL), "connected": False,
-                 "last_error": dict(_last_error) or None}
-    try:
-        import psycopg2  # noqa: F401
-        out["driver"] = True
-    except Exception as exc:
-        out["driver"] = False
-        out["driver_error"] = f"{type(exc).__name__}: {exc}"[:200]
-    conn = _connect()
-    if conn is None:
-        out["last_error"] = dict(_last_error) or out["last_error"]
+    """Whether Org History is being saved, and if not, why — no secrets."""
+    out: dict = {"backend": "upstash-redis (Vercel KV)", "configured": _configured(),
+                 "connected": False, "last_error": dict(_last_error) or None}
+    if not out["configured"]:
         return out
-    out["connected"] = True
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT to_regclass('public.chart_runs') IS NOT NULL")
-            out["table_exists"] = bool(cur.fetchone()[0])
-            if out["table_exists"]:
-                cur.execute("SELECT status, count(*) FROM chart_runs GROUP BY status")
-                out["rows_by_status"] = {k: int(v) for k, v in cur.fetchall()}
-                cur.execute("SELECT max(created_at) FROM chart_runs")
-                latest = cur.fetchone()[0]
-                out["latest_created_at"] = latest.isoformat() if latest else None
+        pong, total = _pipeline([["PING"], ["ZCARD", _RUNS]])
+        out["connected"] = pong == "PONG"
+        out["runs_total"] = int(total or 0)
+        latest = _cmd("ZREVRANGE", _RUNS, "0", "0", "WITHSCORES") or []
+        out["latest_created_at"] = _iso(float(latest[1])) if len(latest) >= 2 else None
     except Exception as exc:
         _note_error("status", exc)
         out["last_error"] = dict(_last_error)
-    finally:
-        conn.close()
     return out

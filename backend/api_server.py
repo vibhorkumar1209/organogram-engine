@@ -824,10 +824,10 @@ def _try_reload_job(job_id: str) -> None:
             company_name=restored_dag.company_name,
         )
         _enforce_job_capacity()
-        logger.info("Reloaded job '%s' from Postgres history (%d nodes)",
+        logger.info("Reloaded job '%s' from KV history (%d nodes)",
                     job_id, restored_dag.G.number_of_nodes())
     except Exception as exc:
-        logger.warning("Postgres reload failed for job '%s': %s", job_id, exc)
+        logger.warning("KV history reload failed for job '%s': %s", job_id, exc)
 
 
 def _require_dag(job_id: str):
@@ -3384,7 +3384,7 @@ async def list_history(
 ):
     """
     Shared, server-wide list of completed org-chart generations — durable
-    across redeploys (backed by Postgres, see history_store.py), unlike an
+    across redeploys (backed by Upstash Redis / Vercel KV, see history_store.py), unlike an
     individual job's live session state. No auth: matches every other
     endpoint in this API, and lets an external caller discover job_ids to
     address via /tree, /company, /export, etc. without already knowing one.
