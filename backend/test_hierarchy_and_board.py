@@ -193,5 +193,15 @@ ok(F._named_near_org("Sanjeev Tirath", answer, "Pyramid Consulting", "pyramidci.
    and not F._named_near_org("Allyson Goodman", answer, "Pyramid Consulting", "pyramidci.com"),
    "retry: a similarly named company's founder is not taken as a director")
 
+# ── Departments read from titles: no fragments, no territories ──────────────
+for title, dept in [("SVP, Head of Delivery", "Delivery"),
+                    ("VP, US Southeast", ""), ("VP, US Mid - Atlantic", ""),
+                    ("SVP, US West Client Services", "Client Services"),
+                    ("SVP, US East Client Services & Head of Delivery", "Client Services"),
+                    ("Executive Vice President, Core Diagnostics", "Core Diagnostics"),
+                    ("Executive Vice President, Worldwide Field Operations", "Operations")]:
+    got = S._exec_department(title)
+    ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

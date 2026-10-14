@@ -2617,6 +2617,18 @@ def _exec_department(title: str) -> str:
     # the department.
     unit = _business_unit_from_title(raw)
     if unit and unit not in (BOARD_DEPT, EXEC_DEPT):
+        # "Client Services", "Delivery": the taxonomy may already know the
+        # function the unit names. Use its department when it does.
+        try:
+            from classifier import classify as _classify_title
+            ur = _classify_title(job_title=unit, linkedin_headline="", job_function="",
+                                 job_level="", industry="")
+            if (ur and ur.dept_primary and ur.method != "job_function_fallback"
+                    and ur.confidence >= 0.5
+                    and ur.dept_primary not in (BOARD_DEPT, EXEC_DEPT)):
+                return ur.dept_primary
+        except Exception:
+            pass
         return unit
     # Neither the taxonomy nor a business unit names anything: this person
     # runs no department. The classifier's last resort is a 0.3-confidence
@@ -2644,11 +2656,31 @@ def _business_unit_from_title(title: str) -> str:
     tail = re.sub(r"\s+and\s+(?:chief|secretary|general counsel).*$", "", tail,
                   flags=re.IGNORECASE).strip(" ,&-")
     tail = _RANK_PREFIX_RE.sub("", tail).strip(" ,&-")
+    # "SVP, Head of Delivery" left "of Delivery" — a department literally
+    # called "Of Delivery" appeared on Pyramid Consulting's chart.
+    tail = re.sub(r"^(?:head\s+)?of\s+(?:the\s+)?", "", tail, flags=re.IGNORECASE).strip(" ,&-")
+    # "Client Services & Head of Delivery": the second remit starts a new role.
+    tail = re.split(r"\s*(?:&|\band\b)\s+(?:head|chief|vp|svp|evp|director)\b", tail,
+                    flags=re.IGNORECASE)[0].strip(" ,&-")
+    # A place is a territory, not a department: "VP, US Southeast" runs a
+    # region. Strip the geography; whatever function remains ("US West Client
+    # Services" -> "Client Services") is the department, or nothing is.
+    tail = _GEO_WORDS_RE.sub(" ", tail)
+    tail = re.sub(r"\s+", " ", tail).strip(" ,&-")
     _GENERIC_TAIL = {"staff", "office", "the company", "company", "group",
-                     "business", "operations officer", "administration"}
+                     "business", "operations officer", "administration", "and", "&"}
     if tail and 2 < len(tail) <= 60 and tail.lower() not in _GENERIC_TAIL:
         return _titlecase_dept(tail)
     return ""
+
+
+_GEO_WORDS_RE = re.compile(
+    r"\b(?:u\.?s\.?a?|us|uk|u\.k\.|emea|apac|apj|latam|mena|asean|gcc|anz|europe|asia"
+    r"|americas?|north\s+america|south\s+america|africa|middle\s+east|india|china|japan"
+    r"|canada|mexico|brazil|germany|france|australia|singapore|global|international"
+    r"|(?:north|south)(?:east|west)?|east|west|central|mid\s*-?\s*atlantic|midwest"
+    r"|southeast|southwest|northeast|northwest|region|regional)\b",
+    re.IGNORECASE)
 
 
 def _core_departments() -> list[str]:
