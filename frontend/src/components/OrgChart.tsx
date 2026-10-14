@@ -267,6 +267,13 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .text(d => {
         if (d.data.node_type === 'person' && d.data.metadata?.designation)
           return String(d.data.metadata.designation).slice(0, 23)
+        // Who runs this department — the CEO on Executive Management, the
+        // functional head on each branch below it.
+        const head = d.data.metadata?.head_name
+        if (head && d.data.node_type !== 'person') {
+          const txt = `led by ${String(head)}`
+          return txt.length > 26 ? txt.slice(0, 25) + '…' : txt
+        }
         return NODE_TYPE_LABEL[d.data.node_type] ?? d.data.sector ?? ''
       })
 

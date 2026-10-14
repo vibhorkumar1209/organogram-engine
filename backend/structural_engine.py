@@ -1278,7 +1278,14 @@ class OrganogramDAG:
         person_layer = rec.layer
         start_layer  = 4   # first employee layer after dept tree
 
-        if person_layer <= start_layer:
+        # The leadership panels are rosters: seniority there is the person's
+        # layer, not a chain of "Senior Director ✦" placeholders. A Director
+        # of Business Development on Pyramid's leadership page ended up two
+        # placeholders deep — invisible to everything that looks for
+        # Executive Management's members.
+        panels = (self._node_id("dept", "Executive Management"),
+                  self._node_id("dept", "Board of Management"))
+        if person_layer <= start_layer or dept_node in panels:
             self._ensure_edge(dept_node, person_node)
             return
 
@@ -2317,7 +2324,9 @@ def _enrich_with_llm_leadership(
             injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region, li))
         for person in leadership.get("executives", []):
             title = person["title"]
-            em_layer    = 2 if _is_regional_exec(title) else 1
+            em_layer    = _exec_layer(title)
+            if _is_regional_exec(title):
+                em_layer = max(em_layer, 2)
             exec_region = _infer_exec_region(title, region)
             li = (person.get("linkedin_url", "") or "").strip()
             injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region, li))
@@ -2756,6 +2765,7 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
             meta = dict(dag.G.nodes[nid].get("metadata", {}) or {})
             meta["leads_department"], meta["leads_department_id"] = dept_name, dept_id
             dag.G.nodes[nid]["metadata"] = meta
+    mark_apex(dag)
     if created:
         logger.info("Split Executive Management into %d department(s)", created)
     return created
@@ -2839,6 +2849,89 @@ def resolve_leadership_linkedin(dag: "OrganogramDAG", company_name: str,
     return summary
 
 
+_TOP_TIER_RE = re.compile(
+    r"\bchief\b|\bpresident\b(?<!vice president)|\bmanaging\s+(?:partner|director)\b"
+    r"|\bfounder\b|\bchair(?:man|woman|person)?\b|\b(?:ceo|cfo|coo|cto|cio|cmo|chro|cso|clo)\b",
+    re.IGNORECASE)
+
+
+def _exec_layer(title: str) -> int:
+    """
+    Seniority of an Executive Management member, from their title.
+
+    Every injected executive used to get layer 1, so a CEO, a Senior VP and a
+    Director of Business Development were all peers and the panel could not
+    show who reports to whom. The classifier's grade is used instead, with the
+    apex at 1 and C-suite / presidents / founders kept at the top tier.
+    """
+    t = str(title or "")
+    if _is_ceo(t):
+        return 1
+    if _TOP_TIER_RE.search(t) and not re.search(r"\bvice\s+president\b", t, re.I):
+        return 1
+    try:
+        from classifier import classify as _classify_title
+        layer = _classify_title(job_title=t, linkedin_headline="", job_function="",
+                                job_level="", industry="").layer
+    except Exception:
+        layer = 2
+    if layer is None or layer >= 9:
+        return 2            # unknown grade: below the C-suite, not at the bottom
+    return max(1, min(int(layer), 8))
+
+
+def mark_apex(dag: "OrganogramDAG") -> str:
+    """
+    Mark the one person who leads Executive Management, and say so on the panel.
+
+    The panel decided this by re-parsing titles in the browser, and that check
+    rejected "Co-founder and Chief Executive Officer" (it read "co-" as co-CEO)
+    and "President and CEO" — so Pyramid Consulting's CEO was shown as a peer
+    of his own team. The engine's own head-of-organisation test decides it now,
+    once. Returns the apex node id, or "".
+    """
+    em_id = _dept_node_id(EXEC_DEPT)
+    if em_id not in dag.G:
+        return ""
+    members = []
+    for nid in dag.G.nodes:
+        attrs = dag.G.nodes[nid]
+        if attrs.get("node_type") == "person" and _person_department(dag, nid) == EXEC_DEPT:
+            members.append(nid)
+
+    def rank(nid: str) -> tuple:
+        t = str((dag.G.nodes[nid].get("metadata", {}) or {}).get("designation", "")).lower()
+        return (
+            0 if re.search(r"\bchief\s+executive\b|\bceo\b", t) else
+            1 if _ORG_HEAD_RE.search(t) or re.search(r"^vice[\s-]+chancellor", t) else 2,
+            0 if "group" in t or "global" in t else 1,
+            dag.G.nodes[nid].get("label", ""),
+        )
+
+    candidates = sorted((n for n in members
+                         if _is_ceo(str((dag.G.nodes[n].get("metadata", {}) or {})
+                                        .get("designation", "")))), key=rank)
+    apex = candidates[0] if candidates else ""
+    for nid in members:
+        meta = dict(dag.G.nodes[nid].get("metadata", {}) or {})
+        if nid == apex:
+            meta["is_apex"] = True
+            dag.G.nodes[nid]["layer"] = 1
+        else:
+            meta.pop("is_apex", None)
+        dag.G.nodes[nid]["metadata"] = meta
+    em_meta = dict(dag.G.nodes[em_id].get("metadata", {}) or {})
+    if apex:
+        a = dag.G.nodes[apex]
+        em_meta.update(head_node_id=apex, head_name=a.get("label", ""),
+                       head_title=(a.get("metadata", {}) or {}).get("designation", ""))
+    else:
+        for k in ("head_node_id", "head_name", "head_title"):
+            em_meta.pop(k, None)
+    dag.G.nodes[em_id]["metadata"] = em_meta
+    return apex
+
+
 def _dept_node_id(dept_name: str) -> str:
     """Id for a department node, using the DAG's own helper.
 
@@ -2852,10 +2945,29 @@ def _dept_node_id(dept_name: str) -> str:
 
 
 def _person_department(dag: "OrganogramDAG", node_id: str) -> str:
-    """The label of the department node a person hangs from."""
-    for parent in dag.G.predecessors(node_id):
-        if str(dag.G.nodes[parent].get("node_type", "")).startswith("dept"):
-            return dag.G.nodes[parent].get("label", "")
+    """The label of the department node a person hangs from.
+
+    Looks through level placeholders (ghost nodes) in between. It does NOT
+    climb through people: someone reporting to an executive is in that
+    executive's team, not a member of Executive Management.
+    """
+    seen = {node_id}
+    frontier = [node_id]
+    for _ in range(12):
+        nxt = []
+        for nid in frontier:
+            for parent in dag.G.predecessors(nid):
+                if parent in seen:
+                    continue
+                seen.add(parent)
+                ntype = str(dag.G.nodes[parent].get("node_type", ""))
+                if ntype.startswith("dept"):
+                    return dag.G.nodes[parent].get("label", "")
+                if ntype == "ghost" or dag.G.nodes[parent].get("is_ghost"):
+                    nxt.append(parent)
+        if not nxt:
+            break
+        frontier = nxt
     return ""
 
 

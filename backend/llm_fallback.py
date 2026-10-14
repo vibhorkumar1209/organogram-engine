@@ -1086,8 +1086,14 @@ def _bio_links(html: str, base_url: str) -> list[str]:
 # "The Minister", "Organisational structure", "Office of the Dean") — and
 # links it from the homepage. Matched against the link's path AND its text.
 _NAV_STRONG_RE = re.compile(
-    r"\b(?:leadership|leaders|management|governance|board|boards|trustees?|council"
-    r"|executive|executives|directors?|officers|committee|cabinet|senior[- ]officials?"
+    # Phrases, not bare words, where a bare word is also a product or a topic:
+    # NVIDIA's nav has "Executive Insights" and "NVIDIA App Enterprise", and a
+    # hardware maker sells development "boards".
+    r"\b(?:leadership|leaders|governance|board\s+of|boards?\s+of|our\s+board|the\s+board"
+    r"|board\s+members|management\s+team|management\s+board|management\s+committee"
+    r"|senior\s+management|executive\s+team|executive\s+committee|executive\s+leadership"
+    r"|executive\s+board|executives|trustees?|council"
+    r"|directors|officers|cabinet|senior[- ]officials?"
     r"|dean|deans|rector|rectorate|chancellor|provost|president|presidency"
     r"|minister|ministers|secretary[- ]general|director[- ]general|commissioners?"
     r"|governors|organi[sz]ational[- ]structure|organi[sz]ation[- ]structure"
@@ -1107,7 +1113,11 @@ _NAV_EXCLUDE_RE = re.compile(
     # A school's catalogue is full of leadership words: "Executive MBA",
     # "Healthcare Management", "Emerging Leaders Track".
     r"|mba|emba|degrees?|masters?|bachelors?|phd|doctorate|certificates?|diplomas?"
-    r"|education|training|academy|track|summer|scholarships?)\b", re.IGNORECASE)
+    r"|education|training|academy|track|summer|scholarships?"
+    # Marketing sections of a product company.
+    r"|insights?|software|solutions?|products?|partners?|industries|technolog(?:y|ies)"
+    r"|platforms?|resources|support|developers?|downloads?|gaming|store|pricing)\b",
+    re.IGNORECASE)
 
 
 def _nav_leadership_links(html: str, base_url: str, limit: int = 8) -> list[tuple[str, bool]]:
@@ -1135,6 +1145,9 @@ def _nav_leadership_links(html: str, base_url: str, limit: int = 8) -> list[tupl
                 or parsed.netloc.lower().removeprefix("www.") != base_host:
             continue
         if parsed.path in ("", "/") or absolute in seen or _is_archival(absolute):
+            continue
+        # "/en-us/" is the homepage in another language, not a section.
+        if re.fullmatch(r"/[a-z]{2}(?:[-_][a-z]{2})?/?", parsed.path, re.IGNORECASE):
             continue
         if re.search(r"\.(?:pdf|jpe?g|png|gif|svg|zip|docx?|xlsx?|mp4)$", parsed.path, re.I):
             continue
@@ -1334,23 +1347,55 @@ def _discover_from_navigation(h: "_Harvester", domain: str, seed_url: str = "") 
             start_pages.append((home, html))
             break
 
-    weak_pages: list[str] = []
+    strong_hits = 0
     for base, html in start_pages:
         for url, strong in _nav_leadership_links(html, base):
             if h.exhausted:
                 break
-            if h.fetch(url, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
-                hits += 1
-                if not strong:
-                    weak_pages.append(url)
-                    # An About page is often a hub: "About us" → "Leadership".
-                    for sub, sub_strong in _nav_leadership_links(h.last_html, url, limit=4):
-                        if sub_strong and not h.exhausted and h.fetch(
-                                sub, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
-                            hits += 1
+            if not h.fetch(url, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+                continue
+            hits += 1
+            if strong:
+                strong_hits += 1
+                continue
+            # An About page is often a hub: "About us" → "Leadership".
+            for sub, sub_strong in _nav_leadership_links(h.last_html, url, limit=4):
+                if sub_strong and not h.exhausted and h.fetch(
+                        sub, follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+                    hits += 1
+                    strong_hits += 1
+            # …and its leadership pages often sit right under it without being
+            # linked in the HTML: NVIDIA's /about-nvidia/ never links its own
+            # /about-nvidia/board-of-directors/, which exists.
+            strong_hits += _probe_under(h, url)
     if hits:
-        logger.info("Navigation discovery for '%s': %d page(s)", domain, hits)
-    return hits
+        logger.info("Navigation discovery for '%s': %d page(s), %d leadership",
+                    domain, hits, strong_hits)
+    # Only leadership pages count: an About page or a menu hit is not a reason
+    # to skip looking for the board.
+    return strong_hits
+
+
+_UNDER_ABOUT = ["board-of-directors", "leadership", "executive-team", "leadership-team",
+                "management", "governance", "executive-leadership", "our-leadership",
+                "management-team", "board"]
+
+
+def _probe_under(h: "_Harvester", about_url: str) -> int:
+    """Try the usual leadership pages directly under an About page."""
+    from urllib.parse import urlparse
+    path = urlparse(about_url).path
+    if not path or path == "/":
+        return 0
+    suffix = "/" if about_url.endswith("/") else (".html" if about_url.endswith(".html") else "")
+    base = about_url[: -len(".html")] if suffix == ".html" else about_url.rstrip("/")
+    found = 0
+    for leaf in _UNDER_ABOUT:
+        if h.exhausted:
+            break
+        if h.fetch(f"{base}/{leaf}{suffix}", follow_bios=True, timeout=_NAV_FETCH_TIMEOUT):
+            found += 1
+    return found
 
 
 def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None,
@@ -1437,6 +1482,45 @@ def _fetch_static_leadership(domain: str, harvester: "_Harvester | None" = None,
                         domain, len(result), len(h.blocks))
         return result
     return ""   # shared harvester — caller owns draining and reading
+
+
+_GROUNDING_REDIRECT = "grounding-api-redirect"
+
+
+def _resolve_grounding_urls(urls: list[str]) -> list[str]:
+    """Follow each grounding redirect one hop to the real page URL."""
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        import httpx
+    except ImportError:
+        return urls
+
+    def one(url: str) -> str:
+        if _GROUNDING_REDIRECT not in url:
+            return url
+        try:
+            r = httpx.get(url, follow_redirects=False, timeout=6, headers=_FETCH_HEADERS)
+            return r.headers.get("location") or ""
+        except Exception:
+            return ""
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return [u for u in pool.map(one, urls[:60]) if u]
+
+
+def _is_relevant_grounding_url(url: str, domain: str) -> bool:
+    """A search hit worth fetching: a leadership-looking page on the org's site."""
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc.lower().removeprefix("www.")
+    if domain and not (host == domain or host.endswith("." + domain)):
+        # Off-site hits (a governance blog, a news article) describe other
+        # organisations or other eras; the grounded TEXT still keeps what they
+        # said about this one.
+        return False
+    if _is_archival(url) or _is_offtopic_url(url):
+        return False
+    low = url.lower()
+    return any(kw in low for kw in _GEMINI_URL_SIGNAL) or bool(_ABOUT_PAGE_RE.search(low))
 
 
 def _subdomain_hosts(urls: list[str], domain: str) -> list[str]:
@@ -1527,6 +1611,7 @@ def _gemini_discover_leadership_urls(
 
     all_urls:  list[str] = []
     all_texts: list[str] = []
+    raw_urls:  list[str] = []
     seen: set[str] = set()
 
     # Try both REST tool name variants — stable models use camelCase "googleSearch",
@@ -1598,14 +1683,22 @@ def _gemini_discover_leadership_urls(
                 for chunk in grounding.get("groundingChunks", []):
                     url = chunk.get("web", {}).get("uri", "")
                     if url and url not in seen:
-                        if (any(kw in url.lower() for kw in _GEMINI_URL_SIGNAL)
-                                and not _is_archival(url) and not _is_offtopic_url(url)):
-                            seen.add(url)
-                            all_urls.append(url)
-                            logger.info("Gemini grounding URL for '%s': %s", company_name, url)
+                        seen.add(url)
+                        raw_urls.append(url)
 
         except Exception as exc:
             logger.warning("Gemini query error for '%s': %s", company_name, exc)
+
+    # Grounding sources arrive as vertexaisearch redirect links whose path is
+    # an opaque token. The keyword filter used to run on that token, so
+    # Google's actual hits — NVIDIA's board page among them — were dropped
+    # unless random letters happened to spell "bod" or "team". Resolve each
+    # to the page it points at and judge THAT.
+    for url in _resolve_grounding_urls(raw_urls):
+        if url in all_urls or not _is_relevant_grounding_url(url, domain):
+            continue
+        all_urls.append(url)
+        logger.info("Gemini grounding URL for '%s': %s", company_name, url)
 
     return all_urls, "\n\n---\n\n".join(all_texts)
 
@@ -1748,10 +1841,23 @@ def _gemini_fetch_leadership(
     result = _merge_leadership(partials)
     merged_board = len(result.get("board", []))
     result = _resolve_stale(result, canonical_text)
+    # An empty board is almost never the truth for an organisation that has a
+    # leadership team. NVIDIA's roster lives only on investor.nvidia.com,
+    # which refuses Render's IP, so the board came solely from the grounded
+    # search answer — 11 directors on one run and none on the next. One
+    # board-only search settles it.
+    board_retry = 0
+    if not result.get("board"):
+        retry = _gemini_board_retry(company_name, domain, location, api_key)
+        if retry.get("board"):
+            board_retry = len(retry["board"])
+            result = _merge_leadership([result, {"board": retry["board"],
+                                                 "executives": [], "senior_leadership": []}])
     harvest_info["stages"] = {
         "gemini_board":       gemini_board,
         "corroborated_board": corrob_board,
         "merged_board":       merged_board,
+        "board_retry":        board_retry,
         "final_board":        len(result.get("board", [])),
         "corroboration_ran":  bool(corroborated),
     }
@@ -1800,6 +1906,58 @@ def _site_only_leadership(company_name: str, domain: str, site_url: str = "") ->
     _strip_internal_fields(result)
     result["_harvest"] = info
     return result
+
+
+def _gemini_board_retry(company_name: str, domain: str, location: str,
+                        api_key: str) -> dict:
+    """One grounded search for the board alone, extracted to {board: [...]}."""
+    try:
+        import httpx
+    except ImportError:
+        return {}
+    place = f" ({location})" if location else ""
+    queries = [
+        f"Who are the current members of the Board of Directors (or Board of Trustees / "
+        f"governing board) of {company_name}{place}? List every member's full name and "
+        f"board role, from the official website, investor relations site or latest proxy "
+        f"statement.",
+    ]
+    if domain:
+        queries.append(f'site:{domain} "board of directors" OR "board of trustees" '
+                       f'OR "governing board" members')
+    texts: list[str] = []
+    for query in queries:
+        try:
+            resp = httpx.post(
+                f"{_GEMINI_API_BASE}/models/{_GEMINI_MODEL}:generateContent",
+                params={"key": api_key},
+                json={"contents": [{"parts": [{"text": query}]}],
+                      "tools": [{"googleSearch": {}}],
+                      "generationConfig": {"temperature": 0, "maxOutputTokens": 2048}},
+                timeout=90,
+            )
+            if not resp.is_success:
+                continue
+            data = resp.json()
+            um = data.get("usageMetadata", {})
+            from usage_tracker import record_usage
+            record_usage("gemini", _GEMINI_MODEL,
+                         um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
+            for cand in data.get("candidates", []):
+                parts = cand.get("content", {}).get("parts", [])
+                text = " ".join(p.get("text", "") for p in parts if "text" in p).strip()
+                if text:
+                    texts.append(text)
+        except Exception as exc:
+            logger.warning("Board retry search failed for '%s': %s", company_name, exc)
+    if not texts:
+        return {}
+    # Grounded answers come from search results, not the org's own pages, so
+    # no domain lock here — but only the board section is taken from it.
+    parsed = _gemini_synthesize_chunk(company_name, "", "\n\n".join(texts), api_key, 1, 1)
+    board = (parsed or {}).get("board", []) or []
+    logger.info("Board retry for '%s': %d member(s)", company_name, len(board))
+    return {"board": board}
 
 
 _CORROBORATE_MAX_CHUNKS = 3   # index pages only — bounds the added cost
@@ -2448,8 +2606,47 @@ def _tidy_name(name: str) -> str:
     return " ".join(fix(w) for w in str(name or "").split())
 
 
+# "Executive" is a senior word in "Executive Vice President" and a junior job
+# title on its own ("Sales Executive", "Executive - Resourcing" — common in
+# India). Pyramid Consulting's team page listed ten "Executive Resourcing"
+# recruiters, and all ten reached Executive Management.
+_SENIOR_WORD_RE = re.compile(
+    r"\b(?:chief|president|vice\s+president|vp|evp|svp|director|head|officer|chair"
+    r"|chairman|chairwoman|chairperson|partner|founder|managing|general\s+manager"
+    r"|dean|minister|secretary|commissioner|governor|rector|chancellor|provost"
+    r"|ceo|cfo|coo|cto|cio|cmo|chro|cso|clo|treasurer|controller|counsel|fellow"
+    r"|principal|leader|lead)\b", re.IGNORECASE)
+_JUNIOR_TITLE_RE = re.compile(
+    r"\b(?:executive|analyst|associate|coordinator|specialist|assistant|intern|trainee"
+    r"|recruiter|representative|consultant|engineer|administrator|clerk|officer\s+trainee"
+    r"|resourcing|sourcer)\b", re.IGNORECASE)
+
+
+def _is_junior_title(title: str) -> bool:
+    """A title with a junior job word and no senior one."""
+    # Supporting a leader is not being one, whoever is named after "to".
+    if re.search(r"\b(?:executive|personal|administrative)\s+assistant\b|\bassistant\s+to\b",
+                 str(title or ""), re.I):
+        return True
+    t = re.sub(r"\bexecutive\s+(?:vice|director|chair|officer|committee|board|leadership"
+               r"|president|partner|team)\b", "", str(title or ""), flags=re.I)
+    t = re.sub(r"\bchief\s+executive\b", "", t, flags=re.I)
+    return bool(_JUNIOR_TITLE_RE.search(t)) and not _SENIOR_WORD_RE.search(t)
+
+
+def _drop_junior(result: dict) -> None:
+    """Keep junior staff out of Executive Management and senior leadership."""
+    for section in ("executives", "senior_leadership"):
+        people = result.get(section) or []
+        kept = [p for p in people if not _is_junior_title(p.get("title", ""))]
+        if len(kept) < len(people):
+            logger.info("Dropped %d junior title(s) from %s", len(people) - len(kept), section)
+        result[section] = kept
+
+
 def _strip_internal_fields(result: dict) -> None:
     """Remove merge bookkeeping so it never reaches the DAG or the frontend."""
+    _drop_junior(result)
     for section in ("board", "executives", "senior_leadership"):
         for person in result.get(section) or []:
             person.pop("_mentions", None)

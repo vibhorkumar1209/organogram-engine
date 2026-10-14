@@ -91,11 +91,15 @@ interface ExecTreeNode {
 // Detect the GLOBAL CEO / Group President as the apex of EM.
 // Excludes: co-/deputy/vice CEO; regional/country CEOs; plain MD (EVP, not group CEO).
 function isCeoTitle(person: OrgNode): boolean {
+  // The engine marks the one person leading Executive Management. Trust it:
+  // re-parsing titles here rejected "Co-founder and Chief Executive Officer".
+  if (person.metadata?.is_apex) return true
   const d = ((person.metadata?.designation as string) ?? '').toLowerCase()
   const text = d || person.label.toLowerCase()
 
-  // Exclude co-/deputy/vice/assistant qualifiers
-  if (/\b(co-?|deputy|vice|assistant|associate)\b/.test(text)) return false
+  // Exclude co-CEOs and deputies — but not a CO-FOUNDER who is the CEO.
+  if (/\bco-?(?:ceo|chief\s+executive)\b/.test(text)) return false
+  if (/\b(deputy|vice|assistant|associate)\b/.test(text)) return false
 
   // Exclude regional / country / divisional scope — NOT the global CEO.
   // Covers major geographies and common regional abbreviations.
@@ -105,7 +109,9 @@ function isCeoTitle(person: OrgNode): boolean {
   // Allowed global prefixes: group, global, interim, acting, incoming.
   const m = text.match(/(\w+)\s+ceo\b/)
   if (m && m[1]) {
-    const globalPfx = new Set(['group', 'global', 'chief', 'interim', 'acting', 'incoming', 'the'])
+    // "President and CEO", "Founder & CEO": a conjunction is not a region.
+    const globalPfx = new Set(['group', 'global', 'chief', 'interim', 'acting', 'incoming', 'the',
+                               'and', 'founder', 'president', 'chairman'])
     if (!globalPfx.has(m[1])) return false
   }
 
@@ -226,7 +232,8 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
   const topLayer = sorted[0]?.layer ?? 99
   const topGroup = sorted.filter(p => (p.layer ?? 99) === topLayer)
   const deeper   = sorted.filter(p => (p.layer ?? 99) !== topLayer)
-  const ceoIdx   = topGroup.findIndex(p => isCeoTitle(p))
+  const marked   = topGroup.findIndex(p => Boolean(p.metadata?.is_apex))
+  const ceoIdx   = marked >= 0 ? marked : topGroup.findIndex(p => isCeoTitle(p))
 
   // Only one person at top → standard layer tree (they're the natural apex)
   if (topGroup.length <= 1) return buildLayerTree(sorted)
