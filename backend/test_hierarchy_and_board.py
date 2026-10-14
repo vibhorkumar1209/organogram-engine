@@ -154,9 +154,19 @@ ok([p["name"] for p in res["board"]] == ["Tench Coxe", "Dawn Hudson"]
    and res["_harvest"]["stages"]["board_retry"] == 2,
    f"board retry: its directors join the result, and diagnostics say so ({res['_harvest']['stages']})")
 
+# A board of one — the dual-role CEO — is not a board found.
 calls.clear()
 F._gemini_synthesize_chunk = lambda *a, **k: {
-    "board": [{"name": "Tench Coxe", "title": "Director"}],
+    "board": [{"name": "Jensen Huang", "title": "Founder, President and CEO"}],
+    "executives": [{"name": "Jensen Huang", "title": "President and CEO"}], "senior_leadership": []}
+res = F._gemini_fetch_leadership("NVIDIA", "nvidia.com", "key")
+ok(calls == ["NVIDIA"] and len(res["board"]) == 3,
+   f"board retry: runs when only the CEO is on the board, and merges (got {len(res['board'])})")
+
+calls.clear()
+F._gemini_synthesize_chunk = lambda *a, **k: {
+    "board": [{"name": "Tench Coxe", "title": "Director"}, {"name": "Aarti Shah", "title": "Director"},
+              {"name": "Dawn Hudson", "title": "Director"}],
     "executives": [{"name": "Jensen Huang", "title": "President and CEO"}], "senior_leadership": []}
 F._gemini_fetch_leadership("NVIDIA", "nvidia.com", "key")
 ok(calls == [], "board retry: not run when the board was already found")

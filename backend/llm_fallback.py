@@ -1846,8 +1846,11 @@ def _gemini_fetch_leadership(
     # which refuses Render's IP, so the board came solely from the grounded
     # search answer — 11 directors on one run and none on the next. One
     # board-only search settles it.
+    # "Empty" includes a board of one or two: the CEO arrives on the board list
+    # as a dual-role director, and NVIDIA's chart showed exactly that — Jensen
+    # Huang alone, the other ten directors missing.
     board_retry = 0
-    if not result.get("board"):
+    if len(result.get("board") or []) < _MIN_PLAUSIBLE_BOARD:
         retry = _gemini_board_retry(company_name, domain, location, api_key)
         if retry.get("board"):
             board_retry = len(retry["board"])
@@ -1906,6 +1909,9 @@ def _site_only_leadership(company_name: str, domain: str, site_url: str = "") ->
     _strip_internal_fields(result)
     result["_harvest"] = info
     return result
+
+
+_MIN_PLAUSIBLE_BOARD = 3
 
 
 def _gemini_board_retry(company_name: str, domain: str, location: str,
