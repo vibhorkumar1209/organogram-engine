@@ -3369,6 +3369,12 @@ async def get_loaded_company(job_id: str = Query(...)):
     return {"loaded": True, "company": company, "people": people}
 
 
+@app.get("/history-status")
+def history_status():
+    """Whether Org History is being saved, and if not, why."""
+    return history_store.status()
+
+
 @app.get("/history")
 async def list_history(
     limit:  int = Query(50, ge=1, le=200),

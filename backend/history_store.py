@@ -22,6 +22,18 @@ logger = logging.getLogger(__name__)
 
 _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _warned_no_db = False
+# The most recent failure, so /history-status can say WHY history is empty
+# instead of every failure looking like "no charts yet".
+_last_error: dict = {}
+
+
+def _note_error(where: str, exc: Exception) -> None:
+    import re as _re
+    import time as _time
+    msg = _re.sub(r"postgres(?:ql)?://\S+", "postgres://***", str(exc))
+    _last_error.clear()
+    _last_error.update({"where": where, "error": f"{type(exc).__name__}: {msg[:300]}",
+                        "at": _time.time()})
 
 
 def _connect():
@@ -40,6 +52,7 @@ def _connect():
         return conn
     except Exception as exc:
         logger.warning("history_store: could not connect to Postgres: %s", exc)
+        _note_error("connect", exc)
         return None
 
 
@@ -77,6 +90,7 @@ def init_schema() -> None:
         logger.info("history_store: schema ready")
     except Exception as exc:
         logger.warning("history_store: schema init failed: %s", exc)
+        _note_error("init_schema", exc)
     finally:
         conn.close()
 
@@ -94,6 +108,7 @@ def record_job_created(job_id: str, company_name: str, source: str) -> None:
             """, (job_id, company_name, source))
     except Exception as exc:
         logger.warning("history_store: record_job_created failed for '%s': %s", job_id, exc)
+        _note_error("record_job_created", exc)
     finally:
         conn.close()
 
@@ -156,6 +171,7 @@ def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict) -
             ))
     except Exception as exc:
         logger.warning("history_store: record_job_completed failed for '%s': %s", job_id, exc)
+        _note_error("record_job_completed", exc)
     finally:
         conn.close()
 
@@ -169,6 +185,7 @@ def delete_job(job_id: str) -> None:
             cur.execute("DELETE FROM chart_runs WHERE job_id = %s", (job_id,))
     except Exception as exc:
         logger.warning("history_store: delete_job failed for '%s': %s", job_id, exc)
+        _note_error("delete_job", exc)
     finally:
         conn.close()
 
@@ -208,6 +225,7 @@ def list_jobs(limit: int = 50, offset: int = 0, source: str = "", q: str = "") -
         return rows
     except Exception as exc:
         logger.warning("history_store: list_jobs failed: %s", exc)
+        _note_error("list_jobs", exc)
         return []
     finally:
         conn.close()
@@ -233,6 +251,40 @@ def load_snapshot(job_id: str) -> dict | None:
         return {"company_name": company_name, **snapshot}
     except Exception as exc:
         logger.warning("history_store: load_snapshot failed for '%s': %s", job_id, exc)
+        _note_error("load_snapshot", exc)
         return None
     finally:
         conn.close()
+
+
+def status() -> dict:
+    """Why history is or isn't being saved — no credentials in the output."""
+    out: dict = {"configured": bool(_DATABASE_URL), "connected": False,
+                 "last_error": dict(_last_error) or None}
+    try:
+        import psycopg2  # noqa: F401
+        out["driver"] = True
+    except Exception as exc:
+        out["driver"] = False
+        out["driver_error"] = f"{type(exc).__name__}: {exc}"[:200]
+    conn = _connect()
+    if conn is None:
+        out["last_error"] = dict(_last_error) or out["last_error"]
+        return out
+    out["connected"] = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.chart_runs') IS NOT NULL")
+            out["table_exists"] = bool(cur.fetchone()[0])
+            if out["table_exists"]:
+                cur.execute("SELECT status, count(*) FROM chart_runs GROUP BY status")
+                out["rows_by_status"] = {k: int(v) for k, v in cur.fetchall()}
+                cur.execute("SELECT max(created_at) FROM chart_runs")
+                latest = cur.fetchone()[0]
+                out["latest_created_at"] = latest.isoformat() if latest else None
+    except Exception as exc:
+        _note_error("status", exc)
+        out["last_error"] = dict(_last_error)
+    finally:
+        conn.close()
+    return out
