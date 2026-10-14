@@ -321,8 +321,49 @@ def _extract_page_signals(html: str, url: str) -> str:
     if attr_data:
         parts.append(f"[Image/label names from {url}]\n{attr_data}")
     if text and len(text) > 200:
-        parts.append(f"[Page: {url}]\n{text[:_PER_PAGE_CHARS]}")
+        parts.append(f"[Page: {url}]\n{_page_window(text, _PER_PAGE_CHARS)}")
     return "\n".join(parts)
+
+
+_LEADERSHIP_HEADING_RE = re.compile(
+    r"\b(?:our\s+leadership|leadership\s+team|executive\s+(?:team|committee|leadership)"
+    r"|board\s+of\s+(?:directors|trustees|governors)|management\s+team|senior\s+leadership"
+    r"|governing\s+board|meet\s+(?:the|our)\s+(?:team|leadership|leaders)|our\s+leaders"
+    r"|leadership)\b", re.IGNORECASE)
+
+
+_TITLE_WORD_RE = re.compile(
+    r"\b(?:chief|officer|president|vice\s+president|svp|evp|vp|director|head\s+of|counsel"
+    r"|founder|chair(?:man|woman|person)?|treasurer|secretary|dean|minister|trustee)\b",
+    re.IGNORECASE)
+
+
+def _page_window(text: str, cap: int) -> str:
+    """
+    The part of a page's text worth sending, at most *cap* characters.
+
+    Keeping the first *cap* characters cut Pyramid Consulting's roster off:
+    its "Our Leadership" section starts at character 12,540, after two copies
+    of the navigation menu and a block of schema JSON. When the text is too
+    long, the window starts just before the first leadership heading instead.
+    """
+    # Schema JSON already arrives as [Structured Data]; as visible text it is
+    # only noise eating the budget.
+    text = "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith(('{"@context', '{"@graph')))
+    if len(text) <= cap:
+        return text
+    # Candidate windows: the top of the page, and one just before each
+    # leadership heading. Keep the one holding the most job titles — that is
+    # where a roster is, whether it sits at the top (a board page whose footer
+    # links "Leadership") or below a long header (Pyramid).
+    starts = {0} | {max(0, m.start() - 600) for m in _LEADERSHIP_HEADING_RE.finditer(text)}
+
+    def titles(start: int) -> int:
+        return len(_TITLE_WORD_RE.findall(text, start, start + cap))
+
+    best = max(sorted(starts), key=titles)     # ties keep the earliest
+    return text[best:best + cap]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1943,12 +1984,15 @@ def _gemini_board_retry(company_name: str, domain: str, location: str,
         import httpx
     except ImportError:
         return {}
-    place = f" ({location})" if location else ""
+    # Name the website: "Pyramid Consulting" alone got another company's
+    # founders (a different "Pyramid") back as directors.
+    ident = ", ".join(x for x in (f"website {domain}" if domain else "", location) if x)
+    place = f" ({ident})" if ident else ""
     queries = [
         f"Who are the current members of the Board of Directors (or Board of Trustees / "
         f"governing board) of {company_name}{place}? List every member's full name and "
         f"board role, from the official website, investor relations site or latest proxy "
-        f"statement.",
+        f"statement. Only this organisation — not others with a similar name.",
     ]
     if domain:
         queries.append(f'site:{domain} "board of directors" OR "board of trustees" '
@@ -1982,10 +2026,40 @@ def _gemini_board_retry(company_name: str, domain: str, location: str,
         return {}
     # Grounded answers come from search results, not the org's own pages, so
     # no domain lock here — but only the board section is taken from it.
-    parsed = _gemini_synthesize_chunk(company_name, "", "\n\n".join(texts), api_key, 1, 1)
+    joined = "\n\n".join(texts)
+    parsed = _gemini_synthesize_chunk(company_name, "", joined, api_key, 1, 1)
     board = (parsed or {}).get("board", []) or []
-    logger.info("Board retry for '%s': %d member(s)", company_name, len(board))
-    return {"board": board}
+    kept = [p for p in board if _named_near_org(p.get("name", ""), joined, company_name, domain)]
+    if len(kept) < len(board):
+        logger.info("Board retry for '%s': dropped %d not tied to the organisation",
+                    company_name, len(board) - len(kept))
+    logger.info("Board retry for '%s': %d member(s)", company_name, len(kept))
+    return {"board": kept}
+
+
+def _named_near_org(name: str, text: str, company_name: str, domain: str,
+                    window: int = 1500) -> bool:
+    """The person is named within *window* chars of the organisation's full name
+    or its domain — not merely somewhere in an answer that may cover another
+    organisation with a similar name."""
+    low = _ascii_fold(text.lower())
+    words = [w for w in re.sub(r"[^a-z0-9 ]", " ", _ascii_fold(company_name.lower())).split()
+             if w not in {"inc", "corp", "corporation", "ltd", "limited", "plc", "llc", "the",
+                          "company", "co", "group", "holdings"}]
+    anchors = [" ".join(words)] if words else []
+    stem = (domain or "").lower().removeprefix("www.").split(".")[0]
+    if len(stem) >= 3:
+        anchors.append(stem)
+    surname = (name.split() or [""])[-1].lower()
+    if not surname or not anchors:
+        return True
+    for anchor in anchors:
+        start = low.find(anchor)
+        while start != -1:
+            if surname in low[max(0, start - window): start + len(anchor) + window]:
+                return True
+            start = low.find(anchor, start + 1)
+    return False
 
 
 _CORROBORATE_MAX_CHUNKS = 3   # index pages only — bounds the added cost

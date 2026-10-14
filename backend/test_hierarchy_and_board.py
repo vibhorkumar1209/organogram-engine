@@ -171,5 +171,27 @@ F._gemini_synthesize_chunk = lambda *a, **k: {
 F._gemini_fetch_leadership("NVIDIA", "nvidia.com", "key")
 ok(calls == [], "board retry: not run when the board was already found")
 
+# ── A long header must not push the roster out of what the model reads ─────
+# pyramidci.com/about-us: "Our Leadership" starts at character 12,540, after
+# two copies of the menu; the 12,000-character page cap cut every title off,
+# so the model returned 3 founders out of ~25 leaders.
+header = "Company About Us Careers Partners Contact Us Services Resources\n" * 200
+roster = "Our Leadership\n" + "\n".join(f"Person {i}\nChief Officer of Unit {i}" for i in range(25))
+w = F._page_window(header + roster, 12000)
+ok("Person 24" in w and "Our Leadership" in w,
+   "window: the leadership section is kept when a long header precedes it")
+top = "Board of Directors\n" + "\n".join(f"Person {i}\nIndependent Director" for i in range(400))
+w = F._page_window(top + "\n" + "x " * 3000 + "\nLeadership | Careers", 12000)
+ok(w.startswith("Board of Directors"),
+   "window: a roster at the top stays, even with 'Leadership' in the footer")
+
+# ── The board retry keeps only people tied to THIS organisation ─────────────
+answer = ("Pyramid Consulting (pyramidci.com) is led by Sanjeev Tirath, CEO. "
+          + "Filler. " * 300
+          + "Pyramid Solutions, a different firm, was founded by Allyson Goodman.")
+ok(F._named_near_org("Sanjeev Tirath", answer, "Pyramid Consulting", "pyramidci.com")
+   and not F._named_near_org("Allyson Goodman", answer, "Pyramid Consulting", "pyramidci.com"),
+   "retry: a similarly named company's founder is not taken as a director")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)
