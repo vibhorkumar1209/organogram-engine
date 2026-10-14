@@ -689,6 +689,15 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setHistoryRuns(data.runs ?? [])
+      // An empty list used to look identical to "storage is down" — the
+      // production database had been gone for weeks with nothing saying so.
+      const st = await apiCreate('/history-status').then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (st && !st.connected) {
+        const why = !st.configured
+          ? 'no database is configured'
+          : (st.last_error?.error ?? 'the database cannot be reached').split('\n')[0]
+        setHistoryError(`Org History is not being saved — ${why}. New charts still work, but won't appear here.`)
+      }
     } catch (e: any) {
       setHistoryError(e?.message || 'Could not load history')
     } finally {
