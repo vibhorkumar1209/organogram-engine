@@ -886,9 +886,10 @@ export default function App() {
       // Board of Directors and Executive Management panels populate.
       setLeadershipNote('🔍 Searching for Board & Executive leadership online…')
       let pollCount = 0
-      // Exhaustive sites take ~4 minutes to enrich, then LinkedIn profiles
-      // take about another minute — 48 × 10s = 8 minutes.
-      const MAX_POLLS = 48
+      // The leadership search is two Parallel research passes (the list, then
+      // a "who is missing?" check), scraping when a list is still short, then
+      // LinkedIn matching — up to ~10 minutes. 72 × 10s = 12 minutes.
+      const MAX_POLLS = 72
       // Stages already reflected in the chart, so each reloads it once.
       let shownPeople = false
       let shownDepartments = false

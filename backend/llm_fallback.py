@@ -2428,12 +2428,44 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     primary = _promote_operating_directors(
         {"board": primary.get("board", []), "executives": primary.get("executives", []),
          "senior_leadership": [], "_parallel": primary.get("_parallel", {})})
-    need_board = len(primary["board"]) < _THIN
-    need_execs = len(primary["executives"]) < _THIN
     diag = {"primary": "parallel_task" if task_ran else "scraping",
             "parallel": primary.pop("_parallel", {}),
             "parallel_board": len(primary["board"]),
-            "parallel_executives": len(primary["executives"])}
+            "parallel_executives": len(primary["executives"]),
+            "bar": {"board": _MIN_BOARD, "executives": _MIN_EXECS}}
+
+    # ── 1b. Completeness pass: who is missing? ───────────────────────────────
+    # Run for BOTH sections, whatever the count. A count can't tell a complete
+    # list from an incomplete one: Parallel's first NVIDIA board had 11
+    # directors — above any sensible bar — yet left out Persis Drell and
+    # Michael McCaffery, whom the previous day's run had found. A second Lite
+    # task is given the names already found and asked only for the rest, from
+    # the sources that list everyone (board page, proxy statement, annual
+    # report's executive officers). Off via ORGANOGRAM_COMPLETENESS_PASS=0.
+    short = (("board", "executives")
+             if os.environ.get("ORGANOGRAM_COMPLETENESS_PASS", "1") != "0"
+             else tuple(k for k, bar in (("board", _MIN_BOARD), ("executives", _MIN_EXECS))
+                        if len(primary[k]) < bar))
+    if task_ran and short:
+        extra = _parallel_task_leadership(company_name, domain, location, site_url,
+                                          known=primary, sections=short)
+        added = {k: 0 for k in short}
+        for k in short:
+            names = set()
+            for p in primary[k]:
+                names |= _name_aliases(p.get("name", ""))
+            for p in extra.get(k, []) or []:
+                if not (_name_aliases(p.get("name", "")) & names):
+                    primary[k].append(p)
+                    names |= _name_aliases(p.get("name", ""))
+                    added[k] += 1
+        primary = _promote_operating_directors(primary)
+        diag["completeness_pass"] = {"for": list(short), "added": added,
+                                     "errors": (extra.get("_parallel") or {}).get("errors", {})}
+        logger.info("Completeness pass for '%s': %s", company_name, added)
+
+    need_board = len(primary["board"]) < _MIN_BOARD
+    need_execs = len(primary["executives"]) < _MIN_EXECS
 
     if task_ran and not (need_board or need_execs):
         result = {**primary, "_source": "web", "_harvest": diag}
@@ -2444,7 +2476,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         return result
 
     # ── 2. Scraping, for whatever Parallel left thin ─────────────────────────
-    logger.info("Parallel left '%s' thin (board %d, executives %d) — scraping %s",
+    logger.info("Parallel below the bar for '%s' (board %d, executives %d) — scraping %s",
                 company_name, len(primary["board"]), len(primary["executives"]),
                 "board + executives" if need_board and need_execs
                 else "board" if need_board else "executives")
@@ -2487,7 +2519,8 @@ def _people_schema(key: str) -> dict:
 
 
 def _parallel_task_leadership(company_name: str, domain: str = "", location: str = "",
-                              site_url: str = "") -> dict:
+                              site_url: str = "", known: dict | None = None,
+                              sections: tuple = ("board", "executives")) -> dict:
     """
     The board and the executive team from two Parallel Task API runs.
 
@@ -2519,6 +2552,26 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                       f"Director-General …) and every senior leader who reports directly to "
                       f"them, with their exact title.{rules}",
     }
+    if known is not None:
+        # The completeness pass: hand over what is already known and ask only
+        # for who is missing, from the sources that list everyone.
+        have = {k: "; ".join(p.get("name", "") for p in (known.get(k) or [])) or "none yet"
+                for k in ("board", "executives")}
+        tasks = {
+            "board": f"{org}: these current board members are already known: {have['board']}. "
+                     f"Check the organisation's board / governance page, its latest proxy "
+                     f"statement or annual report, and list every OTHER current member of the "
+                     f"Board of Directors (or governing board) who is not in that list, with "
+                     f"their board role. Return an empty list if none are missing.{rules}",
+            "executives": f"{org}: these current executive leaders are already known: "
+                          f"{have['executives']}. Check the organisation's leadership page, its "
+                          f"latest annual report's list of executive officers and its proxy "
+                          f"statement, and list every OTHER current member of the executive "
+                          f"leadership team (the CEO's direct reports and named executive "
+                          f"officers) who is not in that list, with their exact title. Return an "
+                          f"empty list if none are missing.{rules}",
+        }
+    tasks = {k: v for k, v in tasks.items() if k in sections}
     import parallel_client
     headers = {"x-api-key": api_key}
     processor = parallel_client.task_processor()        # never above "lite"
@@ -2563,6 +2616,8 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
         if err:
             out["_parallel"]["errors"][key] = err
             logger.warning("Parallel task (%s) for '%s' failed: %s", key, company_name, err)
+    for key in ("board", "executives"):
+        out.setdefault(key, [])
     if all(out["_parallel"]["errors"].get(k) for k in tasks):
         out["_parallel"]["ran"] = False        # nothing came back: treat as not run
     logger.info("Parallel tasks for '%s': %d board, %d executives in %ds",
@@ -2681,6 +2736,12 @@ def _scrape_leadership(company_name: str, domain: str = "", site_url: str = "",
 
 
 _THIN = 3     # fewer than this many board members / executives is "not found"
+# The bar for a COMPLETE list. Below it, the completeness pass and then
+# scraping run, and everything they find is added. Boards of 8-14 and
+# executive teams of 8-15 are typical for listed companies; a smaller
+# organisation simply spends one more Lite task confirming nobody is missing.
+_MIN_BOARD = int(os.environ.get("ORGANOGRAM_MIN_BOARD", "8"))
+_MIN_EXECS = int(os.environ.get("ORGANOGRAM_MIN_EXECS", "8"))
 
 
 def _with_parallel_backup(result: dict, company_name: str, domain: str = "",

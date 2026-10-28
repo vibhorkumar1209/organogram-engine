@@ -211,5 +211,50 @@ for title, dept in [("Co-CEO of Asia Pacific and CEO of Asia Oceania", ""),
     got = S._exec_department(title)
     ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
 
+# ── Completeness: always ask who is missing; scrape only below the bar ──────
+# Parallel's first NVIDIA board had 11 directors — above the bar — but left out
+# Persis Drell and Michael McCaffery. A count can't tell complete from not.
+import importlib
+F2 = importlib.reload(F)
+os.environ["PARALLEL_API_KEY"] = "test"
+passes, scrapes = [], []
+BOARD11 = [{"name": n, "title": "Director"} for n in (
+    "Tench Coxe", "John Dabiri", "Jensen Huang", "Dawn Hudson", "Harvey Jones", "Melissa Lora",
+    "Stephen Neal", "Brooke Seawell", "Aarti Shah", "Mark Stevens", "Suzanne Nora Johnson")]
+
+
+def _fake_tasks(company, domain="", location="", site_url="", known=None,
+                sections=("board", "executives")):
+    passes.append(("check" if known is not None else "list", tuple(sections)))
+    if known is None:
+        return {"board": list(BOARD11),
+                "executives": [{"name": "Jensen Huang", "title": "President and CEO"},
+                               {"name": "Colette Kress", "title": "CFO"}],
+                "_parallel": {"ran": True}}
+    return {"board": [{"name": "Persis Drell", "title": "Director"},
+                      {"name": "Tench Coxe", "title": "Director"}],          # already known
+            "executives": [{"name": "Debora Shoquist", "title": "EVP, Operations"}],
+            "_parallel": {"ran": True}}
+
+
+def _fake_scrape(company, domain="", site_url="", location="", search_backup=True):
+    scrapes.append(True)
+    return {"board": [], "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"}]}
+
+
+F2._parallel_task_leadership = _fake_tasks
+F2._scrape_leadership = _fake_scrape
+F2._LEADERSHIP_CACHE.clear()
+res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
+board = [p["name"] for p in res["board"]]
+execs = [p["name"] for p in res["executives"]]
+ok(passes == [("list", ("board", "executives")), ("check", ("board", "executives"))],
+   f"completeness: the who-is-missing check runs for both sections, even with 11 directors ({passes})")
+ok("Persis Drell" in board and board.count("Tench Coxe") == 1 and len(board) == 12,
+   f"completeness: the missing director is added, a known one not duplicated ({len(board)})")
+ok(scrapes == [True] and "Michael Kagan" in execs and "Debora Shoquist" in execs,
+   f"completeness: executives still below the bar are scraped and added ({execs})")
+os.environ["PARALLEL_API_KEY"] = ""
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)
