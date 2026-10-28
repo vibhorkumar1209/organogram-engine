@@ -2392,7 +2392,193 @@ def _cache_leadership(key: str, value: dict) -> None:
 def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = "",
                          location: str = "") -> dict:
     """
-    Fetch Board of Directors and Executive Management for a company.
+    Board of Directors and Executive Management for an organisation.
+
+    1. Parallel Task API (primary): two research tasks run side by side — the
+       governing board, and the CEO (or head) with every senior leader who
+       reports to them. Structured output, each backed by cited sources.
+    2. Webpage scraping (fallback): the organisation's own leadership pages,
+       Gemini when funded, Claude, Wikipedia. Run ONLY for a section Parallel
+       left thin (fewer than three people), and only that section is filled
+       from it — so an adequate Parallel answer is never padded with scraping.
+
+    Hierarchy (who leads, levels, departments) is built downstream by the
+    engine, not here. Results are cached in-process.
+
+    Returns {"board": [...], "executives": [...], "_source": "web"|"none",
+             "_harvest": {...diagnostics...}}.
+    """
+    if not company_name or len(company_name.strip()) < 3:
+        return {"board": [], "executives": []}
+
+    cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
+    # A full URL or a location points the search at one entity under a shared
+    # domain, so it is part of what was asked.
+    if site_url or location:
+        cache_key += f"|{site_url.strip().lower()}|{location.strip().lower()}"
+    if cache_key in _LEADERSHIP_CACHE:
+        return _LEADERSHIP_CACHE[cache_key]
+
+    # ── 1. Parallel Task API ──────────────────────────────────────────────────
+    primary: dict = {}
+    task_ran = False
+    if os.environ.get("PARALLEL_API_KEY"):
+        primary = _parallel_task_leadership(company_name, domain, location, site_url)
+        task_ran = bool(primary.get("_parallel", {}).get("ran"))
+    primary = _promote_operating_directors(
+        {"board": primary.get("board", []), "executives": primary.get("executives", []),
+         "senior_leadership": [], "_parallel": primary.get("_parallel", {})})
+    need_board = len(primary["board"]) < _THIN
+    need_execs = len(primary["executives"]) < _THIN
+    diag = {"primary": "parallel_task" if task_ran else "scraping",
+            "parallel": primary.pop("_parallel", {}),
+            "parallel_board": len(primary["board"]),
+            "parallel_executives": len(primary["executives"])}
+
+    if task_ran and not (need_board or need_execs):
+        result = {**primary, "_source": "web", "_harvest": diag}
+        _strip_internal_fields(result)
+        logger.info("Leadership for '%s' from Parallel: %d board, %d executives",
+                    company_name, len(result["board"]), len(result["executives"]))
+        _cache_leadership(cache_key, result)
+        return result
+
+    # ── 2. Scraping, for whatever Parallel left thin ─────────────────────────
+    logger.info("Parallel left '%s' thin (board %d, executives %d) — scraping %s",
+                company_name, len(primary["board"]), len(primary["executives"]),
+                "board + executives" if need_board and need_execs
+                else "board" if need_board else "executives")
+    scraped = _scrape_leadership(company_name, domain, site_url, location,
+                                 search_backup=not task_ran)
+    diag["scraping"] = {"ran": True, "for": [k for k, v in (("board", need_board),
+                                                           ("executives", need_execs)) if v],
+                        "board": len(scraped.get("board", []) or []),
+                        "executives": len(scraped.get("executives", []) or []),
+                        **({"harvest": scraped["_harvest"]} if scraped.get("_harvest") else {})}
+    filled = {
+        "board": primary["board"] + (scraped.get("board", []) or [] if need_board else []),
+        "executives": primary["executives"]
+                      + (scraped.get("executives", []) or [] if need_execs else []),
+        "senior_leadership": [],
+    }
+    result = _merge_leadership([filled]) if (filled["board"] or filled["executives"]) else filled
+    result = _promote_operating_directors(result)
+    _strip_internal_fields(result)
+    result["_harvest"] = diag
+    if result.get("board") or result.get("executives"):
+        result["_source"] = "web"
+        _cache_leadership(cache_key, result)
+        return result
+    logger.info("No leaders found for '%s' — returning empty (not cached)", company_name)
+    return {"board": [], "executives": [], "_source": "none", "_harvest": diag,
+            **({"_error": scraped["_error"]} if scraped.get("_error") else {})}
+
+
+_PARALLEL_TASKS_URL = "https://api.parallel.ai/v1/tasks/runs"
+_PARALLEL_PROCESSOR = os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "lite")
+_PARALLEL_TASK_TIMEOUT_S = int(os.environ.get("ORGANOGRAM_PARALLEL_TASK_TIMEOUT_S", "300"))
+
+
+def _people_schema(key: str) -> dict:
+    # Three properties per task: Parallel warns the lite/base processors off
+    # schemas with more than five, and one combined task tripped that.
+    return {"type": "object", "additionalProperties": False, "required": [key],
+            "properties": {key: {"type": "array", "items": {
+                "type": "object", "additionalProperties": False, "required": ["name", "title"],
+                "properties": {"name": {"type": "string"}, "title": {"type": "string"}}}}}}
+
+
+def _parallel_task_leadership(company_name: str, domain: str = "", location: str = "",
+                              site_url: str = "") -> dict:
+    """
+    The board and the executive team from two Parallel Task API runs.
+
+    Measured on Accenture: all 10 directors and the 11-person executive team
+    (CEO included), cited to accenture.com/en/about/leadership and the
+    investor site, in about two minutes on the "lite" processor — the same
+    answer as "base", sooner.
+    """
+    try:
+        import httpx
+        from concurrent.futures import ThreadPoolExecutor
+        from usage_tracker import record_cost
+    except ImportError:
+        return {}
+    api_key = os.environ.get("PARALLEL_API_KEY", "")
+    if not api_key:
+        return {}
+    ident = ", ".join(x for x in (site_url or domain, location) if x)
+    org = f"{company_name} ({ident})" if ident else company_name
+    rules = (" Current people only — exclude anyone former, retired or emeritus. Only this "
+             "organisation, not others with a similar name. Use each person's full name and "
+             "exact title as the organisation publishes it.")
+    tasks = {
+        "board": f"{org}: list every current member of the Board of Directors (or Board of "
+                 f"Trustees / governing board), with their board role (Chair, Lead Director, "
+                 f"Director …).{rules}",
+        "executives": f"{org}: list the current executive leadership team — the CEO (or head "
+                      f"of the organisation: President, Managing Director, Minister, Dean, "
+                      f"Director-General …) and every senior leader who reports directly to "
+                      f"them, with their exact title.{rules}",
+    }
+    headers = {"x-api-key": api_key}
+    cost = float(os.environ.get("PARALLEL_TASK_COST_USD", "0.005"))
+
+    def run(key: str) -> tuple[str, list, list, str]:
+        try:
+            r = httpx.post(_PARALLEL_TASKS_URL, headers=headers, timeout=60, json={
+                "input": tasks[key], "processor": _PARALLEL_PROCESSOR,
+                "task_spec": {"output_schema": {"type": "json", "json_schema": _people_schema(key)}}})
+            if not r.is_success:
+                return key, [], [], f"HTTP {r.status_code}: {r.text[:160]}"
+            record_cost("parallel", f"parallel-task-{_PARALLEL_PROCESSOR}", cost)
+            run_id = r.json().get("run_id", "")
+            res = httpx.get(f"{_PARALLEL_TASKS_URL}/{run_id}/result", headers=headers,
+                            params={"timeout": _PARALLEL_TASK_TIMEOUT_S},
+                            timeout=_PARALLEL_TASK_TIMEOUT_S + 20)
+            if not res.is_success:
+                return key, [], [], f"result HTTP {res.status_code}: {res.text[:160]}"
+            output = res.json().get("output", {}) or {}
+            content = output.get("content") or {}
+            if isinstance(content, str):
+                content = _loads_lenient(content) or {}
+            people = [p for p in (content.get(key) or [])
+                      if isinstance(p, dict) and str(p.get("name", "")).strip()]
+            sources = sorted({c.get("url", "") for b in output.get("basis", []) or []
+                              for c in b.get("citations", []) or [] if c.get("url")})
+            return key, people, sources, ""
+        except Exception as exc:
+            return key, [], [], f"{type(exc).__name__}: {exc}"[:200]
+
+    import time as _t
+    started = _t.time()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, list(tasks)))
+    out: dict = {"_parallel": {"ran": True, "processor": _PARALLEL_PROCESSOR,
+                               "seconds": round(_t.time() - started), "sources": [], "errors": {}}}
+    for key, people, sources, err in results:
+        out[key] = [{"name": str(p["name"]).strip(), "title": str(p.get("title", "")).strip(),
+                     "confidence": "HIGH"} for p in people]
+        out["_parallel"]["sources"] += sources[:15]
+        if err:
+            out["_parallel"]["errors"][key] = err
+            logger.warning("Parallel task (%s) for '%s' failed: %s", key, company_name, err)
+    if all(out["_parallel"]["errors"].get(k) for k in tasks):
+        out["_parallel"]["ran"] = False        # nothing came back: treat as not run
+    logger.info("Parallel tasks for '%s': %d board, %d executives in %ds",
+                company_name, len(out.get("board", [])), len(out.get("executives", [])),
+                out["_parallel"]["seconds"])
+    return out
+
+
+def _scrape_leadership(company_name: str, domain: str = "", site_url: str = "",
+                       location: str = "", search_backup: bool = True) -> dict:
+    """
+    Board and Executive Management from the organisation's own pages — the
+    FALLBACK behind the Parallel Task API (see llm_fetch_leadership).
+
+    search_backup: also try a Parallel web search when the pages give little;
+    off when the Parallel Task API has already been asked.
 
     Pipeline:
       1. Gemini 2.0 Flash with Google Search grounding (primary).
@@ -2416,14 +2602,6 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     if not company_name or len(company_name.strip()) < 3:
         return {"board": [], "executives": []}
 
-    cache_key = f"{company_name.strip().lower()}|{(domain or '').strip().lower()}"
-    # A full URL or a location points the search at one entity under a shared
-    # domain, so it is part of what was asked.
-    if site_url or location:
-        cache_key += f"|{site_url.strip().lower()}|{location.strip().lower()}"
-    if cache_key in _LEADERSHIP_CACHE:
-        return _LEADERSHIP_CACHE[cache_key]
-
     gemini_result: dict = {}
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2436,8 +2614,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         gemini_result = result
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
-            result = _with_parallel_backup(result, company_name, domain, location)
-            _cache_leadership(cache_key, result)
+            if search_backup:
+                result = _with_parallel_backup(result, company_name, domain, location)
             return result
         logger.info("Gemini returned no leaders for '%s' — falling back to Wikipedia", company_name)
     else:
@@ -2451,8 +2629,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         result = _site_only_leadership(company_name, domain, site_url)
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
-            result = _with_parallel_backup(result, company_name, domain, location)
-            _cache_leadership(cache_key, result)
+            if search_backup:
+                result = _with_parallel_backup(result, company_name, domain, location)
             return result
 
     # ── Step 2: Wikipedia + Claude Haiku fallback ─────────────────────────────
@@ -2475,22 +2653,22 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
-            result = _with_parallel_backup(result, company_name, domain, location)
-            _cache_leadership(cache_key, result)
+            if search_backup:
+                result = _with_parallel_backup(result, company_name, domain, location)
             return result
 
     # ── Step 3: nothing on the site, nothing in Wikipedia: search the web ────
     # E-commerce and private companies often publish no leadership page at
     # all; their leaders are named in press coverage, filings and profiles.
-    result = _with_parallel_backup({"board": [], "executives": [], "senior_leadership": []},
-                                   company_name, domain, location)
-    if result.get("board") or result.get("executives"):
-        result["_source"] = "web"
-        _cache_leadership(cache_key, result)
-        return result
+    if search_backup:
+        result = _with_parallel_backup({"board": [], "executives": [], "senior_leadership": []},
+                                       company_name, domain, location)
+        if result.get("board") or result.get("executives"):
+            result["_source"] = "web"
+            return result
 
     # ── No result — don't cache so next upload can retry ─────────────────────
-    logger.info("No leaders found for '%s' — returning empty (not cached)", company_name)
+    logger.info("Scraping found no leaders for '%s'", company_name)
     empty: dict = {"board": [], "executives": [], "_source": "none"}
     # Keep whatever the Gemini path recorded — otherwise an empty result
     # reaches the caller with no indication of whether the site refused us,
