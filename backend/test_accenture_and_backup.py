@@ -187,5 +187,22 @@ calls.clear()
 F._with_parallel_backup({"board": [], "executives": []}, "Acme", "acme.com")
 ok(calls == [], "backup: no API key -> no search")
 
+# ── Directors who run the business are executives too ───────────────────────
+# SHEIN's founders appear as "Executive Director and Chief Operating Officer";
+# whether the extraction also listed them as executives varied run to run.
+out = F._promote_operating_directors({
+    "board": [{"name": "Yangtian Xu", "title": "Chairman of the Board, Executive Director and Chief Executive Officer"},
+              {"name": "Miao Miao", "title": "Executive Director and Chief Operating Officer"},
+              {"name": "Xiaoqing Ren", "title": "Executive Director"},
+              {"name": "Hongbin Cai", "title": "Independent Non-Executive Director"}],
+    "executives": []})
+names = [p["name"] for p in out["executives"]]
+ok(names == ["Yangtian Xu", "Miao Miao"],
+   f"directors: CEO and COO directors join Executive Management; bare/independent ones don't ({names})")
+ok(out["executives"][1]["title"] == "Chief Operating Officer",
+   "directors: the executive panel shows the operating title")
+again = F._promote_operating_directors(out)
+ok(len(again["executives"]) == 2, "directors: never added twice")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

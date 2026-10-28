@@ -2516,6 +2516,7 @@ def _with_parallel_backup(result: dict, company_name: str, domain: str = "",
     the primary search being down. Only the thin sections are filled, so a
     complete executive team is never padded with search noise.
     """
+    result = _promote_operating_directors(result)
     board = result.get("board") or []
     execs = result.get("executives") or []
     want_board, want_execs = len(board) < _THIN, len(execs) < _THIN
@@ -2531,10 +2532,51 @@ def _with_parallel_backup(result: dict, company_name: str, domain: str = "",
         result = _merge_leadership([result, extra])
         result.update(keep)
         _strip_internal_fields(result)
+        result = _promote_operating_directors(result)
     result.setdefault("_harvest", {})["parallel_backup"] = {
         "ran": True, "wanted_board": want_board, "wanted_executives": want_execs, **added}
     logger.info("Parallel backup for '%s': +%d board, +%d executives",
                 company_name, added["board"], added["executives"])
+    return result
+
+
+_OPERATING_ROLE_RE = re.compile(
+    r"\b(?:chief\s+\w+(?:\s+\w+)?\s+officer|ceo|cfo|coo|cto|cio|cmo|cpo|chro"
+    r"|(?<!vice\s)president|managing\s+director|founder|co-founder|general\s+manager)\b",
+    re.IGNORECASE)
+
+
+def _promote_operating_directors(result: dict) -> dict:
+    """
+    Put directors who run the business into Executive Management as well.
+
+    A board title like "Executive Director and Chief Operating Officer" names
+    an executive job; SHEIN's founders appear only that way, and whether the
+    extraction ALSO listed them as executives varied run to run (4, then 0).
+    A bare "Executive Director" or "Non-Executive Director" is not promoted.
+    """
+    execs = list(result.get("executives") or [])
+    have = set()
+    for p in execs:
+        have |= _name_aliases(p.get("name", ""))
+    added = 0
+    for p in result.get("board") or []:
+        title = str(p.get("title", "") or "")
+        if re.search(r"non[-\s]?executive|independent", title, re.I):
+            continue
+        if not _OPERATING_ROLE_RE.search(title):
+            continue
+        if _name_aliases(p.get("name", "")) & have:
+            continue
+        # Keep the operating part of the title for the executive panel.
+        role = re.sub(r"^(?:.*?\b(?:director|board)\b\s*(?:,|and|&)\s*)", "", title,
+                      flags=re.IGNORECASE).strip(" ,&") or title
+        execs.append({"name": p.get("name", ""), "title": role})
+        have |= _name_aliases(p.get("name", ""))
+        added += 1
+    if added:
+        result = {**result, "executives": execs}
+        logger.info("Promoted %d operating director(s) into Executive Management", added)
     return result
 
 
