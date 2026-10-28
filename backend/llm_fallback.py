@@ -2474,8 +2474,6 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
             **({"_error": scraped["_error"]} if scraped.get("_error") else {})}
 
 
-_PARALLEL_TASKS_URL = "https://api.parallel.ai/v1/tasks/runs"
-_PARALLEL_PROCESSOR = os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "lite")
 _PARALLEL_TASK_TIMEOUT_S = int(os.environ.get("ORGANOGRAM_PARALLEL_TASK_TIMEOUT_S", "300"))
 
 
@@ -2521,19 +2519,21 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                       f"Director-General …) and every senior leader who reports directly to "
                       f"them, with their exact title.{rules}",
     }
+    import parallel_client
     headers = {"x-api-key": api_key}
-    cost = float(os.environ.get("PARALLEL_TASK_COST_USD", "0.005"))
+    processor = parallel_client.task_processor()        # never above "lite"
+    cost = parallel_client.TASK_COST_LITE
 
     def run(key: str) -> tuple[str, list, list, str]:
         try:
-            r = httpx.post(_PARALLEL_TASKS_URL, headers=headers, timeout=60, json={
-                "input": tasks[key], "processor": _PARALLEL_PROCESSOR,
+            r = httpx.post(parallel_client.TASKS_URL, headers=headers, timeout=60, json={
+                "input": tasks[key], "processor": processor,
                 "task_spec": {"output_schema": {"type": "json", "json_schema": _people_schema(key)}}})
             if not r.is_success:
                 return key, [], [], f"HTTP {r.status_code}: {r.text[:160]}"
-            record_cost("parallel", f"parallel-task-{_PARALLEL_PROCESSOR}", cost)
+            record_cost("parallel", f"parallel-task-{processor}", cost)
             run_id = r.json().get("run_id", "")
-            res = httpx.get(f"{_PARALLEL_TASKS_URL}/{run_id}/result", headers=headers,
+            res = httpx.get(f"{parallel_client.TASKS_URL}/{run_id}/result", headers=headers,
                             params={"timeout": _PARALLEL_TASK_TIMEOUT_S},
                             timeout=_PARALLEL_TASK_TIMEOUT_S + 20)
             if not res.is_success:
@@ -2554,7 +2554,7 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
     started = _t.time()
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(run, list(tasks)))
-    out: dict = {"_parallel": {"ran": True, "processor": _PARALLEL_PROCESSOR,
+    out: dict = {"_parallel": {"ran": True, "processor": processor,
                                "seconds": round(_t.time() - started), "sources": [], "errors": {}}}
     for key, people, sources, err in results:
         out[key] = [{"name": str(p["name"]).strip(), "title": str(p.get("title", "")).strip(),
@@ -2780,24 +2780,17 @@ def _parallel_leadership(company_name: str, domain: str, location: str,
                      f"CFO, COO, CTO and other C-suite and senior executives, with titles.",
                      [f"{company_name} executive leadership team", f"{company_name} CEO founder "
                       f"CFO COO management team"]))
+    import parallel_client
     texts: list[str] = []
     for objective, queries in asks:
         try:
-            resp = httpx.post(
-                "https://api.parallel.ai/v1beta/search",
-                json={"objective": objective + " Only this organisation, not others with a "
+            # A roster search: "advanced" (the lite price). It runs only when the
+            # Parallel Task API could not run at all.
+            results = parallel_client.search(
+                queries, objective=objective + " Only this organisation, not others with a "
                                                "similar name. Current people only.",
-                      "search_queries": queries, "max_results": 10,
-                      "excerpts": {"max_chars_per_result": 1500}},
-                headers={"x-api-key": api_key, "parallel-beta": "search-extract-2025-10-10"},
-                timeout=40)
-            record_cost("parallel", "parallel-search",
-                        float(os.environ.get("PARALLEL_SEARCH_COST_USD", "0.005")))
-            if not resp.is_success:
-                logger.warning("Parallel leadership search for '%s': HTTP %s",
-                               company_name, resp.status_code)
-                continue
-            for r in resp.json().get("results", []) or []:
+                mode="advanced", max_chars_per_result=1500, timeout=40)
+            for r in results:
                 if "linkedin.com/in/" in (r.get("url") or ""):
                     continue          # one person's profile, not a roster
                 excerpt = " ".join(r.get("excerpts") or [])

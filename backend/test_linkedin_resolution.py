@@ -236,8 +236,12 @@ _FAKE = {
 }
 
 
-def _fake_search(person, company, api_key, second_pass=False):
+_modes: list[tuple[str, bool, str]] = []
+
+
+def _fake_search(person, company, api_key, second_pass=False, mode="advanced"):
     _calls.append((person["name"], second_pass))
+    _modes.append((person["name"], second_pass, mode))
     return _FAKE.get((person["name"], second_pass), [])
 
 
@@ -251,6 +255,20 @@ ok(out["a"]["confidence"] == "High", "batch: strong first-pass answer")
 ok(("Jane Smith", True) not in _calls, "batch: a High answer does not pay for a second search")
 ok(("Lee Park", True) in _calls and out["b"]["linkedin_url"].endswith("lee-park-acme"),
    "batch: an unresolved person gets a second, role-led search")
+# Cost tiers: turbo first; advanced (the lite price) only for what turbo
+# didn't settle; nothing else.
+ok([m for n, sp, m in _modes if n == "Jane Smith"] == ["turbo"],
+   "tiers: a person turbo settles costs one turbo search")
+ok([(sp, m) for n, sp, m in _modes if n == "Lee Park"]
+   == [(False, "turbo"), (False, "advanced"), (True, "advanced")],
+   "tiers: escalation is turbo -> advanced -> advanced role-led")
+ok({m for _, _, m in _modes} <= {"turbo", "advanced"}, "tiers: no other search mode is ever used")
+
+import parallel_client as PC
+for asked in ("core", "pro", "base", "ultra8x", ""):
+    os.environ["ORGANOGRAM_PARALLEL_PROCESSOR"] = asked
+    ok(PC.task_processor() == "lite", f"tiers: processor {asked!r} is capped at lite")
+os.environ.pop("ORGANOGRAM_PARALLEL_PROCESSOR")
 
 os.environ["PARALLEL_API_KEY"] = ""
 ok(L.resolve_people([{"key": "x", "name": "A B", "title": "", "kind": "board"}], "Acme") == {},

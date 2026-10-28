@@ -43,13 +43,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_URL = "https://api.parallel.ai/v1beta/search"
-_SEARCH_BETA = "search-extract-2025-10-10"
 _MAX_PEOPLE = int(os.environ.get("ORGANOGRAM_LINKEDIN_MAX_PEOPLE", "80"))
 _DEADLINE_S = int(os.environ.get("ORGANOGRAM_LINKEDIN_DEADLINE_S", "120"))
 _WORKERS = int(os.environ.get("ORGANOGRAM_LINKEDIN_WORKERS", "6"))
-# Parallel bills per search request. Estimate, override from the dashboard.
-_SEARCH_COST_USD = float(os.environ.get("PARALLEL_SEARCH_COST_USD", "0.005"))
 
 NOT_FOUND = "Not Found"
 _LEVELS = {"High": 3, "Medium": 2, "Low": 1}
@@ -495,27 +491,16 @@ def _queries(person: dict, company: str, second_pass: bool) -> list[str]:
             f"site:linkedin.com/in {short} {title or 'executive'}"]
 
 
-def _search(person: dict, company: str, api_key: str, second_pass: bool = False) -> list[dict]:
-    import httpx
-    from usage_tracker import record_cost
-
-    body = {
-        "objective": (
-            f"Find the official LinkedIn profile (linkedin.com/in/...) of {person['name']}, "
-            f"{person.get('title') or 'a leader'} at {company}. Only this exact person, who "
-            f"is or was a board member or executive at {company}."
-        ),
-        "search_queries": _queries(person, company, second_pass),
-        "max_results": 10,
-        "excerpts": {"max_chars_per_result": 600},
-    }
-    resp = httpx.post(_SEARCH_URL, json=body, timeout=30,
-                      headers={"x-api-key": api_key, "parallel-beta": _SEARCH_BETA})
-    record_cost("parallel", "parallel-search", _SEARCH_COST_USD)
-    if not resp.is_success:
-        logger.warning("LinkedIn search for '%s': HTTP %s", person["name"], resp.status_code)
-        return []
-    return resp.json().get("results", []) or []
+def _search(person: dict, company: str, api_key: str, second_pass: bool = False,
+            mode: str = "advanced") -> list[dict]:
+    """One Parallel search for this person's profile (see parallel_client for tiers)."""
+    import parallel_client
+    return parallel_client.search(
+        _queries(person, company, second_pass),
+        objective=(f"Find the official LinkedIn profile (linkedin.com/in/...) of {person['name']}, "
+                   f"{person.get('title') or 'a leader'} at {company}. Only this exact person, "
+                   f"who is or was a board member or executive at {company}."),
+        mode=mode)
 
 
 def _is_vanity(url: str) -> bool:
@@ -603,11 +588,14 @@ def resolve_person(person: dict, company: str, domain: str, api_key: str,
     """Best verified profile for one person, or a Not Found record."""
     results: list[dict] = []
     best = not_found(person)
-    # Company-led first; only an unresolved or weak answer pays for a second,
-    # role-led search, and that one is judged together with the first.
-    for second_pass in (False, True):
+    # Cheapest first, and each step only for what the last couldn't settle:
+    #   1. turbo, company-led queries        ($0.001)
+    #   2. advanced, the same queries        ($0.005, the lite price)
+    #   3. advanced, role-led queries         ($0.005)
+    # Every step is judged together with the results before it.
+    for second_pass, mode in ((False, "turbo"), (False, "advanced"), (True, "advanced")):
         try:
-            results += _search(person, company, api_key, second_pass)
+            results += _search(person, company, api_key, second_pass, mode=mode)
         except Exception as exc:
             logger.warning("LinkedIn search failed for '%s': %s", person.get("name"), exc)
         best = judge(person, results, company, domain, hq)
