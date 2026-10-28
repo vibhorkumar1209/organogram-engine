@@ -204,5 +204,12 @@ ok(out["executives"][1]["title"] == "Chief Operating Officer",
 again = F._promote_operating_directors(out)
 ok(len(again["executives"]) == 2, "directors: never added twice")
 
+# ── A regional head runs a territory, not a department ──────────────────────
+for title, dept in [("Co-CEO of Asia Pacific and CEO of Asia Oceania", ""),
+                    ("CEO – Americas", ""),
+                    ("Chief Financial Officer – EMEA", S._exec_department("Chief Financial Officer"))]:
+    got = S._exec_department(title)
+    ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

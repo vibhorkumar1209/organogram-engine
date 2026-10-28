@@ -2596,6 +2596,14 @@ def _exec_department(title: str) -> str:
         return ""
     if _is_ceo(raw) or _is_board_chairman(raw):
         return ""                      # the apex owns the whole company
+    # A regional head runs a territory, not a function: "Co-CEO of Asia
+    # Pacific and CEO of Asia Oceania" became a department called "Pacific
+    # and CEO of Oceania". Functional regional titles ("CFO – EMEA") still
+    # map to their function.
+    if _is_regional_exec(raw) and re.search(
+            r"\b(?:co-?)?ceo\b|chief\s+executive|\bchair(?:man|woman)?\b|\bpresident\b"
+            r"|managing\s+director|market\s+unit\s+lead|country\s+(?:head|manager)", raw, re.I):
+        return ""
 
     result = None
     try:
@@ -2686,6 +2694,7 @@ _GEO_WORDS_RE = re.compile(
     r"\b(?:u\.?s\.?a?|us|uk|u\.k\.|emea|apac|apj|latam|mena|asean|gcc|anz|europe|asia"
     r"|americas?|north\s+america|south\s+america|africa|middle\s+east|india|china|japan"
     r"|canada|mexico|brazil|germany|france|australia|singapore|global|international"
+    r"|pacific|oceania|asia\s+pacific|apac|emea|americas"
     r"|(?:north|south)(?:east|west)?|east|west|central|mid\s*-?\s*atlantic|midwest"
     r"|southeast|southwest|northeast|northwest|region|regional)\b",
     re.IGNORECASE)
