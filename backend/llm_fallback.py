@@ -2547,10 +2547,17 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
         "board": f"{org}: list every current member of the Board of Directors (or Board of "
                  f"Trustees / governing board), with their board role (Chair, Lead Director, "
                  f"Director …).{rules}",
-        "executives": f"{org}: list the current executive leadership team — the CEO (or head "
-                      f"of the organisation: President, Managing Director, Minister, Dean, "
-                      f"Director-General …) and every senior leader who reports directly to "
-                      f"them, with their exact title.{rules}",
+        # Spelled out, because "who reports to the CEO" was read narrowly and
+        # inconsistently: NVIDIA's CTO and Chief Scientist came back in 1 of 3
+        # runs with that wording, and in 3 of 3 with this one.
+        "executives": f"{org}: list the complete current executive leadership team, with exact "
+                      f"titles: the CEO (or head of the organisation: President, Managing "
+                      f"Director, Minister, Dean, Director-General …); every executive officer "
+                      f"named in the latest annual report or proxy statement; everyone holding a "
+                      f"'Chief … Officer' or 'Chief …' title (for example CFO, COO, CTO, CMO, "
+                      f"CHRO, Chief Scientist, General Counsel); and every Executive or Senior "
+                      f"Vice President who reports to the CEO. Check the organisation's "
+                      f"leadership / management team page.{rules}",
     }
     if known is not None:
         # The completeness pass: hand over what is already known and ask only
@@ -2564,12 +2571,13 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                      f"Board of Directors (or governing board) who is not in that list, with "
                      f"their board role. Return an empty list if none are missing.{rules}",
             "executives": f"{org}: these current executive leaders are already known: "
-                          f"{have['executives']}. Check the organisation's leadership page, its "
-                          f"latest annual report's list of executive officers and its proxy "
-                          f"statement, and list every OTHER current member of the executive "
-                          f"leadership team (the CEO's direct reports and named executive "
-                          f"officers) who is not in that list, with their exact title. Return an "
-                          f"empty list if none are missing.{rules}",
+                          f"{have['executives']}. Check the organisation's leadership / management "
+                          f"team page, its latest annual report's list of executive officers and "
+                          f"its proxy statement, and list every OTHER current executive who is not "
+                          f"in that list — executive officers, anyone with a 'Chief … Officer' or "
+                          f"'Chief …' title, and Executive or Senior Vice Presidents who report to "
+                          f"the CEO — with their exact title. Return an empty list if none are "
+                          f"missing.{rules}",
         }
     tasks = {k: v for k, v in tasks.items() if k in sections}
     import parallel_client
