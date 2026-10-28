@@ -659,6 +659,20 @@ Return ONLY valid JSON. No explanation, no markdown, no code blocks."""
 # ─────────────────────────────────────────────────────────────────────────────
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+# The most recent Gemini failure. A 402 "prepayment credits are depleted"
+# took out grounding, extraction and the board retry at once in Oct 2026, and
+# the only symptom was an empty board; diagnostics now carry the reason.
+_GEMINI_HEALTH: dict = {}
+
+
+def _note_gemini_failure(status: int, body: str) -> None:
+    import time as _t
+    msg = body
+    try:
+        msg = json.loads(body).get("error", {}).get("message", body)
+    except Exception:
+        pass
+    _GEMINI_HEALTH.update({"status": status, "error": str(msg)[:200], "at": _t.time()})
 _GEMINI_MODEL    = "gemini-2.5-flash"   # grounding via googleSearch tool
 # URL-path keywords that identify leadership / governance pages in search results
 _GEMINI_URL_SIGNAL = {
@@ -1012,7 +1026,10 @@ class _Harvester:
             return False
         # The same body under a different address — a soft 404 served with a
         # 200, or one page reachable by many spellings — adds nothing.
-        body_hash = hash(re.sub(r"^\[Page:[^\]]*\]", "", block).strip())
+        # Addresses are stripped first: every label in the block carries the
+        # page's own URL, so www.accenture.com/x and accenture.com/x — the
+        # same page — hashed differently and both were read.
+        body_hash = hash(re.sub(r"https?://\S+", "", block).strip())
         if body_hash in self.content_hashes:
             return False
         self.content_hashes.add(body_hash)
@@ -1213,6 +1230,8 @@ def _nav_leadership_links(html: str, base_url: str, limit: int = 8) -> list[tupl
             continue
         if re.search(r"\.(?:pdf|jpe?g|png|gif|svg|zip|docx?|xlsx?|mp4)$", parsed.path, re.I):
             continue
+        if _is_offtopic_url(absolute):
+            continue
         anchor = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
         # Judge the link by its own words: the last path segment and the text.
         label = f"{parsed.path.rstrip('/').rsplit('/', 1)[-1]} {anchor}".replace("-", " ")
@@ -1292,21 +1311,50 @@ _OFFTOPIC_URL_RE = re.compile(
     r"|admissions?|executive-education|mba|emba|masters?|bachelors?|phd|students?"
     r"|alumni|events?|careers?|jobs|vacancies|tenders?|services|e-services"
     r"|publications?|knowledge|insights?|case-?stud(?:y|ies)|success-stories"
-    r"|blogs?|whitepapers?|webinars?)(?:[/-]|$)", re.IGNORECASE)
+    r"|blogs?|whitepapers?|webinars?|industries|support|purchase-orders?|terms-and-conditions"
+    r"|political-contributions?[^/]*)(?:[/-]|$)", re.IGNORECASE)
+
+
+# A regional leadership team's page. Accenture's /about/leadership-emea lists
+# 43 EMEA market and industry leads; read as Executive Management they buried
+# the 11-person global executive team. The global leadership page already
+# names the regional CEOs who sit on Executive Management.
+_REGIONAL_TEAM_RE = re.compile(
+    r"/(?:leadership|leaders|management|executives?)[-/_](?:emea|apac|apj|americas?|north-america"
+    r"|latin-america|latam|asia(?:-pacific)?|europe|mena|middle-east|africa|anz|uk|india|china"
+    r"|japan|gcc|nordics|dach)(?:[/-]|$)", re.IGNORECASE)
 
 
 def _is_offtopic_url(url: str) -> bool:
     from urllib.parse import urlparse
-    return bool(_OFFTOPIC_URL_RE.search(urlparse(url).path))
+    path = urlparse(url).path
+    return bool(_OFFTOPIC_URL_RE.search(path) or _REGIONAL_TEAM_RE.search(path))
+
+
+_LOCALE_SEG_RE = re.compile(r"^/(?:[a-z]{2}(?:[-_][a-z]{2})?)(?=/)", re.IGNORECASE)
+
+
+def _locale_rank(url: str) -> int:
+    """Prefer the US / global English edition of a page."""
+    from urllib.parse import urlparse
+    m = _LOCALE_SEG_RE.match(urlparse(url).path)
+    seg = (m.group(0).strip("/").lower() if m else "")
+    return {"": 0, "us-en": 1, "en-us": 1, "en": 2, "gb-en": 3, "en-gb": 3}.get(seg, 5)
 
 
 def _sitemap_leadership_urls(domain: str, limit: int = 40) -> list[str]:
     """
-    Mine the site's sitemap.xml for leadership/governance URLs.
+    Mine the site's sitemaps for leadership/governance URLs.
 
     Guessed paths only find conventional URL layouts; the sitemap finds the
     real ones (/en-gb/corporate/our-board, /group/gestion/comite-executif …)
     on sites that don't follow any convention.
+
+    Sitemaps are found the way crawlers find them: robots.txt "Sitemap:" lines
+    first — accenture.com 404s /sitemap.xml and declares /sitemap-index.xml —
+    then the usual spellings, then the investor-relations subdomains, where
+    boards usually live (investor.accenture.com has its own sitemap, listing
+    the board page that accenture.com never links).
     """
     try:
         import httpx
@@ -1315,45 +1363,98 @@ def _sitemap_leadership_urls(domain: str, limit: int = 40) -> list[str]:
     if not domain:
         return []
 
-    roots = [f"https://www.{domain}/sitemap.xml", f"https://{domain}/sitemap.xml"]
+    from urllib.parse import urlparse as _up
+    hosts = [f"https://www.{domain}", f"https://{domain}"]
     found: list[str] = []
+    by_path: dict[str, str] = {}
     seen: set[str] = set()
-    child_budget = 3
+    scanned: set[str] = set()
+    child_budget = 6
 
-    def _scan(url: str, allow_children: bool) -> None:
-        nonlocal child_budget
+    def _get(url: str):
         try:
-            r = httpx.get(url, headers=_FETCH_HEADERS, timeout=6, follow_redirects=True)
+            return httpx.get(url, headers=_FETCH_HEADERS, timeout=8, follow_redirects=True)
         except Exception:
-            return
-        if r.status_code != 200 or "<loc" not in r.text.lower():
-            return
-        locs = _SITEMAP_LOC_RE.findall(r.text)
+            return None
+
+    def _child_rank(url: str) -> int:
+        low = url.lower()
+        if re.search(r"product|blog|news|press|event|career|job|insight|case|video|image|tag", low):
+            return 3
+        if re.search(r"about|company|corporate|leadership|governance|page|main|en[-_]?(?:us|gb)?\b", low):
+            return 0
+        return 1
+
+    def _scan(url: str, allow_children: bool) -> bool:
+        nonlocal child_budget
+        if url in scanned:
+            return False
+        scanned.add(url)
+        r = _get(url)
+        if r is None or r.status_code != 200 or "<loc" not in r.text.lower():
+            return False
         child_sitemaps: list[str] = []
-        for loc in locs:
+        for loc in _SITEMAP_LOC_RE.findall(r.text):
             low = loc.lower()
-            if low.endswith(".xml") or "sitemap" in low.rsplit("/", 1)[-1]:
+            if low.endswith((".xml", ".xml.gz")) or "sitemap" in low.rsplit("/", 1)[-1]:
                 child_sitemaps.append(loc)
                 continue
-            if len(found) >= limit or loc in seen:
-                continue
-            if _is_offtopic_url(loc):
+            if loc in seen or _is_offtopic_url(loc) or _is_archival(loc):
                 continue
             if any(kw in low for kw in _SITEMAP_URL_SIGNAL) or _ABOUT_PAGE_RE.search(low):
                 seen.add(loc)
-                found.append(loc)
+                # One page per path across country editions: Accenture lists
+                # /ae-en/…, /au-en/…, /us-en/… copies of every leadership page,
+                # which filled all 40 slots with the same few pages.
+                key = _LOCALE_SEG_RE.sub("/", _up(loc).path.rstrip("/").lower())
+                prev = by_path.get(key)
+                if prev is None:
+                    if len(by_path) >= limit * 3:
+                        continue
+                    by_path[key] = loc
+                elif _locale_rank(loc) < _locale_rank(prev):
+                    by_path[key] = loc
         if allow_children:
-            for child in child_sitemaps:
-                if child_budget <= 0 or len(found) >= limit:
+            for child in sorted(child_sitemaps, key=_child_rank):
+                if child_budget <= 0:
                     break
+                if _child_rank(child) == 3:
+                    continue
                 child_budget -= 1
                 _scan(child, allow_children=False)
+        return True
 
-    for root in roots:
-        if found:
+    # 1. robots.txt declares the real sitemap location.
+    declared: list[str] = []
+    for host in hosts:
+        r = _get(f"{host}/robots.txt")
+        if r is not None and r.status_code == 200:
+            declared += re.findall(r"(?im)^\s*sitemap:\s*(\S+)", r.text)
+            if declared:
+                break
+    # 2. The usual spellings, if robots.txt named none that worked.
+    candidates = declared + [f"{h}/{name}" for h in hosts
+                             for name in ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml")]
+    for root in candidates:
+        if _scan(root, allow_children=True) and by_path:
             break
-        _scan(root, allow_children=True)
+    # 3. Investor-relations subdomains carry their own sitemaps — always
+    #    read, so a full main sitemap can't crowd the board page out.
+    for sub in _IR_SUBDOMAINS:
+        _scan(f"https://{sub}.{domain}/sitemap.xml", allow_children=True)
+    found = list(by_path.values())
 
+    # Board and leadership pages before About pages, so the crawl spends its
+    # budget on the roster first.
+    def _strength(u: str) -> int:
+        low = u.lower()
+        if re.search(r"board|director", low):
+            return 0
+        if re.search(r"leadership|executive|management-team|officers|governance", low):
+            # An index page before the bios under it.
+            return 1 if low.rstrip("/").count("/") <= 5 else 2
+        return 3
+    found.sort(key=_strength)
     if found:
         logger.info("Sitemap for '%s': %d leadership URLs", domain, len(found))
     return found[:limit]
@@ -1727,6 +1828,7 @@ def _gemini_discover_leadership_urls(
             if not resp.is_success:
                 logger.warning("Gemini search %d for '%s': %s",
                                resp.status_code, company_name, resp.text[:300])
+                _note_gemini_failure(resp.status_code, resp.text)
                 continue
 
             data = resp.json()
@@ -1795,6 +1897,9 @@ def _gemini_fetch_leadership(
     if not api_key or not company_name:
         return {}
 
+    import time as _time
+    run_started = _time.time()
+
     # ── Phase A: Research via Google Search grounding ─────────────────────────
     discovered_urls, grounded_text = _gemini_discover_leadership_urls(
         company_name, api_key, domain=domain, location=location
@@ -1851,6 +1956,8 @@ def _gemini_fetch_leadership(
         "deadline_hit":    harvester._expired,
         "urls":            harvester.fetched[:40],
     }
+    if _GEMINI_HEALTH.get("at", 0) >= run_started:
+        harvest_info["gemini_error"] = f"HTTP {_GEMINI_HEALTH['status']}: {_GEMINI_HEALTH['error']}"
 
     if not combined_text:
         # Nothing fetched AND nothing grounded: usually the site refused us
@@ -1877,10 +1984,26 @@ def _gemini_fetch_leadership(
                 company_name, len(chunks), len(combined_text))
 
     partials: list[dict] = []
+    gemini_failed_chunks = 0
     for idx, chunk in enumerate(chunks, start=1):
         partial = _gemini_synthesize_chunk(
             company_name, domain, chunk, api_key, idx, len(chunks)
         )
+        if partial is None:
+            # Gemini could not read this chunk at all (out of credits, outage):
+            # have Claude read it rather than lose every name in it. Before
+            # this, only the corroboration pass's first three chunks were
+            # read by anyone, and Accenture's board page was the eighth page.
+            gemini_failed_chunks += 1
+            partial = _call_claude(
+                system=_SYSTEM_FROM_WEB,
+                user_msg=(f"Extract the governing board and the leadership / executive team "
+                          f"for {company_name}.\nCOMPLETENESS: excerpt {idx} of {len(chunks)} — "
+                          f"extract EVERY person named.\nNO HALLUCINATIONS: only people "
+                          f"explicitly named below.\n\n{chunk}"),
+                label=f"{company_name} [claude for gemini] {idx}/{len(chunks)}",
+                source_text=chunk,
+            )
         if partial:
             partials.append(partial)
 
@@ -1924,6 +2047,7 @@ def _gemini_fetch_leadership(
         "corroborated_board": corrob_board,
         "merged_board":       merged_board,
         "board_retry":        board_retry,
+        "gemini_failed_chunks": gemini_failed_chunks,
         "final_board":        len(result.get("board", [])),
         "corroboration_ran":  bool(corroborated),
     }
@@ -2194,7 +2318,8 @@ def _gemini_synthesize_chunk(
                 "Gemini Phase B chunk %d/%d for '%s': HTTP %s — %s",
                 idx, total, company_name, resp.status_code, resp.text[:300],
             )
-            return {}
+            _note_gemini_failure(resp.status_code, resp.text)
+            return None                   # failed — not "nobody on this page"
 
         data = resp.json()
         um = data.get("usageMetadata", {})
@@ -2245,6 +2370,7 @@ def _gemini_synthesize_chunk(
     except Exception as exc:
         logger.warning("Gemini Phase B chunk %d/%d failed for '%s': %s",
                        idx, total, company_name, exc)
+        return None
     return {}
 
 
@@ -2310,6 +2436,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         gemini_result = result
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
+            result = _with_parallel_backup(result, company_name, domain, location)
             _cache_leadership(cache_key, result)
             return result
         logger.info("Gemini returned no leaders for '%s' — falling back to Wikipedia", company_name)
@@ -2324,6 +2451,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         result = _site_only_leadership(company_name, domain, site_url)
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
+            result = _with_parallel_backup(result, company_name, domain, location)
             _cache_leadership(cache_key, result)
             return result
 
@@ -2347,8 +2475,19 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
         )
         if result.get("board") or result.get("executives"):
             result["_source"] = "web"
+            result = _with_parallel_backup(result, company_name, domain, location)
             _cache_leadership(cache_key, result)
             return result
+
+    # ── Step 3: nothing on the site, nothing in Wikipedia: search the web ────
+    # E-commerce and private companies often publish no leadership page at
+    # all; their leaders are named in press coverage, filings and profiles.
+    result = _with_parallel_backup({"board": [], "executives": [], "senior_leadership": []},
+                                   company_name, domain, location)
+    if result.get("board") or result.get("executives"):
+        result["_source"] = "web"
+        _cache_leadership(cache_key, result)
+        return result
 
     # ── No result — don't cache so next upload can retry ─────────────────────
     logger.info("No leaders found for '%s' — returning empty (not cached)", company_name)
@@ -2361,6 +2500,110 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
             if gemini_result.get(k) is not None:
                 empty[k] = gemini_result[k]
     return empty
+
+
+_THIN = 3     # fewer than this many board members / executives is "not found"
+
+
+def _with_parallel_backup(result: dict, company_name: str, domain: str = "",
+                          location: str = "") -> dict:
+    """
+    Fill a thin board or executive team from a Parallel web search.
+
+    Used when the organisation's own site and the primary search left either
+    section with fewer than three people — a company that doesn't publish its
+    leadership (most e-commerce firms), a site that refuses the crawler, or
+    the primary search being down. Only the thin sections are filled, so a
+    complete executive team is never padded with search noise.
+    """
+    board = result.get("board") or []
+    execs = result.get("executives") or []
+    want_board, want_execs = len(board) < _THIN, len(execs) < _THIN
+    if not (want_board or want_execs) or not os.environ.get("PARALLEL_API_KEY"):
+        return result
+    found = _parallel_leadership(company_name, domain, location, want_board, want_execs)
+    added = {"board": len(found.get("board", [])), "executives": len(found.get("executives", []))}
+    if added["board"] or added["executives"]:
+        extra = {"board": found.get("board", []) if want_board else [],
+                 "executives": found.get("executives", []) if want_execs else [],
+                 "senior_leadership": []}
+        keep = {k: v for k, v in result.items() if k.startswith("_")}
+        result = _merge_leadership([result, extra])
+        result.update(keep)
+        _strip_internal_fields(result)
+    result.setdefault("_harvest", {})["parallel_backup"] = {
+        "ran": True, "wanted_board": want_board, "wanted_executives": want_execs, **added}
+    logger.info("Parallel backup for '%s': +%d board, +%d executives",
+                company_name, added["board"], added["executives"])
+    return result
+
+
+def _parallel_leadership(company_name: str, domain: str, location: str,
+                         want_board: bool, want_execs: bool) -> dict:
+    """Board / executives named in Parallel web-search results, extracted by Claude."""
+    try:
+        import httpx
+        from usage_tracker import record_cost
+    except ImportError:
+        return {}
+    api_key = os.environ.get("PARALLEL_API_KEY", "")
+    ident = ", ".join(x for x in (domain, location) if x)
+    who = f"{company_name} ({ident})" if ident else company_name
+    asks = []
+    if want_board:
+        asks.append((f"List every current member of the Board of Directors (or Board of "
+                     f"Trustees / governing board) of {who}, with their board role.",
+                     [f"{company_name} board of directors", f"{company_name} board members"
+                      + (f" {domain}" if domain else "")]))
+    if want_execs:
+        asks.append((f"List the current executive leadership team of {who}: CEO, founders, "
+                     f"CFO, COO, CTO and other C-suite and senior executives, with titles.",
+                     [f"{company_name} executive leadership team", f"{company_name} CEO founder "
+                      f"CFO COO management team"]))
+    texts: list[str] = []
+    for objective, queries in asks:
+        try:
+            resp = httpx.post(
+                "https://api.parallel.ai/v1beta/search",
+                json={"objective": objective + " Only this organisation, not others with a "
+                                               "similar name. Current people only.",
+                      "search_queries": queries, "max_results": 10,
+                      "excerpts": {"max_chars_per_result": 1500}},
+                headers={"x-api-key": api_key, "parallel-beta": "search-extract-2025-10-10"},
+                timeout=40)
+            record_cost("parallel", "parallel-search",
+                        float(os.environ.get("PARALLEL_SEARCH_COST_USD", "0.005")))
+            if not resp.is_success:
+                logger.warning("Parallel leadership search for '%s': HTTP %s",
+                               company_name, resp.status_code)
+                continue
+            for r in resp.json().get("results", []) or []:
+                if "linkedin.com/in/" in (r.get("url") or ""):
+                    continue          # one person's profile, not a roster
+                excerpt = " ".join(r.get("excerpts") or [])
+                if excerpt:
+                    texts.append(f"[Source: {r.get('url', '')}] {r.get('title', '')}\n{excerpt}")
+        except Exception as exc:
+            logger.warning("Parallel leadership search failed for '%s': %s", company_name, exc)
+    if not texts:
+        return {}
+    corpus = "\n\n".join(texts)[:_SYNTHESIS_CHUNK * 2]
+    parsed = _call_claude(
+        system=_SYSTEM_FROM_WEB,
+        user_msg=(f"Extract the CURRENT governing board and leadership / executive team of "
+                  f"{who} from these web search results. The results may also mention other "
+                  f"organisations with similar names and people who have left — include only "
+                  f"current leaders of THIS organisation.\nNO HALLUCINATIONS: only people "
+                  f"explicitly named below.\n\n{corpus}"),
+        label=f"{company_name} [parallel]",
+        source_text=corpus,
+    )
+    out = {}
+    for section in ("board", "executives"):
+        people = parsed.get(section) or []
+        out[section] = [p for p in people
+                        if _named_near_org(p.get("name", ""), corpus, company_name, domain)]
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────

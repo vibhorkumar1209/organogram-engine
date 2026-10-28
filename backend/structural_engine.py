@@ -1963,6 +1963,14 @@ def _is_ceo(title: str) -> bool:
     # Whole words: "under" must not catch "Co-founder and CEO".
     if re.search(r"\b(?:deputy|vice|assistant|associate|under|pro)\b", t):
         return False
+    # A co-CEO shares the top job, and a regional CEO runs a territory —
+    # neither leads the organisation. Accenture's "Representative Chairman of
+    # Accenture Japan and Co-CEO of Asia Pacific" was picked over its Chair
+    # and CEO, Julie Sweet, because both titles contain "CEO".
+    if re.search(r"\bco-?(?:ceo|chief\s+executive)\b", t):
+        return False
+    if _is_regional_exec(title):
+        return False
     return bool(re.search(r"\bchief\s+executive\b|\bceo\b", t)) or \
            bool(re.search(r"^(?:group\s+)?president$", t)) or \
            bool(re.search(r"^(?:group\s+)?managing\s+director$", t)) or \
@@ -2931,12 +2939,21 @@ def mark_apex(dag: "OrganogramDAG") -> str:
         if attrs.get("node_type") == "person" and _person_department(dag, nid) == EXEC_DEPT:
             members.append(nid)
 
+    # Who sits on the board too: a Chair-and-CEO is on both panels, and the
+    # board seat is the strongest sign of being the organisation's head.
+    board_keys = {_name_key(dag.G.nodes[n].get("label", "")) for n in dag.G.nodes
+                  if dag.G.nodes[n].get("node_type") == "person"
+                  and _person_department(dag, n) == BOARD_DEPT}
+
     def rank(nid: str) -> tuple:
         t = str((dag.G.nodes[nid].get("metadata", {}) or {}).get("designation", "")).lower()
         return (
             0 if re.search(r"\bchief\s+executive\b|\bceo\b", t) else
             1 if _ORG_HEAD_RE.search(t) or re.search(r"^vice[\s-]+chancellor", t) else 2,
+            0 if _name_key(dag.G.nodes[nid].get("label", "")) in board_keys else 1,
+            0 if re.search(r"\bchair", t) else 1,
             0 if "group" in t or "global" in t else 1,
+            len(t),                      # the unqualified title over a long one
             dag.G.nodes[nid].get("label", ""),
         )
 
