@@ -228,7 +228,7 @@ BOARD11 = [{"name": n, "title": "Director", **HI} for n in (
 def _fake_tasks(company, domain="", location="", site_url="", variant="pages",
                 sections=("board", "executives"), processor=""):
     calls.append(variant)
-    if processor == "base":
+    if processor == "core-fast":
         return {"board": list(BOARD11),
                 "executives": [{"name": "Jensen Huang", "title": "President and CEO", **HI},
                                {"name": "Colette Kress", "title": "CFO", **HI}],
@@ -257,13 +257,17 @@ def _fake_scrape(company, domain="", site_url="", location="", search_backup=Tru
 
 F2._parallel_task_leadership = _fake_tasks
 F2._scrape_leadership = _fake_scrape
+# The voting logic is exercised with three fast runs beside the primary.
+F2._RESEARCH_RUNS = (("primary", "pages", "core-fast"), ("fast1", "pages", "base-fast"),
+                     ("fast2", "filings", "base-fast"), ("fast3", "pages", "base-fast"))
+F2._FAST_RUNS = ("fast1", "fast2", "fast3")
 F2._LEADERSHIP_CACHE.clear()
 t0 = _time.monotonic()
 res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
 board = [p["name"] for p in res["board"]]
 execs = [p["name"] for p in res["executives"]]
 ok(sorted(calls) == ["filings", "pages", "pages", "pages", "scrape"],
-   f"round: the base run, three fast runs and scraping run at once ({calls})")
+   f"round: the primary run, three fast runs and scraping run at once ({calls})")
 ok("Persis Drell" in board and board.count("Tench Coxe") == 1 and len(board) == 12,
    f"union: a director the base run missed, agreed by the fast runs, is added once ({len(board)})")
 ok(execs.count("Colette Kress") + execs.count("Colette M. Kress") == 1 and "Debora Shoquist" in execs,
@@ -277,8 +281,8 @@ ok("Rob Burgess" not in board,
 def _vote_tasks(company, domain="", location="", site_url="", variant="pages",
                 sections=("board", "executives"), processor=""):
     MED = {"_conf": "medium", "_evidenced": False}
-    if processor == "base":
-        return {"board": [], "executives": [], "_parallel": {"ran": False}}   # base is late
+    if processor == "core-fast":
+        return {"board": [], "executives": [], "_parallel": {"ran": False}}   # primary is late
     run = len([c for c in calls if c == "vote"])
     calls.append("vote")
     board = [{"name": "Tench Coxe", "title": "Director", **HI},
@@ -309,7 +313,7 @@ ok("Persis Drell" not in vb and "Ellen Ochoa" not in vb,
 def _authority_tasks(company, domain="", location="", site_url="", variant="pages",
                      sections=("board", "executives"), processor=""):
     MED = {"_conf": "medium", "_evidenced": False}
-    if processor == "base":
+    if processor == "core-fast":
         return {"board": [{"name": "Harvey Jones", "title": "Director", **MED},
                           {"name": "Stephen Neal", "title": "Director", **MED}],
                 "executives": [], "_parallel": {"ran": True}}
@@ -330,6 +334,44 @@ ok("Harvey Jones" in ab and "Stephen Neal" in ab,
 ok("Aarti Shah" in ab, "authority: a fast-only name evidenced in 2 runs is added")
 ok("Robert Burgess" not in ab,
    "authority: a name the base run left out and only one fast run is sure of is rejected")
+F2._parallel_task_leadership = _fake_tasks
+
+# The shipped layout: one core-fast primary, one base-fast fallback.
+F2._RESEARCH_RUNS = (("primary", "pages", "core-fast"), ("fast1", "pages", "base-fast"))
+F2._FAST_RUNS = ("fast1",)
+
+
+def _fallback_tasks(company, domain="", location="", site_url="", variant="pages",
+                    sections=("board", "executives"), processor=""):
+    MED = {"_conf": "medium", "_evidenced": False}
+    if processor == "core-fast":
+        return {"board": [], "executives": [], "_parallel": {"ran": False}}   # late
+    return {"board": [{"name": "Tench Coxe", "title": "Director", **HI},
+                      {"name": "Robert Burgess", "title": "Director", **MED}],
+            "executives": [], "_parallel": {"ran": True}}
+
+
+F2._parallel_task_leadership = _fallback_tasks
+F2._LEADERSHIP_CACHE.clear()
+fb = [p["name"] for p in F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="X")["board"]]
+ok(fb == ["Tench Coxe"],
+   f"fallback: with the primary late, only the fallback run's cited, confident names count ({fb})")
+
+
+def _primary_tasks(company, domain="", location="", site_url="", variant="pages",
+                   sections=("board", "executives"), processor=""):
+    if processor == "core-fast":
+        return {"board": [{"name": "Stephen Neal", "title": "Director"}], "executives": [],
+                "_parallel": {"ran": True}}
+    return {"board": [{"name": "Robert Burgess", "title": "Director", **HI}],
+            "executives": [], "_parallel": {"ran": True}}
+
+
+F2._parallel_task_leadership = _primary_tasks
+F2._LEADERSHIP_CACHE.clear()
+pb = [p["name"] for p in F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="X")["board"]]
+ok(pb == ["Stephen Neal"],
+   f"primary: its answer stands; a lone fallback run can't add to it ({pb})")
 F2._parallel_task_leadership = _fake_tasks
 
 # A source slower than the budget is not waited for.

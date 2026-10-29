@@ -2490,9 +2490,10 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     # gives it high confidence backed by a cited excerpt naming them, or when
     # EVERY run lists it. That kept all eleven and rejected every stale one.
     result = {"board": [], "executives": [], "senior_leadership": []}
-    base_ok = bool(passes.get("base", {}).get("board") or passes.get("base", {}).get("executives"))
+    base_ok = bool(passes.get("primary", {}).get("board")
+                   or passes.get("primary", {}).get("executives"))
     fast_ok = [r for r in _FAST_RUNS if passes.get(r, {}).get("board") or passes.get(r, {}).get("executives")]
-    diag["base_run"] = "used" if base_ok else "late or empty"
+    diag["primary_run"] = "used" if base_ok else "late or empty — fallback used"
     for section in ("board", "executives"):
         groups: list[dict] = []   # {"person", "runs": set, "strong": set of runs}
         for run_id, got in passes.items():
@@ -2502,7 +2503,7 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
                 if g is None:
                     g = {"person": dict(p), "runs": set(), "strong": set()}
                     groups.append(g)
-                elif run_id == "base" or (strong and not g["strong"]):
+                elif run_id == "primary" or (strong and not g["strong"]):
                     keep_comm = g["person"].get("committees")
                     g["person"] = dict(p)                 # the authoritative / best entry
                     if keep_comm and not g["person"].get("committees"):
@@ -2514,16 +2515,18 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
                     g["strong"].add(run_id)
 
         def _accept(g: dict) -> bool:
-            fast_runs = g["runs"] - {"base"}
+            fast_runs = g["runs"] - {"primary"}
             if base_ok:
-                if "base" in g["runs"]:
+                if "primary" in g["runs"]:
                     return True
-                # Only what base missed: two fast runs each confident AND
-                # citing an excerpt that names them. A stale director a single
-                # run is sure of (NVIDIA's Robert Burgess) doesn't pass.
-                return len(g["strong"] - {"base"}) >= 2
-            # base is late: the fast vote decides.
-            return bool(g["strong"]) or (fast_ok and fast_runs >= set(fast_ok))
+                # Only what the primary run missed: two fast runs each
+                # confident AND citing an excerpt that names them. A stale
+                # director one run is sure of (NVIDIA's Robert Burgess) fails.
+                return len(g["strong"] - {"primary"}) >= 2
+            # The primary run is late: fall back to the fast run(s). A name
+            # needs high confidence with a cited excerpt, or — when there are
+            # several fast runs — every one of them listing it.
+            return bool(g["strong"]) or (len(fast_ok) >= 2 and fast_runs >= set(fast_ok))
 
         kept = [g for g in groups if _accept(g)]
         result[section] = [g["person"] for g in kept]
@@ -2587,20 +2590,17 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
             **({"_error": scraped["_error"]} if scraped.get("_error") else {})}
 
 
-# Wall-clock budget for the whole concurrent round. The base run measured
-# 85-150s, base-fast 15-50s; scraping is additive. Anything still running at
+# Wall-clock budget for the whole concurrent round. core-fast measured
+# 66-76s, base-fast 15-50s; scraping is additive. Anything still running at
 # the deadline is skipped rather than waited for.
-_RESEARCH_BUDGET_S = int(os.environ.get("ORGANOGRAM_RESEARCH_BUDGET_S", "160"))
+_RESEARCH_BUDGET_S = int(os.environ.get("ORGANOGRAM_RESEARCH_BUDGET_S", "120"))
 # Three independent research runs, voted on: two from the leadership pages,
 # one from the filings.
-# (run id, variant, processor). One standard "base" run is the authority —
-# measured accurate on NVIDIA where base-fast was not — and three "base-fast"
-# runs (same price tier, ~20s) are the safety net if it is late and a vote
-# on anything it missed.
-_RESEARCH_RUNS = (("base", "pages", "base"),
-                  ("fast1", "pages", "base-fast"),
-                  ("fast2", "filings", "base-fast"),
-                  ("fast3", "pages", "base-fast"))
+# (run id, variant, processor). One "core-fast" run is the answer — 66-76s,
+# and the most complete and accurate tier measured. One "base-fast" run
+# (~20s) runs beside it purely as a fallback in case it is late or fails.
+_RESEARCH_RUNS = (("primary", "pages", "core-fast"),
+                  ("fast1", "pages", "base-fast"))
 _FAST_RUNS = tuple(r for r, _, proc in _RESEARCH_RUNS if proc.endswith("-fast"))
 
 
@@ -2622,8 +2622,9 @@ def _prefetch_linkedin(company_name: str, domain: str, location: str, fast_jobs:
                         counts.append((p, 1))
                     else:
                         counts[counts.index(hit)] = (hit[0], hit[1] + 1)
+            need = 2 if len(fast_jobs) >= 2 else 1
             for p, n in counts:
-                if n >= 2 and not any(_same_person(p["name"], x) for x in seen):
+                if n >= need and not any(_same_person(p["name"], x) for x in seen):
                     seen.append(p["name"])
                     people.append({"name": p["name"], "title": p.get("title", ""), "kind": kind})
         linkedin_resolver.prefetch(people, company_name, domain, location)

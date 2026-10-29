@@ -265,12 +265,13 @@ ok([(sp, m) for n, sp, m in _modes if n == "Lee Park"]
 ok({m for _, _, m in _modes} <= {"turbo", "advanced"}, "tiers: no other search mode is ever used")
 
 import parallel_client as PC
-for asked, want in (("core", "base-fast"), ("pro", "base-fast"), ("ultra8x", "base-fast"),
-                   ("core-fast", "base-fast"), ("", "base-fast"), ("base", "base"),
-                   ("base-fast", "base-fast"), ("lite", "lite")):
+for asked, want in (("core", "core-fast"), ("pro", "core-fast"), ("ultra8x", "core-fast"),
+                   ("pro-fast", "core-fast"), ("", "core-fast"), ("core-fast", "core-fast"),
+                   ("base", "base"), ("base-fast", "base-fast"), ("lite", "lite")):
     os.environ["ORGANOGRAM_PARALLEL_PROCESSOR"] = asked
-    ok(PC.task_processor() == want, f"tiers: processor {asked!r} -> {want} (capped at the base price)")
-ok(PC.TASK_COST["base-fast"] == PC.TASK_COST["base"], "tiers: base-fast costs the same as base")
+    ok(PC.task_processor() == want, f"tiers: processor {asked!r} -> {want} (ceiling core-fast)")
+ok(PC.TASK_COST["base-fast"] == PC.TASK_COST["base"] and PC.TASK_COST["core-fast"] == PC.TASK_COST["core"],
+   "tiers: -fast variants cost the same as their tier")
 os.environ.pop("ORGANOGRAM_PARALLEL_PROCESSOR")
 
 os.environ["PARALLEL_API_KEY"] = ""

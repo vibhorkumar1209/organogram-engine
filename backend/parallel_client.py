@@ -1,14 +1,16 @@
 """
 Parallel.ai calls, held to the cheap tiers.
 
-Cost ceiling: the Task API "base" price — $10 per 1,000 runs (Parallel
-pricing, October 2026: Task lite $5, base $10, core $25 per 1,000; Search
-turbo/fast $1, basic/advanced $5 per 1,000 requests).
+Cost ceiling: "core-fast" — $25 per 1,000 runs (Parallel pricing, October
+2026: Task lite $5, base $10, core $25 per 1,000; "-fast" variants cost the
+same as their tier; Search turbo/fast $1, basic/advanced $5 per 1,000).
 
-  Task API     "base" by default (the user raised research from lite to the
-               next tier, Oct 2026); "lite" allowed. Anything higher set in
-               the environment is refused and logged, so a dashboard typo
-               can't multiply the bill.
+  Task API     "core-fast" by default. The user chose it (Oct 2026) to bring a
+               chart under ~3 minutes: it answered in 66-76s with the best
+               quality measured (NVIDIA: all 11 current directors, 25
+               executives), where standard "base" took ~4 minutes. Two runs
+               per chart cost less than the previous eight-run design.
+               Anything above core-fast is refused and logged.
   Search API   "turbo" first ($1/1,000); "advanced" ($5/1,000 — the lite
                price) only for what turbo couldn't settle. Measured on ten
                NVIDIA leaders' LinkedIn profiles: advanced 8/10, turbo 7/10,
@@ -35,29 +37,31 @@ TASK_COST = {
     "base": float(os.environ.get("PARALLEL_TASK_COST_USD", "0.010")),
 }
 # "-fast" variants cost the same as their standard tier (Parallel pricing).
+TASK_COST["core"] = float(os.environ.get("PARALLEL_TASK_CORE_COST_USD", "0.025"))
 TASK_COST["lite-fast"] = TASK_COST["lite"]
 TASK_COST["base-fast"] = TASK_COST["base"]
+TASK_COST["core-fast"] = TASK_COST["core"]
 TASK_COST_LITE = TASK_COST["lite"]
 
-# Nothing above the base price. base-fast is the base tier at 15-50s instead
-# of minutes — the same $10 per 1,000 — and is the default.
-_ALLOWED_PROCESSORS = ("lite", "lite-fast", "base", "base-fast")
+# Nothing above core-fast. Standard "core" is not allowed: same price, but
+# minutes slower, which defeats the reason for the tier.
+_ALLOWED_PROCESSORS = ("lite", "lite-fast", "base", "base-fast", "core-fast")
+_DEFAULT_PROCESSOR = "core-fast"
 _ALLOWED_SEARCH_MODES = ("turbo", "advanced")
 
 
 def task_processor(requested: str = "") -> str:
-    """The Task API processor to use — never above the base price ceiling.
+    """The Task API processor to use — never above the core-fast ceiling.
 
-    requested: a specific tier the caller wants (e.g. "base" for the
-    authoritative run); otherwise ORGANOGRAM_PARALLEL_PROCESSOR, default
-    base-fast. Either way it is clamped to the ceiling.
+    requested: a specific tier the caller wants; otherwise
+    ORGANOGRAM_PARALLEL_PROCESSOR, default core-fast. Clamped to the ceiling.
     """
-    asked = ((requested or os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "base-fast"))
-             .strip().lower() or "base-fast")
+    asked = ((requested or os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", _DEFAULT_PROCESSOR))
+             .strip().lower() or _DEFAULT_PROCESSOR)
     if asked not in _ALLOWED_PROCESSORS:
-        logger.warning("ORGANOGRAM_PARALLEL_PROCESSOR=%r is above the base cost ceiling; "
-                       "using 'base-fast'", asked)
-        return "base-fast"
+        logger.warning("Parallel processor %r is not allowed (ceiling: core-fast); "
+                       "using %r", asked, _DEFAULT_PROCESSOR)
+        return _DEFAULT_PROCESSOR
     return asked
 
 
