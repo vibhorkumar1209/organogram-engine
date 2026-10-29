@@ -1166,12 +1166,18 @@ class OrganogramDAG:
             elif _is_board_chairman(designation):
                 layer     = 0
                 board_sub = _board_sub_role(designation)
-            elif _is_vice_chair(designation) or _is_committee_chair(designation):
+            elif (_is_vice_chair(designation) or _is_committee_chair(designation)
+                  or _board_sub_role(designation) == "lead_director"):
                 layer     = 1
                 board_sub = _board_sub_role(designation)
             else:
                 layer     = 2   # Regular NED / INED
                 board_sub = _board_sub_role(designation)
+            # The leadership search may know more than the title says — a
+            # director who chairs a committee is listed as plain "Independent
+            # Director" — so keep the more senior of the two placements.
+            if _trust_dept and isinstance(rec.layer, int) and 0 <= rec.layer < layer:
+                layer = rec.layer
 
         dept_s = _canonical_subdept(rec.dept_secondary if layer > 2 else "")
         dept_t = rec.dept_tertiary  if layer > 2 else ""

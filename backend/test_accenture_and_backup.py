@@ -276,5 +276,29 @@ ok(all(len(names) for _, names in confirm_asked) and
    "completeness: only names Parallel hadn't listed are sent for confirmation")
 os.environ["PARALLEL_API_KEY"] = ""
 
+# ── Board levels: committee chairs and the lead director sit under the Chair ─
+jb = client.post("/company-chart", json={"company_name": "Board Co", "domain": "",
+                                         "hq_location": ""}).json()["job_id"]
+db_ = A._JOBS[jb].dag
+_orig_fetch = F2.llm_fetch_leadership
+for name, title, layer, comm in [
+        ("Julie Sweet", "Chair & CEO", 0, []),
+        ("Arun Sarin", "Independent Lead Director", 1, []),
+        ("Tracey Travis", "Independent Director", 1, [{"name": "Audit Committee", "role": "Chair"}]),
+        ("Paula Price", "Independent Director", 2, [{"name": "Audit Committee", "role": "Member"}])]:
+    rec = ClassifiedRecord(
+        id="llm_" + uuid.uuid4().hex[:8], full_name=name, designation=title, company="X",
+        linkedin_url="", location="", country="", sector="Private", region="Global HQ",
+        layer=layer, dept_primary=S.BOARD_DEPT, dept_secondary="", dept_tertiary="",
+        nlp_confidence=0.9, nlp_industry="llm", nlp_method="llm_leadership_web")
+    db_.insert_person(rec)
+_four = {"Julie Sweet", "Arun Sarin", "Tracey Travis", "Paula Price"}
+lv = {a["label"]: a.get("layer") for _, a in db_.G.nodes(data=True)
+      if a.get("node_type") == "person" and a["label"] in _four}
+ok(lv == {"Julie Sweet": 0, "Arun Sarin": 1, "Tracey Travis": 1, "Paula Price": 2},
+   f"board levels: chair 0, lead director and committee chair 1, member 2 ({lv})")
+ok(S._is_board_chairman("Chair & CEO") and not S._is_board_chairman("Chairman of Accenture Japan"),
+   "board chair: 'Chair & CEO' is the chair; 'Chairman of Accenture Japan' is regional")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)
