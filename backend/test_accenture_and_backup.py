@@ -242,8 +242,23 @@ def _fake_scrape(company, domain="", site_url="", location="", search_backup=Tru
     return {"board": [], "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"}]}
 
 
+confirm_asked = []
+
+
+def _fake_confirm(company, domain, location, section, names):
+    confirm_asked.append((section, tuple(names)))
+    return {n for n in names if n != "Rob Burgess"}        # a former director
+
+
+def _fake_scrape(company, domain="", site_url="", location="", search_backup=True):
+    scrapes.append(True)
+    return {"board": [{"name": "Rob Burgess", "title": "Director"}],
+            "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"}]}
+
+
 F2._parallel_task_leadership = _fake_tasks
 F2._scrape_leadership = _fake_scrape
+F2._parallel_confirm_current = _fake_confirm
 F2._LEADERSHIP_CACHE.clear()
 res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
 board = [p["name"] for p in res["board"]]
@@ -253,7 +268,12 @@ ok(passes == [("list", ("board", "executives")), ("check", ("board", "executives
 ok("Persis Drell" in board and board.count("Tench Coxe") == 1 and len(board) == 12,
    f"completeness: the missing director is added, a known one not duplicated ({len(board)})")
 ok(scrapes == [True] and "Michael Kagan" in execs and "Debora Shoquist" in execs,
-   f"completeness: executives still below the bar are scraped and added ({execs})")
+   f"completeness: executives still below the bar are scraped, confirmed and added ({execs})")
+ok("Rob Burgess" not in board and ("board", ("Rob Burgess",)) in confirm_asked,
+   "completeness: a scraped director the current-role check rejects is not added")
+ok(all(len(names) for _, names in confirm_asked) and
+   not any("Tench Coxe" in names for _, names in confirm_asked),
+   "completeness: only names Parallel hadn't listed are sent for confirmation")
 os.environ["PARALLEL_API_KEY"] = ""
 
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")

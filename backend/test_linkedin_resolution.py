@@ -265,9 +265,10 @@ ok([(sp, m) for n, sp, m in _modes if n == "Lee Park"]
 ok({m for _, _, m in _modes} <= {"turbo", "advanced"}, "tiers: no other search mode is ever used")
 
 import parallel_client as PC
-for asked in ("core", "pro", "base", "ultra8x", ""):
+for asked, want in (("core", "base"), ("pro", "base"), ("ultra8x", "base"),
+                   ("", "base"), ("base", "base"), ("lite", "lite")):
     os.environ["ORGANOGRAM_PARALLEL_PROCESSOR"] = asked
-    ok(PC.task_processor() == "lite", f"tiers: processor {asked!r} is capped at lite")
+    ok(PC.task_processor() == want, f"tiers: processor {asked!r} -> {want} (capped at base)")
 os.environ.pop("ORGANOGRAM_PARALLEL_PROCESSOR")
 
 os.environ["PARALLEL_API_KEY"] = ""

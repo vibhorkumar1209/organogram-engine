@@ -1803,7 +1803,11 @@ def _is_board_chairman(title: str) -> bool:
     if "committee" in t:
         return False   # "Audit Committee Chairman" → director, not THE chairman
     # Exclude regional/country chairman ("U.S. Chairman", "Asia Chair", etc.)
-    if _REGIONAL_CHAIR_RE.search(t):
+    if _REGIONAL_CHAIR_RE.search(t) or _is_regional_exec(title):
+        return False
+    # "Chairman of Accenture Japan": chair OF a place is a territory role.
+    m = re.search(r"\bchair(?:man|woman|person)?\s+of\s+(.+)$", t)
+    if m and "board" not in m.group(1) and _REGIONAL_GEO_RE.search(m.group(1)):
         return False
     # Board chairman — covers Executive Chairman, Non-Exec Chairman, etc.
     if re.search(r'\bchairman\b|\bchairwoman\b|\bchairperson\b', t):
@@ -1816,6 +1820,12 @@ def _is_board_chairman(title: str) -> bool:
     if re.search(r"\bexecutive\s+chair\b", t):
         return True
     if t == "chair":
+        return True
+    # "Chair & CEO", "Chair and Chief Executive Officer", "Chair, President
+    # and CEO": the title opens with Chair. Accenture's Julie Sweet is "Chair &
+    # CEO", and without this the board had no chair at its head.
+    if re.match(r"^(?:non-executive\s+|independent\s+)?chair\b(?!\s+of\s+(?:the\s+)?\w+\s+committee)",
+                t):
         return True
     return False
 
@@ -1882,7 +1892,10 @@ def _board_sub_role(title: str) -> str:
         return "chairman"
     if _is_vice_chair(title):
         return "vice_chair"
-    if re.search(r"\b(?:lead|senior)\s+independent\s+director\b", t):
+    # "Lead Independent Director", "Independent Lead Director" (Accenture),
+    # "Senior Independent Director" (UK), plain "Lead Director".
+    if re.search(r"\b(?:lead|senior)\s+independent\s+director\b"
+                 r"|\bindependent\s+lead\s+director\b|\blead\s+director\b", t):
         return "lead_director"
     if re.search(r"\bpresiding\s+director\b", t):
         return "lead_director"
@@ -2319,11 +2332,16 @@ def _enrich_with_llm_leadership(
         #        regional/country heads at layer 2, own region sub-card ──────
         # injections: (layer, name, title, dept_primary, sub_role, person_region, linkedin_url)
         injections: list[tuple[int, str, str, str, str, str, str]] = []
+        committees_by_key: dict[str, list] = {}
         for person in leadership.get("board", []):
             title = person["title"]
+            committees = [c for c in (person.get("committees") or []) if isinstance(c, dict)]
+            committees_by_key[_name_key(person["name"])] = committees
+            chairs_one = any(str(c.get("role", "")).lower() == "chair" for c in committees)
             if _is_board_chairman(title):
                 bod_layer = 0
-            elif _is_vice_chair(title) or _is_committee_chair(title):
+            elif (_is_vice_chair(title) or _is_committee_chair(title) or chairs_one
+                  or _board_sub_role(title) == "lead_director"):
                 bod_layer = 1
             else:
                 bod_layer = 2   # Regular NED / INED
@@ -2419,6 +2437,11 @@ def _enrich_with_llm_leadership(
                 # Attach board sub-role for ExecPanel committee badge display
                 if sub_role and person_uid in dag.G:
                     dag.G.nodes[person_uid]["metadata"]["board_sub_role"] = sub_role
+                # Committee memberships drive the Board panel's hierarchy:
+                # Chair → Lead Director → each committee (its chair, then members).
+                if dept_primary == "Board of Management" and person_uid in dag.G \
+                        and committees_by_key.get(key):
+                    dag.G.nodes[person_uid]["metadata"]["committees"] = committees_by_key[key]
                 if person_uid in dag.G:
                     pmeta = dag.G.nodes[person_uid]["metadata"]
                     if linkedin:

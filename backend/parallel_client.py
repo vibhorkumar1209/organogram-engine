@@ -1,12 +1,14 @@
 """
 Parallel.ai calls, held to the cheap tiers.
 
-Cost ceiling: nothing above the Task API "lite" price — $5 per 1,000 runs
-(Parallel pricing, October 2026: Task lite $5, base $10, core $25 per 1,000;
-Search turbo/fast $1, basic/advanced $5 per 1,000 requests).
+Cost ceiling: the Task API "base" price — $10 per 1,000 runs (Parallel
+pricing, October 2026: Task lite $5, base $10, core $25 per 1,000; Search
+turbo/fast $1, basic/advanced $5 per 1,000 requests).
 
-  Task API     always "lite". A higher processor set in the environment is
-               refused and logged, so a dashboard typo can't 5x the bill.
+  Task API     "base" by default (the user raised research from lite to the
+               next tier, Oct 2026); "lite" allowed. Anything higher set in
+               the environment is refused and logged, so a dashboard typo
+               can't multiply the bill.
   Search API   "turbo" first ($1/1,000); "advanced" ($5/1,000 — the lite
                price) only for what turbo couldn't settle. Measured on ten
                NVIDIA leaders' LinkedIn profiles: advanced 8/10, turbo 7/10,
@@ -28,19 +30,23 @@ SEARCH_COST = {
     "turbo":    float(os.environ.get("PARALLEL_SEARCH_TURBO_COST_USD", "0.001")),
     "advanced": float(os.environ.get("PARALLEL_SEARCH_COST_USD", "0.005")),
 }
-TASK_COST_LITE = float(os.environ.get("PARALLEL_TASK_COST_USD", "0.005"))
+TASK_COST = {
+    "lite": float(os.environ.get("PARALLEL_TASK_LITE_COST_USD", "0.005")),
+    "base": float(os.environ.get("PARALLEL_TASK_COST_USD", "0.010")),
+}
+TASK_COST_LITE = TASK_COST["lite"]
 
-_ALLOWED_PROCESSORS = ("lite",)          # nothing above the lite price
+_ALLOWED_PROCESSORS = ("lite", "base")   # nothing above the base price
 _ALLOWED_SEARCH_MODES = ("turbo", "advanced")
 
 
 def task_processor() -> str:
-    """The Task API processor to use — always within the lite price ceiling."""
-    asked = os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "lite").strip().lower() or "lite"
+    """The Task API processor to use — never above the base price ceiling."""
+    asked = os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "base").strip().lower() or "base"
     if asked not in _ALLOWED_PROCESSORS:
-        logger.warning("ORGANOGRAM_PARALLEL_PROCESSOR=%r is above the lite cost ceiling; "
-                       "using 'lite'", asked)
-        return "lite"
+        logger.warning("ORGANOGRAM_PARALLEL_PROCESSOR=%r is above the base cost ceiling; "
+                       "using 'base'", asked)
+        return "base"
     return asked
 
 

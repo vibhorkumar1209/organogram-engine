@@ -887,9 +887,10 @@ export default function App() {
       setLeadershipNote('🔍 Searching for Board & Executive leadership online…')
       let pollCount = 0
       // The leadership search is two Parallel research passes (the list, then
-      // a "who is missing?" check), scraping when a list is still short, then
-      // LinkedIn matching — up to ~10 minutes. 72 × 10s = 12 minutes.
-      const MAX_POLLS = 72
+      // a "who is missing?" check), scraping and a current-role check when a
+      // list is still short, then LinkedIn matching for up to ~45 leaders —
+      // up to ~13 minutes. 90 × 10s = 15 minutes.
+      const MAX_POLLS = 90
       // Stages already reflected in the chart, so each reloads it once.
       let shownPeople = false
       let shownDepartments = false

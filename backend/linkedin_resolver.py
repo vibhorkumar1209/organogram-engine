@@ -44,8 +44,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger(__name__)
 
 _MAX_PEOPLE = int(os.environ.get("ORGANOGRAM_LINKEDIN_MAX_PEOPLE", "80"))
-_DEADLINE_S = int(os.environ.get("ORGANOGRAM_LINKEDIN_DEADLINE_S", "120"))
-_WORKERS = int(os.environ.get("ORGANOGRAM_LINKEDIN_WORKERS", "6"))
+_DEADLINE_S = int(os.environ.get("ORGANOGRAM_LINKEDIN_DEADLINE_S", "240"))
+_WORKERS = int(os.environ.get("ORGANOGRAM_LINKEDIN_WORKERS", "8"))
 
 NOT_FOUND = "Not Found"
 _LEVELS = {"High": 3, "Medium": 2, "Low": 1}

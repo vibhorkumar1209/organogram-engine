@@ -181,33 +181,81 @@ function buildLayerTree(sorted: OrgNode[]): ExecTreeNode[] {
 // All non-Chairman directors are shown as FLAT direct reports of the Chairman
 // (they all report to the Chairman per the Excel — not to each other).
 // Directors are sorted: layer 1 (Committee Chairs/Vice Chair) first, then layer 2 (NEDs).
+type Committee = { name: string; role: string }
+
+function committeesOf(p: OrgNode): Committee[] {
+  const raw = p.metadata?.committees
+  return Array.isArray(raw)
+    ? (raw as Committee[]).filter(c => c && typeof c.name === 'string' && c.name.trim())
+    : []
+}
+
+// Audit, compensation and nominating/governance committees first — the
+// three every listed company's board has — then the rest alphabetically.
+function committeeRank(name: string): number {
+  const n = name.toLowerCase()
+  if (n.includes('audit')) return 0
+  if (/compensation|remuneration|people|human capital|leadership development/.test(n)) return 1
+  if (/nominat|governance/.test(n)) return 2
+  return 3
+}
+
+const leaf = (p: OrgNode, isLast = false): ExecTreeNode => ({ person: p, reports: [], isLast })
+
+// Board of Directors as a governance hierarchy:
+//   Chair
+//   ├─ Lead Independent Director / Vice Chair
+//   ├─ <Committee> · chaired by …   (its chair first, then members)
+//   └─ directors on no listed committee
+// A director on two committees appears under both — that is their membership.
+// Without committee data it falls back to Chair → lead director → directors.
 function buildBODTree(sorted: OrgNode[]): ExecTreeNode[] {
   if (!sorted.length) return []
 
-  const chairmen = sorted.filter(p => (p.layer ?? 99) === 0)
-  const others   = sorted
-    .filter(p => (p.layer ?? 99) !== 0)
-    .sort((a, b) => {
-      const la = a.layer ?? 99; const lb = b.layer ?? 99
-      return la !== lb ? la - lb : a.label.localeCompare(b.label)
+  const chairs = sorted.filter(p => (p.layer ?? 99) === 0)
+  const isLead = (p: OrgNode) =>
+    ['lead_director', 'vice_chair'].includes(String(p.metadata?.board_sub_role ?? ''))
+  const leads  = sorted.filter(p => (p.layer ?? 99) !== 0 && isLead(p))
+  const others = sorted.filter(p => (p.layer ?? 99) !== 0 && !isLead(p))
+
+  // Committees, keyed by their name as written.
+  const groups = new Map<string, { chair: OrgNode | null; members: OrgNode[] }>()
+  for (const p of sorted) {
+    for (const c of committeesOf(p)) {
+      const g = groups.get(c.name) ?? { chair: null, members: [] }
+      if (c.role === 'Chair' && !g.chair) g.chair = p
+      else g.members.push(p)
+      groups.set(c.name, g)
+    }
+  }
+  const committeeNodes: ExecTreeNode[] = [...groups.entries()]
+    .sort(([a], [b]) => committeeRank(a) - committeeRank(b) || a.localeCompare(b))
+    .map(([name, g]) => {
+      const people = [...(g.chair ? [g.chair] : []), ...g.members.sort((x, y) => x.label.localeCompare(y.label))]
+      const header = {
+        node_id: `committee__${name}`, node_type: 'committee', label: name,
+        layer: 1, sector: '', color: '', is_ghost: false, expanded: false, has_more: false,
+        metadata: {
+          is_group: true,
+          designation: `${g.chair ? `Chaired by ${g.chair.label} · ` : ''}${people.length} member${people.length === 1 ? '' : 's'}`,
+        },
+      } as unknown as OrgNode
+      return { person: header, reports: people.map((p, i) => leaf(p, i === people.length - 1)), isLast: false }
     })
 
-  if (!chairmen.length) {
-    // No Chairman detected — show all directors flat
-    return sorted.map((p, i) => ({ person: p, reports: [], isLast: i === sorted.length - 1 }))
-  }
+  const onCommittee = new Set(sorted.filter(p => committeesOf(p).length).map(p => p.node_id))
+  const unassigned = committeeNodes.length ? others.filter(p => !onCommittee.has(p.node_id)) : others
 
-  // All other directors as flat direct reports of the Chairman
-  const reportNodes = others.map((p, i) => ({
-    person: p, reports: [], isLast: i === others.length - 1,
-  }))
+  const under: ExecTreeNode[] = [
+    ...leads.map(p => leaf(p)),
+    ...committeeNodes,
+    ...unassigned.map(p => leaf(p)),
+  ]
+  under.forEach((n, i) => { n.isLast = i === under.length - 1 })
 
-  // When there are multiple co-chairs (rare), first gets all reports
-  return chairmen.map((p, i) => ({
-    person: p,
-    reports: i === 0 ? reportNodes : [],
-    isLast: i === chairmen.length - 1,
-  }))
+  if (!chairs.length) return under
+  // Co-chairs (rare): the first carries the structure.
+  return chairs.map((p, i) => ({ person: p, reports: i === 0 ? under : [], isLast: i === chairs.length - 1 }))
 }
 
 // Main tree builder.
@@ -319,6 +367,7 @@ const PersonRow: React.FC<{
   const isSkipped   = node.isSkippedLevel === true
 
   const indent = depth * 20
+  const isGroup = Boolean(p.metadata?.is_group)
 
   // Dashed gradient for inferred reporting lines
   const dashedV = `repeating-linear-gradient(to bottom, ${color}45, ${color}45 4px, transparent 4px, transparent 8px)`
@@ -326,7 +375,34 @@ const PersonRow: React.FC<{
 
   return (
     <>
+      {/* ── A committee heading (Board panel) ─────────────────── */}
+      {isGroup && (
+        <div
+          onClick={() => hasReports && onToggle(p.node_id)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            paddingLeft: 12 + indent, paddingRight: 14, paddingTop: 7, paddingBottom: 6,
+            borderBottom: '1px solid #f0f4f7', background: '#f7fafc',
+            cursor: hasReports ? 'pointer' : 'default',
+          }}
+        >
+          <span style={{ width: 14, fontSize: 9, color: color + 'aa', textAlign: 'center' }}>
+            {hasReports ? (isCollapsed ? '▶' : '▼') : '·'}
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+            color: '#00204d', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {p.label}
+          </span>
+          <span style={{ fontSize: 9, color: '#627184', whiteSpace: 'nowrap', overflow: 'hidden',
+                         textOverflow: 'ellipsis', marginLeft: 'auto' }}>
+            {String(p.metadata?.designation ?? '')}
+          </span>
+        </div>
+      )}
       {/* ── This person's row ────────────────────────────────── */}
+      {!isGroup && (
       <div
         style={{
           display: 'flex', alignItems: 'center',
@@ -543,6 +619,7 @@ const PersonRow: React.FC<{
         )}
       </div>
 
+      )}
       {/* ── Reportees (recursive) ─────────────────────────────── */}
       {hasReports && !isCollapsed && node.reports.map((child, ci) => (
         <PersonRow

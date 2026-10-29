@@ -2470,6 +2470,8 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     if task_ran and not (need_board or need_execs):
         result = {**primary, "_source": "web", "_harvest": diag}
         _strip_internal_fields(result)
+        result["board"] = result["board"][:_MAX_BOARD]
+        result["executives"] = result["executives"][:_MAX_EXECS]
         logger.info("Leadership for '%s' from Parallel: %d board, %d executives",
                     company_name, len(result["board"]), len(result["executives"]))
         _cache_leadership(cache_key, result)
@@ -2487,15 +2489,35 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
                         "board": len(scraped.get("board", []) or []),
                         "executives": len(scraped.get("executives", []) or []),
                         **({"harvest": scraped["_harvest"]} if scraped.get("_harvest") else {})}
+    # Scraped names Parallel didn't list are confirmed as CURRENT before they
+    # are added: a site's stale pages name people who have left (nvidia.com
+    # still has board bios for Rob Burgess and Mark Perry).
+    additions = {}
+    for k, needed in (("board", need_board), ("executives", need_execs)):
+        if not needed:
+            continue
+        known = set()
+        for p in primary[k]:
+            known |= _name_aliases(p.get("name", ""))
+        fresh = [p for p in (scraped.get(k, []) or [])
+                 if not (_name_aliases(p.get("name", "")) & known)]
+        if fresh and task_ran:
+            keep = _parallel_confirm_current(company_name, domain, location, k,
+                                             [p.get("name", "") for p in fresh])
+            dropped = [p.get("name", "") for p in fresh if p.get("name", "") not in keep]
+            fresh = [p for p in fresh if p.get("name", "") in keep]
+            diag.setdefault("confirm", {})[k] = {"kept": len(fresh), "dropped": dropped}
+        additions[k] = fresh
     filled = {
-        "board": primary["board"] + (scraped.get("board", []) or [] if need_board else []),
-        "executives": primary["executives"]
-                      + (scraped.get("executives", []) or [] if need_execs else []),
+        "board": primary["board"] + additions.get("board", []),
+        "executives": primary["executives"] + additions.get("executives", []),
         "senior_leadership": [],
     }
     result = _merge_leadership([filled]) if (filled["board"] or filled["executives"]) else filled
     result = _promote_operating_directors(result)
     _strip_internal_fields(result)
+    result["board"] = (result.get("board") or [])[:_MAX_BOARD]
+    result["executives"] = (result.get("executives") or [])[:_MAX_EXECS]
     result["_harvest"] = diag
     if result.get("board") or result.get("executives"):
         result["_source"] = "web"
@@ -2509,13 +2531,90 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
 _PARALLEL_TASK_TIMEOUT_S = int(os.environ.get("ORGANOGRAM_PARALLEL_TASK_TIMEOUT_S", "300"))
 
 
+def _parallel_confirm_current(company_name: str, domain: str, location: str,
+                              section: str, names: list[str]) -> set[str]:
+    """Which of *names* are CURRENT board members / executives — one Task run.
+
+    Fails closed: if the check can't run or errors, nothing is confirmed, so a
+    stale page can't slip a former director onto the chart.
+    """
+    names = [n for n in names if n][:30]
+    if not names or not os.environ.get("PARALLEL_API_KEY"):
+        return set()
+    try:
+        import httpx
+        import parallel_client
+        from usage_tracker import record_cost
+        processor = parallel_client.task_processor()
+        ident = ", ".join(x for x in (domain, location) if x)
+        org = f"{company_name} ({ident})" if ident else company_name
+        what = ("members of the Board of Directors (or governing board)" if section == "board"
+                else "members of the executive leadership team")
+        prompt = (f"{org}: of these people, which are CURRENT {what}? "
+                  f"{'; '.join(names)}. Return only those who currently hold the role, using "
+                  f"their name exactly as given. Leave out anyone who has left, retired or "
+                  f"whose role you cannot confirm.")
+        schema = {"type": "object", "additionalProperties": False, "required": ["current"],
+                  "properties": {"current": {"type": "array", "items": {"type": "string"}}}}
+        r = httpx.post(parallel_client.TASKS_URL, headers={"x-api-key": parallel_client.api_key()},
+                       timeout=60, json={"input": prompt, "processor": processor,
+                                         "task_spec": {"output_schema": {"type": "json",
+                                                                         "json_schema": schema}}})
+        if not r.is_success:
+            return set()
+        record_cost("parallel", f"parallel-task-{processor}",
+                    parallel_client.TASK_COST.get(processor, parallel_client.TASK_COST["base"]))
+        res = httpx.get(f"{parallel_client.TASKS_URL}/{r.json().get('run_id', '')}/result",
+                        headers={"x-api-key": parallel_client.api_key()},
+                        params={"timeout": _PARALLEL_TASK_TIMEOUT_S},
+                        timeout=_PARALLEL_TASK_TIMEOUT_S + 20)
+        content = (res.json().get("output", {}) or {}).get("content") or {}
+        if isinstance(content, str):
+            content = _loads_lenient(content) or {}
+        said = content.get("current") or []
+        # Map answers back to the names we asked about (tolerating spelling).
+        keep = set()
+        for n in names:
+            al = _name_aliases(n)
+            if any(al & _name_aliases(x) for x in said):
+                keep.add(n)
+        return keep
+    except Exception as exc:
+        logger.warning("Current-role check failed for '%s': %s", company_name, exc)
+        return set()
+
+
 def _people_schema(key: str) -> dict:
-    # Three properties per task: Parallel warns the lite/base processors off
-    # schemas with more than five, and one combined task tripped that.
+    # Few properties per task: Parallel warns the lite/base processors off
+    # schemas with more than five, and one combined task tripped that. The
+    # board adds committees as plain strings ("Audit Committee (Chair)") rather
+    # than nested objects, which would add two more.
+    item = {"name": {"type": "string"}, "title": {"type": "string"}}
+    required = ["name", "title"]
+    if key == "board":
+        item["committees"] = {"type": "array", "items": {"type": "string"}}
+        required.append("committees")
     return {"type": "object", "additionalProperties": False, "required": [key],
             "properties": {key: {"type": "array", "items": {
-                "type": "object", "additionalProperties": False, "required": ["name", "title"],
-                "properties": {"name": {"type": "string"}, "title": {"type": "string"}}}}}}
+                "type": "object", "additionalProperties": False, "required": required,
+                "properties": item}}}}
+
+
+def _parse_committees(raw) -> list[dict]:
+    """["Audit Committee (Chair)", "Compensation Committee"] → [{name, role}]."""
+    out = []
+    for c in raw or []:
+        text = str(c or "").strip()
+        if not text:
+            continue
+        m = re.match(r"^(.*?)\s*[\(\[]\s*(chair(?:man|woman|person)?|member|co-?chair)\s*[\)\]]\s*$",
+                     text, re.IGNORECASE)
+        name, role = (m.group(1), m.group(2)) if m else (text, "Member")
+        role = "Chair" if "chair" in role.lower() else "Member"
+        name = re.sub(r"\s+", " ", name).strip(" -–,")
+        if name:
+            out.append({"name": name, "role": role})
+    return out
 
 
 def _parallel_task_leadership(company_name: str, domain: str = "", location: str = "",
@@ -2545,8 +2644,10 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
              "exact title as the organisation publishes it.")
     tasks = {
         "board": f"{org}: list every current member of the Board of Directors (or Board of "
-                 f"Trustees / governing board), with their board role (Chair, Lead Director, "
-                 f"Director …).{rules}",
+                 f"Trustees / governing board), with their board role (Chair, Vice Chair, Lead "
+                 f"Independent Director, Director …) and every board committee they sit on, "
+                 f"each written as 'Committee name (Chair)' or 'Committee name (Member)'. "
+                 f"Use the board / governance page and the latest proxy statement.{rules}",
         # Spelled out, because "who reports to the CEO" was read narrowly and
         # inconsistently: NVIDIA's CTO and Chief Scientist came back in 1 of 3
         # runs with that wording, and in 3 of 3 with this one.
@@ -2569,7 +2670,8 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                      f"Check the organisation's board / governance page, its latest proxy "
                      f"statement or annual report, and list every OTHER current member of the "
                      f"Board of Directors (or governing board) who is not in that list, with "
-                     f"their board role. Return an empty list if none are missing.{rules}",
+                     f"their board role and committees ('Committee name (Chair)' / 'Committee "
+                     f"name (Member)'). Return an empty list if none are missing.{rules}",
             "executives": f"{org}: these current executive leaders are already known: "
                           f"{have['executives']}. Check the organisation's leadership / management "
                           f"team page, its latest annual report's list of executive officers and "
@@ -2582,8 +2684,8 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
     tasks = {k: v for k, v in tasks.items() if k in sections}
     import parallel_client
     headers = {"x-api-key": api_key}
-    processor = parallel_client.task_processor()        # never above "lite"
-    cost = parallel_client.TASK_COST_LITE
+    processor = parallel_client.task_processor()        # never above "base"
+    cost = parallel_client.TASK_COST.get(processor, parallel_client.TASK_COST["base"])
 
     def run(key: str) -> tuple[str, list, list, str]:
         try:
@@ -2619,7 +2721,10 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                                "seconds": round(_t.time() - started), "sources": [], "errors": {}}}
     for key, people, sources, err in results:
         out[key] = [{"name": str(p["name"]).strip(), "title": str(p.get("title", "")).strip(),
-                     "confidence": "HIGH"} for p in people]
+                     "confidence": "HIGH",
+                     **({"committees": _parse_committees(p.get("committees"))}
+                        if key == "board" else {})}
+                    for p in people]
         out["_parallel"]["sources"] += sources[:15]
         if err:
             out["_parallel"]["errors"][key] = err
@@ -2748,8 +2853,12 @@ _THIN = 3     # fewer than this many board members / executives is "not found"
 # scraping run, and everything they find is added. Boards of 8-14 and
 # executive teams of 8-15 are typical for listed companies; a smaller
 # organisation simply spends one more Lite task confirming nobody is missing.
-_MIN_BOARD = int(os.environ.get("ORGANOGRAM_MIN_BOARD", "8"))
-_MIN_EXECS = int(os.environ.get("ORGANOGRAM_MIN_EXECS", "8"))
+_MIN_BOARD = int(os.environ.get("ORGANOGRAM_MIN_BOARD", "15"))
+_MIN_EXECS = int(os.environ.get("ORGANOGRAM_MIN_EXECS", "20"))
+# Upper bounds, so a large organisation's whole management layer isn't read
+# as its executive team.
+_MAX_BOARD = int(os.environ.get("ORGANOGRAM_MAX_BOARD", "20"))
+_MAX_EXECS = int(os.environ.get("ORGANOGRAM_MAX_EXECS", "25"))
 
 
 def _with_parallel_backup(result: dict, company_name: str, domain: str = "",
