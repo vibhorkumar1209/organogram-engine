@@ -211,69 +211,146 @@ for title, dept in [("Co-CEO of Asia Pacific and CEO of Asia Oceania", ""),
     got = S._exec_department(title)
     ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
 
-# ── Completeness: always ask who is missing; scrape only below the bar ──────
-# Parallel's first NVIDIA board had 11 directors — above the bar — but left out
-# Persis Drell and Michael McCaffery. A count can't tell complete from not.
-import importlib
+# ── One concurrent round: two Parallel passes + scraping, union ────────────
+# The sequential pipeline (list → who's missing → scraping → current-role
+# check) took ~11.5 minutes on Accenture. Now everything runs at once inside a
+# budget; scraped names count only when a roster page names them.
+import importlib, time as _time
 F2 = importlib.reload(F)
 os.environ["PARALLEL_API_KEY"] = "test"
-passes, scrapes = [], []
-BOARD11 = [{"name": n, "title": "Director"} for n in (
+calls = []
+HI = {"_conf": "high", "_evidenced": True}
+BOARD11 = [{"name": n, "title": "Director", **HI} for n in (
     "Tench Coxe", "John Dabiri", "Jensen Huang", "Dawn Hudson", "Harvey Jones", "Melissa Lora",
     "Stephen Neal", "Brooke Seawell", "Aarti Shah", "Mark Stevens", "Suzanne Nora Johnson")]
 
 
-def _fake_tasks(company, domain="", location="", site_url="", known=None,
-                sections=("board", "executives")):
-    passes.append(("check" if known is not None else "list", tuple(sections)))
-    if known is None:
+def _fake_tasks(company, domain="", location="", site_url="", variant="pages",
+                sections=("board", "executives"), processor=""):
+    calls.append(variant)
+    if processor == "base":
         return {"board": list(BOARD11),
-                "executives": [{"name": "Jensen Huang", "title": "President and CEO"},
-                               {"name": "Colette Kress", "title": "CFO"}],
+                "executives": [{"name": "Jensen Huang", "title": "President and CEO", **HI},
+                               {"name": "Colette Kress", "title": "CFO", **HI}],
                 "_parallel": {"ran": True}}
-    return {"board": [{"name": "Persis Drell", "title": "Director"},
-                      {"name": "Tench Coxe", "title": "Director"}],          # already known
-            "executives": [{"name": "Debora Shoquist", "title": "EVP, Operations"}],
+    return {"board": [{"name": "Persis Drell", "title": "Director", **HI},
+                      {"name": "Tench Coxe", "title": "Director", **HI}],          # already listed
+            "executives": [{"name": "Debora Shoquist", "title": "EVP, Operations", **HI},
+                           {"name": "Colette M. Kress", "title": "EVP and CFO", **HI}],  # same person
             "_parallel": {"ran": True}}
 
 
-def _fake_scrape(company, domain="", site_url="", location="", search_backup=True):
-    scrapes.append(True)
-    return {"board": [], "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"}]}
-
-
-confirm_asked = []
-
-
-def _fake_confirm(company, domain, location, section, names):
-    confirm_asked.append((section, tuple(names)))
-    return {n for n in names if n != "Rob Burgess"}        # a former director
+ROSTER = ("[Page: https://nvidia.com/leadership] Jensen Huang, President and CEO. Colette Kress, "
+          "CFO. Michael Kagan, Chief Technology Officer. Debora Shoquist, EVP Operations.")
+STALE_BIO = "[Page: https://nvidia.com/board/rob-burgess] Rob Burgess has served on the board."
 
 
 def _fake_scrape(company, domain="", site_url="", location="", search_backup=True):
-    scrapes.append(True)
+    calls.append("scrape")
     return {"board": [{"name": "Rob Burgess", "title": "Director"}],
-            "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"}]}
+            "executives": [{"name": "Michael Kagan", "title": "Chief Technology Officer"},
+                           {"name": "Jensen Huang", "title": "CEO"},
+                           {"name": "Colette Kress", "title": "CFO"},
+                           {"name": "Debora Shoquist", "title": "EVP"}],
+            "_blocks": [ROSTER, STALE_BIO]}
 
 
 F2._parallel_task_leadership = _fake_tasks
 F2._scrape_leadership = _fake_scrape
-F2._parallel_confirm_current = _fake_confirm
 F2._LEADERSHIP_CACHE.clear()
+t0 = _time.monotonic()
 res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
 board = [p["name"] for p in res["board"]]
 execs = [p["name"] for p in res["executives"]]
-ok(passes == [("list", ("board", "executives")), ("check", ("board", "executives"))],
-   f"completeness: the who-is-missing check runs for both sections, even with 11 directors ({passes})")
+ok(sorted(calls) == ["filings", "pages", "pages", "pages", "scrape"],
+   f"round: the base run, three fast runs and scraping run at once ({calls})")
 ok("Persis Drell" in board and board.count("Tench Coxe") == 1 and len(board) == 12,
-   f"completeness: the missing director is added, a known one not duplicated ({len(board)})")
-ok(scrapes == [True] and "Michael Kagan" in execs and "Debora Shoquist" in execs,
-   f"completeness: executives still below the bar are scraped, confirmed and added ({execs})")
-ok("Rob Burgess" not in board and ("board", ("Rob Burgess",)) in confirm_asked,
-   "completeness: a scraped director the current-role check rejects is not added")
-ok(all(len(names) for _, names in confirm_asked) and
-   not any("Tench Coxe" in names for _, names in confirm_asked),
-   "completeness: only names Parallel hadn't listed are sent for confirmation")
+   f"union: a director the base run missed, agreed by the fast runs, is added once ({len(board)})")
+ok(execs.count("Colette Kress") + execs.count("Colette M. Kress") == 1 and "Debora Shoquist" in execs,
+   f"union: the same person under two spellings is one entry ({execs})")
+ok("Michael Kagan" in execs, "scraping: a name on a roster page is added")
+ok("Rob Burgess" not in board,
+   "scraping: a name found only on its own (stale) bio page is not added")
+
+# Voting, on the real NVIDIA pattern: stale directors come back medium-
+# confidence without a supporting excerpt, in one run.
+def _vote_tasks(company, domain="", location="", site_url="", variant="pages",
+                sections=("board", "executives"), processor=""):
+    MED = {"_conf": "medium", "_evidenced": False}
+    if processor == "base":
+        return {"board": [], "executives": [], "_parallel": {"ran": False}}   # base is late
+    run = len([c for c in calls if c == "vote"])
+    calls.append("vote")
+    board = [{"name": "Tench Coxe", "title": "Director", **HI},
+             {"name": "Melissa Lora", "title": "Director", **(HI if run == 1 else MED)},
+             {"name": "Kevin Allen", "title": "Director", **MED}]          # all 3 runs, never high
+    if run == 2:
+        board += [{"name": "Persis Drell", "title": "Director", **MED},      # stale, once
+                  {"name": "Ellen Ochoa", "title": "Director", **MED}]
+    if run in (0, 2):
+        board.append({"name": "Ellen Ochoa", "title": "Director",
+                      **({"_conf": "medium", "_evidenced": True} if run == 0 else MED)})
+    return {"board": board, "executives": [], "_parallel": {"ran": True}}
+
+
+calls.clear()
+F2._parallel_task_leadership = _vote_tasks
+F2._scrape_leadership = lambda *a, **k: {}
+F2._LEADERSHIP_CACHE.clear()
+res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
+vb = [p["name"] for p in res["board"]]
+ok("Tench Coxe" in vb and "Melissa Lora" in vb,
+   f"vote: high-confidence, evidenced names are kept ({vb})")
+ok("Kevin Allen" in vb, "vote: a name every run lists is kept even without high confidence")
+ok("Persis Drell" not in vb and "Ellen Ochoa" not in vb,
+   "vote: a stale director (medium, in 1-2 of 3 runs) is rejected")
+
+# With the base run in, a fast-only name needs two fast runs AND evidence.
+def _authority_tasks(company, domain="", location="", site_url="", variant="pages",
+                     sections=("board", "executives"), processor=""):
+    MED = {"_conf": "medium", "_evidenced": False}
+    if processor == "base":
+        return {"board": [{"name": "Harvey Jones", "title": "Director", **MED},
+                          {"name": "Stephen Neal", "title": "Director", **MED}],
+                "executives": [], "_parallel": {"ran": True}}
+    run = len([c for c in calls if c == "auth"])
+    calls.append("auth")
+    board = [{"name": "Robert Burgess", "title": "Director", **(HI if run == 0 else MED)}]
+    if run in (0, 1):
+        board.append({"name": "Aarti Shah", "title": "Director", **HI})
+    return {"board": board, "executives": [], "_parallel": {"ran": True}}
+
+
+calls.clear()
+F2._parallel_task_leadership = _authority_tasks
+F2._LEADERSHIP_CACHE.clear()
+ab = [p["name"] for p in F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="X")["board"]]
+ok("Harvey Jones" in ab and "Stephen Neal" in ab,
+   f"authority: everything the base run lists is kept, whatever its confidence ({ab})")
+ok("Aarti Shah" in ab, "authority: a fast-only name evidenced in 2 runs is added")
+ok("Robert Burgess" not in ab,
+   "authority: a name the base run left out and only one fast run is sure of is rejected")
+F2._parallel_task_leadership = _fake_tasks
+
+# A source slower than the budget is not waited for.
+calls.clear()
+
+
+def _slow_scrape(*a, **k):
+    _time.sleep(3)
+    return {"board": [{"name": "Late Person", "title": "Director"}], "executives": [],
+            "_blocks": []}
+
+
+F2._scrape_leadership = _slow_scrape
+F2._RESEARCH_BUDGET_S = 1
+F2._LEADERSHIP_CACHE.clear()
+t0 = _time.monotonic()
+res = F2.llm_fetch_leadership("NVIDIA", "nvidia.com", location="Santa Clara")
+took = _time.monotonic() - t0
+ok(took < 2.5 and "scrape" in res["_harvest"]["late"] and
+   not any(p["name"] == "Late Person" for p in res["board"]),
+   f"budget: a late source is skipped, not waited for ({took:.1f}s, late={res['_harvest']['late']})")
 os.environ["PARALLEL_API_KEY"] = ""
 
 # ── Board levels: committee chairs and the lead director sit under the Chair ─

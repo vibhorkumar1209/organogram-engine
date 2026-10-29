@@ -34,19 +34,30 @@ TASK_COST = {
     "lite": float(os.environ.get("PARALLEL_TASK_LITE_COST_USD", "0.005")),
     "base": float(os.environ.get("PARALLEL_TASK_COST_USD", "0.010")),
 }
+# "-fast" variants cost the same as their standard tier (Parallel pricing).
+TASK_COST["lite-fast"] = TASK_COST["lite"]
+TASK_COST["base-fast"] = TASK_COST["base"]
 TASK_COST_LITE = TASK_COST["lite"]
 
-_ALLOWED_PROCESSORS = ("lite", "base")   # nothing above the base price
+# Nothing above the base price. base-fast is the base tier at 15-50s instead
+# of minutes — the same $10 per 1,000 — and is the default.
+_ALLOWED_PROCESSORS = ("lite", "lite-fast", "base", "base-fast")
 _ALLOWED_SEARCH_MODES = ("turbo", "advanced")
 
 
-def task_processor() -> str:
-    """The Task API processor to use — never above the base price ceiling."""
-    asked = os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "base").strip().lower() or "base"
+def task_processor(requested: str = "") -> str:
+    """The Task API processor to use — never above the base price ceiling.
+
+    requested: a specific tier the caller wants (e.g. "base" for the
+    authoritative run); otherwise ORGANOGRAM_PARALLEL_PROCESSOR, default
+    base-fast. Either way it is clamped to the ceiling.
+    """
+    asked = ((requested or os.environ.get("ORGANOGRAM_PARALLEL_PROCESSOR", "base-fast"))
+             .strip().lower() or "base-fast")
     if asked not in _ALLOWED_PROCESSORS:
         logger.warning("ORGANOGRAM_PARALLEL_PROCESSOR=%r is above the base cost ceiling; "
-                       "using 'base'", asked)
-        return "base"
+                       "using 'base-fast'", asked)
+        return "base-fast"
     return asked
 
 

@@ -44,8 +44,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger(__name__)
 
 _MAX_PEOPLE = int(os.environ.get("ORGANOGRAM_LINKEDIN_MAX_PEOPLE", "80"))
-_DEADLINE_S = int(os.environ.get("ORGANOGRAM_LINKEDIN_DEADLINE_S", "240"))
-_WORKERS = int(os.environ.get("ORGANOGRAM_LINKEDIN_WORKERS", "8"))
+_DEADLINE_S = int(os.environ.get("ORGANOGRAM_LINKEDIN_DEADLINE_S", "75"))
+_WORKERS = int(os.environ.get("ORGANOGRAM_LINKEDIN_WORKERS", "16"))
 
 NOT_FOUND = "Not Found"
 _LEVELS = {"High": 3, "Medium": 2, "Low": 1}
@@ -609,6 +609,44 @@ def not_found(person: dict) -> dict:
             "matched_title": "", "source": "linkedin_search"}
 
 
+# Searches started early (while the leadership research is still running),
+# keyed by (company, person). resolve_people reuses them instead of searching
+# again, which takes LinkedIn matching off the end of the chart's timeline.
+_PREFETCH: dict[tuple[str, str], tuple[float, object]] = {}
+_PREFETCH_TTL_S = 3600
+_PREFETCH_POOL = None
+
+
+def _pkey(company: str, name: str) -> tuple[str, str]:
+    parts = _name_parts(name)
+    return (str(company or "").strip().lower(), " ".join(parts[0]) if parts else name.lower())
+
+
+def prefetch(people: list[dict], company: str, domain: str = "", hq: str = "") -> int:
+    """Start LinkedIn searches now; resolve_people picks the answers up later."""
+    global _PREFETCH_POOL
+    api_key = os.environ.get("PARALLEL_API_KEY", "")
+    if not api_key or not people:
+        return 0
+    if _PREFETCH_POOL is None:
+        _PREFETCH_POOL = ThreadPoolExecutor(max_workers=_WORKERS)
+    now = time.monotonic()
+    for k in [k for k, (ts, _) in _PREFETCH.items() if now - ts > _PREFETCH_TTL_S]:
+        _PREFETCH.pop(k, None)
+    started = 0
+    for p in people[:_MAX_PEOPLE]:
+        key = _pkey(company, p.get("name", ""))
+        if key in _PREFETCH:
+            continue
+        ctx = contextvars.copy_context()
+        _PREFETCH[key] = (now, _PREFETCH_POOL.submit(
+            ctx.run, resolve_person, p, company, domain, api_key, hq))
+        started += 1
+    if started:
+        logger.info("LinkedIn prefetch for '%s': %d searches started", company, started)
+    return started
+
+
 def resolve_people(people: list[dict], company: str, domain: str = "",
                    hq: str = "") -> dict[str, dict]:
     """
@@ -628,22 +666,30 @@ def resolve_people(people: list[dict], company: str, domain: str = "",
     # Worker threads don't inherit context, and the usage tracker lives in a
     # contextvar — run each search inside a copy so its cost is counted.
     ctx = contextvars.copy_context()
-    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {
-            pool.submit(ctx.copy().run, resolve_person, p, company, domain, api_key, hq): p
-            for p in people
-        }
-        for fut in as_completed(futures):
+    from concurrent.futures import TimeoutError as _Timeout
+    pool = ThreadPoolExecutor(max_workers=_WORKERS)
+    futures = {}
+    for p in people:
+        early = _PREFETCH.get(_pkey(company, p.get("name", "")))
+        if early is not None:
+            futures[early[1]] = p          # already searching (or done) — reuse it
+        else:
+            futures[pool.submit(ctx.copy().run, resolve_person, p, company, domain,
+                                api_key, hq)] = p
+    try:
+        # A real wall-clock deadline: as_completed's timeout stops the wait,
+        # and the pool is not joined, so one slow search can't hold the chart.
+        for fut in as_completed(futures, timeout=max(1.0, deadline - time.monotonic())):
             p = futures[fut]
-            if time.monotonic() > deadline:
-                logger.warning("LinkedIn resolution deadline hit for '%s'", company)
-                for f in futures:
-                    f.cancel()
-                break
             try:
                 out[p["key"]] = fut.result()
             except Exception as exc:
                 logger.warning("LinkedIn resolution error for '%s': %s", p.get("name"), exc)
+    except _Timeout:
+        logger.warning("LinkedIn resolution deadline (%ds) hit for '%s': %d of %d done",
+                       _DEADLINE_S, company, len(out), len(people))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # One profile cannot belong to two different people. Keep it for the
     # stronger match and mark the other Not Found.

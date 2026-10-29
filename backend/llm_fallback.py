@@ -2054,6 +2054,8 @@ def _gemini_fetch_leadership(
     _strip_internal_fields(result)
     # Diagnostics for /debug-leadership — consumers read board/executives only.
     result["_harvest"] = harvest_info
+    # The page texts, so the caller can tell roster pages from single bios.
+    result["_blocks"] = list(harvester.blocks)
     logger.info(
         "Gemini Phase B merged for '%s': %d board, %d execs (%d senior)",
         company_name,
@@ -2095,6 +2097,7 @@ def _site_only_leadership(company_name: str, domain: str, site_url: str = "") ->
     result = _resolve_stale(_merge_leadership(partials), harvester.canonical_text())
     _strip_internal_fields(result)
     result["_harvest"] = info
+    result["_blocks"] = list(harvester.blocks)
     return result
 
 
@@ -2394,16 +2397,21 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     """
     Board of Directors and Executive Management for an organisation.
 
-    1. Parallel Task API (primary): two research tasks run side by side — the
-       governing board, and the CEO (or head) with every senior leader who
-       reports to them. Structured output, each backed by cited sources.
-    2. Webpage scraping (fallback): the organisation's own leadership pages,
-       Gemini when funded, Claude, Wikipedia. Run ONLY for a section Parallel
-       left thin (fewer than three people), and only that section is filled
-       from it — so an adequate Parallel answer is never padded with scraping.
+    Everything runs in ONE concurrent round, bounded by _RESEARCH_BUDGET_S:
+      - Parallel Task API, two independent passes, each as a board task and an
+        executive task (four runs): one built from the organisation's own
+        leadership / governance pages, one from its filings (proxy statement,
+        annual report's executive officers). Their union is the list; the
+        redundancy is what catches a name one pass misses.
+      - Webpage scraping of the organisation's own pages, at the same time.
+        Its names are added only when Parallel didn't list them AND they
+        appear on a roster page (a page naming several leaders) — a lone bio
+        page can be years stale (nvidia.com still has bios for directors who
+        left).
 
-    Hierarchy (who leads, levels, departments) is built downstream by the
-    engine, not here. Results are cached in-process.
+    This replaced a sequential pipeline (list → "who is missing?" → scraping →
+    current-role check) that took ~11.5 minutes on Accenture for the same
+    answer. Hierarchy is built downstream by the engine. Results are cached.
 
     Returns {"board": [...], "executives": [...], "_source": "web"|"none",
              "_harvest": {...diagnostics...}}.
@@ -2419,169 +2427,257 @@ def llm_fetch_leadership(company_name: str, domain: str = "", site_url: str = ""
     if cache_key in _LEADERSHIP_CACHE:
         return _LEADERSHIP_CACHE[cache_key]
 
-    # ── 1. Parallel Task API ──────────────────────────────────────────────────
-    primary: dict = {}
-    task_ran = False
-    if os.environ.get("PARALLEL_API_KEY"):
-        primary = _parallel_task_leadership(company_name, domain, location, site_url)
-        task_ran = bool(primary.get("_parallel", {}).get("ran"))
-    primary = _promote_operating_directors(
-        {"board": primary.get("board", []), "executives": primary.get("executives", []),
-         "senior_leadership": [], "_parallel": primary.get("_parallel", {})})
-    diag = {"primary": "parallel_task" if task_ran else "scraping",
-            "parallel": primary.pop("_parallel", {}),
-            "parallel_board": len(primary["board"]),
-            "parallel_executives": len(primary["executives"]),
-            "bar": {"board": _MIN_BOARD, "executives": _MIN_EXECS}}
+    import contextvars
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor, wait as _wait
 
-    # ── 1b. Completeness pass: who is missing? ───────────────────────────────
-    # Run for BOTH sections, whatever the count. A count can't tell a complete
-    # list from an incomplete one: Parallel's first NVIDIA board had 11
-    # directors — above any sensible bar — yet left out Persis Drell and
-    # Michael McCaffery, whom the previous day's run had found. A second Lite
-    # task is given the names already found and asked only for the rest, from
-    # the sources that list everyone (board page, proxy statement, annual
-    # report's executive officers). Off via ORGANOGRAM_COMPLETENESS_PASS=0.
-    short = (("board", "executives")
-             if os.environ.get("ORGANOGRAM_COMPLETENESS_PASS", "1") != "0"
-             else tuple(k for k, bar in (("board", _MIN_BOARD), ("executives", _MIN_EXECS))
-                        if len(primary[k]) < bar))
-    if task_ran and short:
-        extra = _parallel_task_leadership(company_name, domain, location, site_url,
-                                          known=primary, sections=short)
-        added = {k: 0 for k in short}
-        for k in short:
-            names = set()
-            for p in primary[k]:
-                names |= _name_aliases(p.get("name", ""))
-            for p in extra.get(k, []) or []:
-                if not (_name_aliases(p.get("name", "")) & names):
-                    primary[k].append(p)
-                    names |= _name_aliases(p.get("name", ""))
-                    added[k] += 1
-        primary = _promote_operating_directors(primary)
-        diag["completeness_pass"] = {"for": list(short), "added": added,
-                                     "errors": (extra.get("_parallel") or {}).get("errors", {})}
-        logger.info("Completeness pass for '%s': %s", company_name, added)
+    started = _t.monotonic()
+    have_parallel = bool(os.environ.get("PARALLEL_API_KEY"))
+    jobs = {}
+    pool = ThreadPoolExecutor(max_workers=len(_RESEARCH_RUNS) + 1)
+    try:
+        if have_parallel:
+            for run_id, variant, proc in _RESEARCH_RUNS:
+                jobs[run_id] = pool.submit(
+                    contextvars.copy_context().run, _parallel_task_leadership,
+                    company_name, domain, location, site_url, variant=variant, processor=proc)
+        jobs["scrape"] = pool.submit(
+            contextvars.copy_context().run, _scrape_leadership,
+            company_name, domain, site_url, location, not have_parallel)
+        deadline = started + _RESEARCH_BUDGET_S
+        prefetched = False
+        while True:
+            pending = [f for f in jobs.values() if not f.done()]
+            if not pending or _t.monotonic() >= deadline:
+                break
+            # As soon as the fast runs are in, start LinkedIn matching on the
+            # names they agree on — it then runs while the base run finishes,
+            # instead of after the whole search.
+            if not prefetched and have_parallel and all(
+                    jobs[r].done() for r in _FAST_RUNS if r in jobs):
+                prefetched = True
+                _prefetch_linkedin(company_name, domain, location,
+                                   {r: jobs[r] for r in _FAST_RUNS if r in jobs})
+            _wait(pending, timeout=min(2.0, max(0.1, deadline - _t.monotonic())),
+                  return_when="FIRST_COMPLETED")
+    finally:
+        # Don't wait for stragglers: whatever finished inside the budget is
+        # the answer. A late thread finishes in the background and is ignored.
+        pool.shutdown(wait=False, cancel_futures=True)
 
-    need_board = len(primary["board"]) < _MIN_BOARD
-    need_execs = len(primary["executives"]) < _MIN_EXECS
+    def _got(name: str) -> dict:
+        f = jobs.get(name)
+        if f is None or not f.done() or f.cancelled():
+            return {}
+        try:
+            return f.result() or {}
+        except Exception as exc:
+            logger.warning("Leadership source '%s' failed for '%s': %s", name, company_name, exc)
+            return {}
 
-    if task_ran and not (need_board or need_execs):
-        result = {**primary, "_source": "web", "_harvest": diag}
-        _strip_internal_fields(result)
-        result["board"] = result["board"][:_MAX_BOARD]
-        result["executives"] = result["executives"][:_MAX_EXECS]
-        logger.info("Leadership for '%s' from Parallel: %d board, %d executives",
-                    company_name, len(result["board"]), len(result["executives"]))
-        _cache_leadership(cache_key, result)
-        return result
+    passes = {run_id: _got(run_id) for run_id, _, _ in _RESEARCH_RUNS}
+    scraped = _got("scrape")
+    diag = {"primary": "parallel_task" if have_parallel else "scraping",
+            "seconds": round(_t.monotonic() - started),
+            "budget_s": _RESEARCH_BUDGET_S,
+            "late": [n for n, f in jobs.items() if not f.done()]}
 
-    # ── 2. Scraping, for whatever Parallel left thin ─────────────────────────
-    logger.info("Parallel below the bar for '%s' (board %d, executives %d) — scraping %s",
-                company_name, len(primary["board"]), len(primary["executives"]),
-                "board + executives" if need_board and need_execs
-                else "board" if need_board else "executives")
-    scraped = _scrape_leadership(company_name, domain, site_url, location,
-                                 search_backup=not task_ran)
-    diag["scraping"] = {"ran": True, "for": [k for k, v in (("board", need_board),
-                                                           ("executives", need_execs)) if v],
-                        "board": len(scraped.get("board", []) or []),
-                        "executives": len(scraped.get("executives", []) or []),
-                        **({"harvest": scraped["_harvest"]} if scraped.get("_harvest") else {})}
-    # Scraped names Parallel didn't list are confirmed as CURRENT before they
-    # are added: a site's stale pages name people who have left (nvidia.com
-    # still has board bios for Rob Burgess and Mark Perry).
-    additions = {}
-    for k, needed in (("board", need_board), ("executives", need_execs)):
-        if not needed:
-            continue
-        known = set()
-        for p in primary[k]:
-            known |= _name_aliases(p.get("name", ""))
-        fresh = [p for p in (scraped.get(k, []) or [])
-                 if not (_name_aliases(p.get("name", "")) & known)]
-        if fresh and task_ran:
-            keep = _parallel_confirm_current(company_name, domain, location, k,
-                                             [p.get("name", "") for p in fresh])
-            dropped = [p.get("name", "") for p in fresh if p.get("name", "") not in keep]
-            fresh = [p for p in fresh if p.get("name", "") in keep]
-            diag.setdefault("confirm", {})[k] = {"kept": len(fresh), "dropped": dropped}
-        additions[k] = fresh
-    filled = {
-        "board": primary["board"] + additions.get("board", []),
-        "executives": primary["executives"] + additions.get("executives", []),
-        "senior_leadership": [],
-    }
-    result = _merge_leadership([filled]) if (filled["board"] or filled["executives"]) else filled
+    # ── Vote across the independent runs ────────────────────────────────────
+    # base-fast answers in ~20s but is inconsistent: one NVIDIA run returned
+    # the 11 current directors, each high-confidence and cited; another mixed
+    # in former directors (Burgess, Drell, McCaffery, Ochoa — all medium, no
+    # supporting excerpt) and a garbled name. A name is accepted when ANY run
+    # gives it high confidence backed by a cited excerpt naming them, or when
+    # EVERY run lists it. That kept all eleven and rejected every stale one.
+    result = {"board": [], "executives": [], "senior_leadership": []}
+    base_ok = bool(passes.get("base", {}).get("board") or passes.get("base", {}).get("executives"))
+    fast_ok = [r for r in _FAST_RUNS if passes.get(r, {}).get("board") or passes.get(r, {}).get("executives")]
+    diag["base_run"] = "used" if base_ok else "late or empty"
+    for section in ("board", "executives"):
+        groups: list[dict] = []   # {"person", "runs": set, "strong": set of runs}
+        for run_id, got in passes.items():
+            for p in got.get(section, []) or []:
+                strong = p.get("_conf") == "high" and p.get("_evidenced")
+                g = next((g for g in groups if _same_person(g["person"]["name"], p["name"])), None)
+                if g is None:
+                    g = {"person": dict(p), "runs": set(), "strong": set()}
+                    groups.append(g)
+                elif run_id == "base" or (strong and not g["strong"]):
+                    keep_comm = g["person"].get("committees")
+                    g["person"] = dict(p)                 # the authoritative / best entry
+                    if keep_comm and not g["person"].get("committees"):
+                        g["person"]["committees"] = keep_comm
+                if p.get("committees") and not g["person"].get("committees"):
+                    g["person"]["committees"] = p["committees"]
+                g["runs"].add(run_id)
+                if strong:
+                    g["strong"].add(run_id)
+
+        def _accept(g: dict) -> bool:
+            fast_runs = g["runs"] - {"base"}
+            if base_ok:
+                if "base" in g["runs"]:
+                    return True
+                # Only what base missed: two fast runs each confident AND
+                # citing an excerpt that names them. A stale director a single
+                # run is sure of (NVIDIA's Robert Burgess) doesn't pass.
+                return len(g["strong"] - {"base"}) >= 2
+            # base is late: the fast vote decides.
+            return bool(g["strong"]) or (fast_ok and fast_runs >= set(fast_ok))
+
+        kept = [g for g in groups if _accept(g)]
+        result[section] = [g["person"] for g in kept]
+        diag.setdefault("vote", {})[section] = {
+            "candidates": len(groups), "kept": len(kept),
+            "rejected": [g["person"]["name"] for g in groups if g not in kept][:15]}
+    for run_id, got in passes.items():
+        diag.setdefault("parallel", {})[run_id] = {
+            "board": len(got.get("board", []) or []),
+            "executives": len(got.get("executives", []) or []),
+            **({"errors": got["_parallel"]["errors"]}
+               if (got.get("_parallel") or {}).get("errors") else {})}
+
+    seen = {k: [p.get("name", "") for p in result[k]] for k in ("board", "executives")}
+
+    def _add(section: str, people: list, origin: str) -> int:
+        n = 0
+        for p in people or []:
+            name = p.get("name", "")
+            if not name or any(_same_person(name, s_) for s_ in seen[section]):
+                continue
+            seen[section].append(name)
+            result[section].append(p)
+            n += 1
+        diag.setdefault("added", {}).setdefault(origin, {})[section] = n
+        return n
+
+    # Scraped names Parallel didn't list: only from a roster page.
+    rosters = _roster_text(scraped.get("_blocks") or [],
+                           (scraped.get("board") or []) + (scraped.get("executives") or []))
+    for section, bar in (("board", _MIN_BOARD), ("executives", _MIN_EXECS)):
+        extra = scraped.get(section) or []
+        if have_parallel:
+            if len(result[section]) >= bar:
+                continue                    # already complete
+            backed = [p for p in extra if _name_in_source(p.get("name", ""), rosters)]
+            diag.setdefault("scraping_unbacked", {})[section] = [
+                p.get("name", "") for p in extra
+                if p not in backed and not any(_same_person(p.get("name", ""), x)
+                                               for x in seen[section])][:10]
+            extra = backed
+        _add(section, extra, "scraping")
+
+    if result["board"] or result["executives"]:
+        result = _merge_leadership([result])
     result = _promote_operating_directors(result)
     _strip_internal_fields(result)
     result["board"] = (result.get("board") or [])[:_MAX_BOARD]
     result["executives"] = (result.get("executives") or [])[:_MAX_EXECS]
     result["_harvest"] = diag
+    if scraped.get("_harvest"):
+        diag["scraping"] = {k: v for k, v in scraped["_harvest"].items() if k != "urls"}
+    logger.info("Leadership for '%s' in %ds: %d board, %d executives (late: %s)",
+                company_name, diag["seconds"], len(result["board"]),
+                len(result["executives"]), diag["late"] or "none")
     if result.get("board") or result.get("executives"):
         result["_source"] = "web"
         _cache_leadership(cache_key, result)
         return result
-    logger.info("No leaders found for '%s' — returning empty (not cached)", company_name)
     return {"board": [], "executives": [], "_source": "none", "_harvest": diag,
             **({"_error": scraped["_error"]} if scraped.get("_error") else {})}
 
 
-_PARALLEL_TASK_TIMEOUT_S = int(os.environ.get("ORGANOGRAM_PARALLEL_TASK_TIMEOUT_S", "300"))
+# Wall-clock budget for the whole concurrent round. The base run measured
+# 85-150s, base-fast 15-50s; scraping is additive. Anything still running at
+# the deadline is skipped rather than waited for.
+_RESEARCH_BUDGET_S = int(os.environ.get("ORGANOGRAM_RESEARCH_BUDGET_S", "160"))
+# Three independent research runs, voted on: two from the leadership pages,
+# one from the filings.
+# (run id, variant, processor). One standard "base" run is the authority —
+# measured accurate on NVIDIA where base-fast was not — and three "base-fast"
+# runs (same price tier, ~20s) are the safety net if it is late and a vote
+# on anything it missed.
+_RESEARCH_RUNS = (("base", "pages", "base"),
+                  ("fast1", "pages", "base-fast"),
+                  ("fast2", "filings", "base-fast"),
+                  ("fast3", "pages", "base-fast"))
+_FAST_RUNS = tuple(r for r, _, proc in _RESEARCH_RUNS if proc.endswith("-fast"))
 
 
-def _parallel_confirm_current(company_name: str, domain: str, location: str,
-                              section: str, names: list[str]) -> set[str]:
-    """Which of *names* are CURRENT board members / executives — one Task run.
-
-    Fails closed: if the check can't run or errors, nothing is confirmed, so a
-    stale page can't slip a former director onto the chart.
-    """
-    names = [n for n in names if n][:30]
-    if not names or not os.environ.get("PARALLEL_API_KEY"):
-        return set()
+def _prefetch_linkedin(company_name: str, domain: str, location: str, fast_jobs: dict) -> None:
+    """Start LinkedIn searches for the names the fast runs already agree on."""
     try:
-        import httpx
-        import parallel_client
-        from usage_tracker import record_cost
-        processor = parallel_client.task_processor()
-        ident = ", ".join(x for x in (domain, location) if x)
-        org = f"{company_name} ({ident})" if ident else company_name
-        what = ("members of the Board of Directors (or governing board)" if section == "board"
-                else "members of the executive leadership team")
-        prompt = (f"{org}: of these people, which are CURRENT {what}? "
-                  f"{'; '.join(names)}. Return only those who currently hold the role, using "
-                  f"their name exactly as given. Leave out anyone who has left, retired or "
-                  f"whose role you cannot confirm.")
-        schema = {"type": "object", "additionalProperties": False, "required": ["current"],
-                  "properties": {"current": {"type": "array", "items": {"type": "string"}}}}
-        r = httpx.post(parallel_client.TASKS_URL, headers={"x-api-key": parallel_client.api_key()},
-                       timeout=60, json={"input": prompt, "processor": processor,
-                                         "task_spec": {"output_schema": {"type": "json",
-                                                                         "json_schema": schema}}})
-        if not r.is_success:
-            return set()
-        record_cost("parallel", f"parallel-task-{processor}",
-                    parallel_client.TASK_COST.get(processor, parallel_client.TASK_COST["base"]))
-        res = httpx.get(f"{parallel_client.TASKS_URL}/{r.json().get('run_id', '')}/result",
-                        headers={"x-api-key": parallel_client.api_key()},
-                        params={"timeout": _PARALLEL_TASK_TIMEOUT_S},
-                        timeout=_PARALLEL_TASK_TIMEOUT_S + 20)
-        content = (res.json().get("output", {}) or {}).get("content") or {}
-        if isinstance(content, str):
-            content = _loads_lenient(content) or {}
-        said = content.get("current") or []
-        # Map answers back to the names we asked about (tolerating spelling).
-        keep = set()
-        for n in names:
-            al = _name_aliases(n)
-            if any(al & _name_aliases(x) for x in said):
-                keep.add(n)
-        return keep
+        import linkedin_resolver
+        people, seen = [], []
+        for kind, section in (("board", "board"), ("executive", "executives")):
+            counts: list[tuple[dict, int]] = []
+            for f in fast_jobs.values():
+                try:
+                    got = f.result() or {}
+                except Exception:
+                    continue
+                for p in got.get(section, []) or []:
+                    hit = next((c for c in counts if _same_person(c[0]["name"], p["name"])), None)
+                    if hit is None:
+                        counts.append((p, 1))
+                    else:
+                        counts[counts.index(hit)] = (hit[0], hit[1] + 1)
+            for p, n in counts:
+                if n >= 2 and not any(_same_person(p["name"], x) for x in seen):
+                    seen.append(p["name"])
+                    people.append({"name": p["name"], "title": p.get("title", ""), "kind": kind})
+        linkedin_resolver.prefetch(people, company_name, domain, location)
     except Exception as exc:
-        logger.warning("Current-role check failed for '%s': %s", company_name, exc)
-        return set()
+        logger.warning("LinkedIn prefetch failed for '%s': %s", company_name, exc)
+
+
+def _same_person(a: str, b: str) -> bool:
+    """Two spellings of one person: "Nick / Nicholas Parker", "Jen-Hsun /
+    Jensen Huang", a one-letter slip ("Tenoch / Tench Coxe"). The surname must
+    match exactly."""
+    if _name_aliases(a) & _name_aliases(b):
+        return True
+    from linkedin_resolver import _name_parts, _given_compatible
+    for ga, sa in _name_parts(a):
+        for gb, sb in _name_parts(b):
+            if sa != sb:
+                continue
+            if _given_compatible(ga, gb):
+                return True
+            if min(len(ga), len(gb)) >= 4 and _edit_distance(ga, gb) <= 2:
+                return True
+            # "Jen-Hsun" written as one word: "jenhsun" vs "jensen"
+            if ga.startswith(gb[:3]) and gb.startswith(ga[:3]) and _edit_distance(ga, gb) <= 2:
+                return True
+    return False
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _roster_text(blocks: list[str], people: list[dict]) -> str:
+    """Lower-cased text of the harvested pages that name three or more leaders.
+
+    A roster page (a leadership index, a board listing) vouches for who is in
+    the team now; a page about one person does not.
+    """
+    names = [p.get("name", "") for p in people if p.get("name")]
+    keep = []
+    for block in blocks:
+        low = block.lower()
+        if sum(1 for n in names if _name_in_source(n, low)) >= 3:
+            keep.append(low)
+    return "\n".join(keep)
+
+
+_PARALLEL_TASK_TIMEOUT_S = int(os.environ.get("ORGANOGRAM_PARALLEL_TASK_TIMEOUT_S", "300"))
 
 
 def _people_schema(key: str) -> dict:
@@ -2618,8 +2714,9 @@ def _parse_committees(raw) -> list[dict]:
 
 
 def _parallel_task_leadership(company_name: str, domain: str = "", location: str = "",
-                              site_url: str = "", known: dict | None = None,
-                              sections: tuple = ("board", "executives")) -> dict:
+                              site_url: str = "", variant: str = "pages",
+                              sections: tuple = ("board", "executives"),
+                              processor: str = "") -> dict:
     """
     The board and the executive team from two Parallel Task API runs.
 
@@ -2660,31 +2757,27 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
                       f"Vice President who reports to the CEO. Check the organisation's "
                       f"leadership / management team page.{rules}",
     }
-    if known is not None:
-        # The completeness pass: hand over what is already known and ask only
-        # for who is missing, from the sources that list everyone.
-        have = {k: "; ".join(p.get("name", "") for p in (known.get(k) or [])) or "none yet"
-                for k in ("board", "executives")}
+    if variant == "filings":
+        # The second, independent pass: the documents that list EVERYONE, so
+        # the union catches names the leadership pages leave out. Run at the
+        # same time as the first — it needs nothing from it.
         tasks = {
-            "board": f"{org}: these current board members are already known: {have['board']}. "
-                     f"Check the organisation's board / governance page, its latest proxy "
-                     f"statement or annual report, and list every OTHER current member of the "
-                     f"Board of Directors (or governing board) who is not in that list, with "
-                     f"their board role and committees ('Committee name (Chair)' / 'Committee "
-                     f"name (Member)'). Return an empty list if none are missing.{rules}",
-            "executives": f"{org}: these current executive leaders are already known: "
-                          f"{have['executives']}. Check the organisation's leadership / management "
-                          f"team page, its latest annual report's list of executive officers and "
-                          f"its proxy statement, and list every OTHER current executive who is not "
-                          f"in that list — executive officers, anyone with a 'Chief … Officer' or "
-                          f"'Chief …' title, and Executive or Senior Vice Presidents who report to "
-                          f"the CEO — with their exact title. Return an empty list if none are "
-                          f"missing.{rules}",
+            "board": f"{org}: from the latest proxy statement or annual report (or the official "
+                     f"governance filings for a non-listed organisation), list every current "
+                     f"member of the Board of Directors (or governing board), with their board "
+                     f"role and every board committee they sit on, each written as 'Committee "
+                     f"name (Chair)' or 'Committee name (Member)'.{rules}",
+            "executives": f"{org}: from the latest annual report's list of executive officers, the "
+                          f"proxy statement and the official management team page, list every "
+                          f"current executive officer and senior leader reporting to the CEO "
+                          f"(CEO, every 'Chief …' officer, Executive and Senior Vice Presidents, "
+                          f"General Counsel, heads of major business units), with exact "
+                          f"titles.{rules}",
         }
     tasks = {k: v for k, v in tasks.items() if k in sections}
     import parallel_client
     headers = {"x-api-key": api_key}
-    processor = parallel_client.task_processor()        # never above "base"
+    processor = parallel_client.task_processor(processor)   # never above the base price
     cost = parallel_client.TASK_COST.get(processor, parallel_client.TASK_COST["base"])
 
     def run(key: str) -> tuple[str, list, list, str]:
@@ -2697,16 +2790,30 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
             record_cost("parallel", f"parallel-task-{processor}", cost)
             run_id = r.json().get("run_id", "")
             res = httpx.get(f"{parallel_client.TASKS_URL}/{run_id}/result", headers=headers,
-                            params={"timeout": _PARALLEL_TASK_TIMEOUT_S},
-                            timeout=_PARALLEL_TASK_TIMEOUT_S + 20)
+                            params={"timeout": min(_PARALLEL_TASK_TIMEOUT_S, _RESEARCH_BUDGET_S)},
+                            timeout=min(_PARALLEL_TASK_TIMEOUT_S, _RESEARCH_BUDGET_S) + 15)
             if not res.is_success:
                 return key, [], [], f"result HTTP {res.status_code}: {res.text[:160]}"
             output = res.json().get("output", {}) or {}
             content = output.get("content") or {}
             if isinstance(content, str):
                 content = _loads_lenient(content) or {}
-            people = [p for p in (content.get(key) or [])
-                      if isinstance(p, dict) and str(p.get("name", "")).strip()]
+            raw_people = content.get(key) or []
+            # Parallel cites each list item separately ("board.3"): its own
+            # confidence and the excerpts it relied on. Kept per person so the
+            # caller can tell a well-evidenced name from a guess.
+            basis = {b.get("field", ""): b for b in output.get("basis", []) or []}
+            people = []
+            for i, p in enumerate(raw_people):
+                if not (isinstance(p, dict) and str(p.get("name", "")).strip()):
+                    continue
+                b = basis.get(f"{key}.{i}") or {}
+                excerpts = " ".join(" ".join(c.get("excerpts") or [])
+                                    for c in b.get("citations") or []).lower()
+                p = dict(p)
+                p["_conf"] = str(b.get("confidence") or "").lower()
+                p["_evidenced"] = bool(excerpts) and _name_in_source(str(p["name"]), excerpts)
+                people.append(p)
             sources = sorted({c.get("url", "") for b in output.get("basis", []) or []
                               for c in b.get("citations", []) or [] if c.get("url")})
             return key, people, sources, ""
@@ -2717,11 +2824,12 @@ def _parallel_task_leadership(company_name: str, domain: str = "", location: str
     started = _t.time()
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(run, list(tasks)))
-    out: dict = {"_parallel": {"ran": True, "processor": processor,
+    out: dict = {"_parallel": {"ran": True, "processor": processor, "variant": variant,
                                "seconds": round(_t.time() - started), "sources": [], "errors": {}}}
     for key, people, sources, err in results:
         out[key] = [{"name": str(p["name"]).strip(), "title": str(p.get("title", "")).strip(),
                      "confidence": "HIGH",
+                     "_conf": p.get("_conf", ""), "_evidenced": p.get("_evidenced", False),
                      **({"committees": _parse_committees(p.get("committees"))}
                         if key == "board" else {})}
                     for p in people]
@@ -3386,6 +3494,8 @@ def _strip_internal_fields(result: dict) -> None:
     for section in ("board", "executives", "senior_leadership"):
         for person in result.get(section) or []:
             person.pop("_mentions", None)
+            person.pop("_conf", None)
+            person.pop("_evidenced", None)
             if person.get("name"):
                 person["name"] = _tidy_name(person["name"])
 
