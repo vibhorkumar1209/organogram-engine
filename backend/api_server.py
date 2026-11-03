@@ -3333,6 +3333,11 @@ class ChangeReportPayload(BaseModel):
     linkedInUrl: Optional[str] = None
     notes:       Optional[str] = None
     timestamp:   Optional[int] = None
+    # Which chart and which person the report is about — without these a
+    # report named only a company and a department label.
+    jobId:       Optional[str] = None
+    nodeId:      Optional[str] = None
+    deptId:      Optional[str] = None
 
 
 @app.post("/report-change")
@@ -3342,15 +3347,22 @@ async def report_change(payload: ChangeReportPayload):
     entry["id"]          = str(uuid.uuid4())
     entry["received_at"] = datetime.now(timezone.utc).isoformat()
     _CHANGE_REPORTS.append(entry)
+    stored = history_store.record_change_report(entry)
     import logging as _lg
     _lg.getLogger(__name__).info("Change report received: %s", json.dumps(entry))
-    return {"ok": True, "id": entry["id"]}
+    return {"ok": True, "id": entry["id"], "stored": stored}
 
 
 @app.get("/change-reports")
-async def get_change_reports():
-    """Return all received change reports (admin / review endpoint)."""
-    return {"count": len(_CHANGE_REPORTS), "reports": _CHANGE_REPORTS}
+async def get_change_reports(limit: int = Query(200, ge=1, le=2000)):
+    """Received change reports, newest first (admin / review endpoint).
+
+    Read from the durable store when it is configured; otherwise only the
+    reports this process has received since it started.
+    """
+    durable = history_store.list_change_reports(limit)
+    reports = durable if durable is not None else list(reversed(_CHANGE_REPORTS))[:limit]
+    return {"count": len(reports), "durable": durable is not None, "reports": reports}
 
 
 @app.get("/company")

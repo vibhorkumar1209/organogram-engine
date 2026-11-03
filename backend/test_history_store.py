@@ -73,6 +73,14 @@ class FakeUpstash:
             if "WITHSCORES" in flags:
                 return [x for m, s in items for x in (m, str(s))]
             return [m for m, _ in items]
+        if op == "LPUSH":
+            self.kv.setdefault(a[0], [])[:0] = list(reversed(a[1:]))
+            return len(self.kv[a[0]])
+        if op == "LTRIM":
+            self.kv[a[0]] = self.kv.get(a[0], [])[int(a[1]): int(a[2]) + 1]
+            return "OK"
+        if op == "LRANGE":
+            return self.kv.get(a[0], [])[int(a[1]): int(a[2]) + 1]
         raise AssertionError(f"unexpected command {cmd}")
 
     def pipeline(self, commands):
@@ -151,6 +159,21 @@ st = client.get("/history-status").json()
 ok(not st["connected"] and st["last_error"] and "Name or service not known" in st["last_error"]["error"],
    f"failure: status says why history isn't saving ({st.get('last_error')})")
 fake.down = False
+
+# ── Change reports survive a restart ("Report a Change" in the drawer) ─────
+r1 = client.post("/report-change", json={"type": "no_longer_here", "companyName": "Google",
+                                          "personName": "A Person", "jobId": job,
+                                          "nodeId": "llm_abc", "deptId": "dept__board_of_management"}).json()
+r2 = client.post("/report-change", json={"type": "new_executive", "companyName": "Google",
+                                          "linkedInUrl": "https://www.linkedin.com/in/x"}).json()
+ok(r1["ok"] and r1["stored"] and r2["stored"], "reports: stored durably")
+A._CHANGE_REPORTS.clear()          # what a restart does to the in-memory list
+got = client.get("/change-reports").json()
+ok(got["durable"] and [x["id"] for x in got["reports"]] == [r2["id"], r1["id"]],
+   "reports: still listed after the in-memory list is gone, newest first")
+ok(got["reports"][1]["jobId"] == job and got["reports"][1]["nodeId"] == "llm_abc"
+   and got["reports"][1]["deptId"] == "dept__board_of_management",
+   "reports: carry the chart, person and department ids")
 
 for k in ("KV_REST_API_URL", "KV_REST_API_TOKEN"):
     os.environ.pop(k)

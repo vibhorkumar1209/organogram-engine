@@ -20,13 +20,15 @@ const REPORT_TYPES: { value: ReportType; label: string; desc: string }[] = [
 interface Props {
   person?:     OrgNode         // pre-filled when flagging an existing person
   deptName:    string
+  deptId?:     string
+  jobId?:      string | null
   companyName: string
   apiBase:     string
   onClose:     () => void
 }
 
 export const FeedbackModal: React.FC<Props> = ({
-  person, deptName, companyName, apiBase, onClose,
+  person, deptName, deptId = '', jobId = null, companyName, apiBase, onClose,
 }) => {
   const defaultType: ReportType = person ? 'no_longer_here' : 'new_executive'
   const [type,       setType]       = useState<ReportType>(defaultType)
@@ -55,6 +57,11 @@ export const FeedbackModal: React.FC<Props> = ({
             ? String(person.metadata.designation)
             : undefined,
           currentDept: deptName || undefined,
+          // Which chart and which person: without these a report named only a
+          // company and a department label.
+          jobId:       jobId || undefined,
+          nodeId:      person?.node_id || undefined,
+          deptId:      deptId || undefined,
           linkedInUrl: linkedIn.trim() || undefined,
           notes:       notes.trim()    || undefined,
           timestamp:   Date.now(),

@@ -22,7 +22,9 @@ export interface LinkedInReport {
 }
 
 interface Props {
-  report:      LinkedInReport | null   // null = loading
+  report:      LinkedInReport | null   // null = loading (unless `error` is set)
+  /** Why the report could not be loaded. */
+  error?:      string | null
   companyName: string
   onRefresh:   () => void
   onClose:     () => void
@@ -52,7 +54,7 @@ function downloadCsv(rows: LinkedInRow[], columns: string[], companyName: string
   URL.revokeObjectURL(url)
 }
 
-export const LinkedInTable: React.FC<Props> = ({ report, companyName, onRefresh, onClose }) => {
+export const LinkedInTable: React.FC<Props> = ({ report, error = null, companyName, onRefresh, onClose }) => {
   const [copied, setCopied] = useState(false)
   const [filter, setFilter] = useState<string>('All')
 
@@ -157,7 +159,12 @@ export const LinkedInTable: React.FC<Props> = ({ report, companyName, onRefresh,
 
         {/* Table */}
         <div style={{ overflow: 'auto', flex: 1, borderTop: '1px solid #1e3a4a' }}>
-          {!report ? (
+          {error ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>
+              <div style={{ color: '#f08a5d', marginBottom: 6 }}>Couldn't load the LinkedIn profiles.</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>{error}</div>
+            </div>
+          ) : !report ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>
               Loading…
             </div>

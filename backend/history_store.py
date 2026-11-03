@@ -201,6 +201,40 @@ def delete_job(job_id: str) -> None:
         _note_error("delete_job", exc)
 
 
+# ── User-reported corrections ("Report a Change" in the drawer) ──────────────
+# Kept in one capped list so they survive a restart; before this they lived
+# only in process memory and every deploy discarded them.
+_REPORTS = _PREFIX + "change_reports"
+_REPORTS_MAX = 2000
+
+
+def record_change_report(entry: dict) -> bool:
+    """Store one correction, newest first. False when the store is not set up or fails."""
+    if not _configured():
+        return False
+    try:
+        _pipeline([["LPUSH", _REPORTS, json.dumps(entry)],
+                   ["LTRIM", _REPORTS, "0", str(_REPORTS_MAX - 1)]])
+        return True
+    except Exception as exc:
+        logger.warning("history_store: record_change_report failed: %s", exc)
+        _note_error("record_change_report", exc)
+        return False
+
+
+def list_change_reports(limit: int = 200) -> list[dict] | None:
+    """Newest first, or None when the store is not set up or cannot be read."""
+    if not _configured():
+        return None
+    try:
+        rows = _cmd("LRANGE", _REPORTS, "0", str(max(0, limit - 1))) or []
+        return [json.loads(r) for r in rows]
+    except Exception as exc:
+        logger.warning("history_store: list_change_reports failed: %s", exc)
+        _note_error("list_change_reports", exc)
+        return None
+
+
 # How many recent runs to read before filtering — the filters (status, source,
 # search) are applied in Python, which is fine at this app's volume.
 _SCAN_LIMIT = 2000

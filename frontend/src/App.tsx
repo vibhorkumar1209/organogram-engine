@@ -368,12 +368,15 @@ export default function App() {
   const [panelExecs, setPanelExecs] = useState<OrgNode[] | null>(null)
   // Total person count for the open dept (may exceed panelExecs.length when paginated)
   const [panelTotal, setPanelTotal] = useState<number>(0)
+  // Why the open department's people could not be loaded (null = no error).
+  const [panelError, setPanelError] = useState<string | null>(null)
   // The poll runs in a long-lived interval; it reads the open panel from here.
   const panelDeptRef = useRef<OrgNode | null>(null)
   useEffect(() => { panelDeptRef.current = panelDept }, [panelDept])
 
   // LinkedIn profiles of Board + Executive Management, as a table.
   const [linkedInReport, setLinkedInReport] = useState<LinkedInReport | 'loading' | null>(null)
+  const [linkedInError, setLinkedInError] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [companyWebsite, setCompanyWebsite] = useState('')
@@ -434,18 +437,47 @@ export default function App() {
           .map(p => toPersonNode(p, dept.color))
         setPanelExecs(people)
         setPanelTotal(d.total ?? people.length)
+        setPanelError(null)
         const entryId = activeEntryIdRef.current
         if (entryId) updateExecCache(entryId, dept.node_id, people)
       })
       .catch(() => {})
   }
 
+  // A failed load stays open with the reason, instead of the dialog vanishing.
   function openLinkedInReport() {
     setLinkedInReport('loading')
+    setLinkedInError(null)
     apiFetch('/linkedin-report')
-      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
-      .then(d => setLinkedInReport(d))
-      .catch(() => setLinkedInReport(null))
+      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json() })
+      .then(d => {
+        if (d.loaded === false) {
+          setLinkedInError('This chart is no longer on the server — create it again.')
+          return
+        }
+        setLinkedInReport(d)
+      })
+      .catch((e: any) => setLinkedInError(
+        (e?.message ?? '').toLowerCase().includes('fetch')
+          ? 'Connection failed — the backend may be restarting. Try Refresh in a moment.'
+          : (e?.message || 'Unknown error')))
+  }
+
+  // Every person in the open department, paging past the 200 the drawer shows.
+  async function loadAllPanelPeople(): Promise<OrgNode[]> {
+    const dept = panelDeptRef.current
+    if (!dept) return []
+    const PAGE = 5000   // the endpoint's maximum
+    const out: OrgNode[] = []
+    for (let offset = 0; ; offset += PAGE) {
+      const r = await apiFetch(`/executives?dept_id=${encodeURIComponent(dept.node_id)}&offset=${offset}&limit=${PAGE}`)
+      if (!r.ok) throw new Error(`Server error ${r.status}`)
+      const d = await r.json()
+      const page = ((d.executives ?? []) as Record<string, any>[])
+        .filter(p => p.node_id).map(p => toPersonNode(p, dept.color))
+      out.push(...page)
+      if (page.length < PAGE || out.length >= (d.total ?? 0)) return out
+    }
   }
 
   // Patch a history entry's stored job_id — used when restoring a demo entry
@@ -734,6 +766,101 @@ export default function App() {
     }
   }
 
+  // ── Load the drawer's people for a department ──────────────────────
+  // Served from the history entry's cache when present (instant, and works
+  // offline after a restore); otherwise the first 200 by seniority.
+  // A response is applied only if that department is still the open one —
+  // clicking B while A was loading used to show A's people under B's title.
+  const loadPanelPeople = useCallback((node: OrgNode, useCache = true) => {
+    setPanelTotal(0)
+    setPanelError(null)
+    const entryId = activeEntryIdRef.current
+    const cached  = useCache && entryId
+      ? (historyRef.current.find(e => e.id === entryId)?.execCache ?? {})[node.node_id]
+      : undefined
+    if (cached !== undefined) {
+      setPanelExecs(cached)
+      setPanelTotal(cached.length)
+      return
+    }
+    setPanelExecs(null)
+    const deptId    = node.node_id
+    const nodeColor = node.color
+    const stillOpen = () => panelDeptRef.current?.node_id === deptId
+    const fail = (msg: string) => {
+      if (!stillOpen()) return
+      setPanelExecs([])
+      setPanelError(msg)
+    }
+
+    const fetchAndSet = (retryAfterReload = false): Promise<void> =>
+      apiFetch(`/executives?dept_id=${encodeURIComponent(deptId)}&limit=200`)
+        .then(r => {
+          if (r.status === 404) throw new Error('This department is no longer in the chart — reload the chart.')
+          if (!r.ok) throw new Error(`Server error ${r.status}.`)
+          return r.json()
+        })
+        .then(async (data) => {
+          // Backend restarted and lost in-memory data (Render free tier)
+          if (data.loaded === false && !retryAfterReload) {
+            const src = entryId
+              ? historyRef.current.find(e => e.id === entryId)?.source
+              : undefined
+            if (src === 'demo') {
+              // /load-demo mints a fresh job — move the active ref (and the
+              // entry's stored jobId) to it before retrying.
+              const rd = await apiCreate('/load-demo', { method: 'POST' })
+              const rdData = await rd.json().catch(() => null)
+              if (rdData?.job_id) {
+                activeJobIdRef.current = rdData.job_id
+                if (entryId) updateJobId(entryId, rdData.job_id)
+              }
+              return fetchAndSet(true)
+            }
+            // Upload entry — the backend can't restore it without the source
+            fail('This chart is no longer on the server — create it again.')
+            return
+          }
+          if (data.loaded === false) { fail('This chart is no longer on the server — create it again.'); return }
+          const people = (data.executives as Record<string, any>[])
+            .filter((p: Record<string, any>) => p.node_id)
+            .map((p: Record<string, any>) => toPersonNode(p, nodeColor))
+          // Cache it either way; show it only if it is still the open department.
+          if (entryId) updateExecCache(entryId, deptId, people)
+          if (!stillOpen()) return
+          setPanelExecs(people)
+          setPanelTotal(data.total ?? people.length)
+        })
+        .catch((e: any) => {
+          const msg = String(e?.message ?? '')
+          fail(msg.toLowerCase().includes('fetch')
+            ? 'Connection failed — the backend may be restarting.'
+            : msg || 'Unknown error.')
+        })
+
+    fetchAndSet()
+  }, [updateExecCache, updateJobId])
+
+  const closePanel = () => {
+    setPanelDept(null); setPanelExecs(null); setPanelTotal(0); setPanelError(null)
+  }
+
+  // Escape closes the topmost layer: Paste-JSON, LinkedIn table, add-people,
+  // then the drawer. (The drawer's own report dialog claims Escape first.)
+  const escState = useRef({ jsonDialog: false, linkedIn: false, selectOpen: false, ingestBusy: false })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const st = escState.current
+      if (st.jsonDialog) setJsonDialog(false)
+      else if (st.linkedIn) setLinkedInReport(null)
+      else if (st.selectOpen) { if (!st.ingestBusy) setSelectOpen(false) }
+      else if (panelDeptRef.current) closePanel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // ── Handle node click: expand / collapse / open panel ─────────────
   const handleNodeClick = useCallback(async (node: OrgNode) => {
     // Synthetic nodes (BOD/EM groups) are pre-expanded — don't interact
@@ -773,64 +900,10 @@ export default function App() {
 
       // ── Always open ExecPanel (employees view – never change this) ────
       setPanelDept(node)
-      setPanelTotal(0)
-
-      // Check exec cache first — allows offline history restore to show executives
-      const entryId = activeEntryIdRef.current
-      const cached  = entryId
-        ? (historyRef.current.find(e => e.id === entryId)?.execCache ?? {})[node.node_id]
-        : undefined
-
-      if (cached !== undefined) {
-        // Serve from cache instantly — no backend call needed
-        setPanelExecs(cached)
-        setPanelTotal(cached.length)
-      } else {
-        setPanelExecs(null)
-        const deptId    = node.node_id
-        const nodeColor = node.color
-
-        // First page: most-senior 200 people (sorted by layer asc then name).
-        // panelTotal carries the full count so ExecPanel can show "200 of N".
-        const fetchAndSet = (retryAfterReload = false): Promise<void> =>
-          apiFetch(`/executives?dept_id=${encodeURIComponent(deptId)}&limit=200`)
-            .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
-            .then(async (data) => {
-              // Backend restarted and lost in-memory data (Render free tier)
-              if (data.loaded === false && !retryAfterReload) {
-                const src = entryId
-                  ? historyRef.current.find(e => e.id === entryId)?.source
-                  : undefined
-                if (src === 'demo') {
-                  // Auto-reload demo and retry once — /load-demo mints a fresh
-                  // job, so the active ref (and the entry's stored jobId) must
-                  // move to it before the retry, or fetchAndSet(true) would
-                  // still address the orphaned old job and fail the same way.
-                  const rd = await apiCreate('/load-demo', { method: 'POST' })
-                  const rdData = await rd.json().catch(() => null)
-                  if (rdData?.job_id) {
-                    activeJobIdRef.current = rdData.job_id
-                    if (entryId) updateJobId(entryId, rdData.job_id)
-                  }
-                  return fetchAndSet(true)
-                }
-                // Upload entry — backend can't restore without the file
-                setPanelExecs([])
-                return
-              }
-              const people = (data.executives as Record<string, any>[])
-                .filter((p: Record<string, any>) => p.node_id)
-                .map((p: Record<string, any>) => toPersonNode(p, nodeColor))
-              setPanelExecs(people)
-              setPanelTotal(data.total ?? people.length)
-              if (entryId) updateExecCache(entryId, deptId, people)
-            })
-            .catch(() => setPanelExecs([]))
-
-        fetchAndSet()
-      }
+      panelDeptRef.current = node   // before any response can arrive
+      loadPanelPeople(node)
     }
-  }, [updateExecCache, updateJobId])
+  }, [loadPanelPeople])
 
   // ── Ingest ─────────────────────────────────────────────────────────
   // Shared by both inputs: an uploaded file (CSV/JSON/Excel → POST /upload)
@@ -997,7 +1070,10 @@ export default function App() {
     setIngestNote('')
     // Clicking a department in the chart pre-selects it, so the roster lands
     // where the user was already looking.
-    setSelectedIds(preselect?.node_id ? [preselect.node_id] : [])
+    // Executive Management is not in /selectable's lists, so pre-selecting it
+    // checked nothing while still sending it as scope. Start empty there.
+    setSelectedIds(preselect?.node_id && preselect.node_id !== 'dept__executive_management'
+      ? [preselect.node_id] : [])
     setIngestTarget(preselect?.label ?? '')
     try {
       const res = await apiFetch('/selectable')
@@ -1042,6 +1118,8 @@ export default function App() {
       // grown, which reads as "nothing happened".
       if (data.stats) setStats(data.stats)
       await loadDeptStructure(data.stats, industry, 'upload', toUsage(data.usage), jobId)
+      // The open drawer listed the department before these people arrived.
+      refreshOpenPanel()
     } catch (e: any) {
       setIngestNote(e?.message ?? 'Ingest failed.')
     } finally {
@@ -1070,6 +1148,8 @@ export default function App() {
   const [jsonDialog, setJsonDialog] = useState(false)
   const [jsonText,   setJsonText]   = useState('')
   const [jsonError,  setJsonError]  = useState('')
+  // What the Escape handler (registered once) needs to know about open layers.
+  escState.current = { jsonDialog, linkedIn: !!linkedInReport, selectOpen, ingestBusy }
 
   const handlePasteJson = () => {
     const text = jsonText.trim()
@@ -1783,7 +1863,8 @@ export default function App() {
           {selectOpen && (
             <div style={{
               position: 'absolute', inset: 0, background: 'rgba(0,32,77,0.35)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40,
+              // Above the drawer (zIndex 200), which used to cover its right side.
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300,
             }}
               onClick={() => { if (!ingestBusy) setSelectOpen(false) }}
             >
@@ -1799,7 +1880,7 @@ export default function App() {
                   {ingestTarget ? `Add people to ${ingestTarget}` : 'Add people to the chart'}
                 </div>
                 <div style={{ fontSize: 12, color: '#627184', marginTop: 4, marginBottom: 14 }}>
-                  {ingestTarget
+                  {ingestTarget && selectedIds.length > 0
                     ? 'Selected below. Adjust if this roster spans more than one area, then choose a source.'
                     : 'Pick the executives or their departments this roster belongs to, then choose a source.'}
                   {' '}Anyone already in the chart is merged, not duplicated.
@@ -1939,18 +2020,22 @@ export default function App() {
           {/* ExecPanel — overlays right side of chart */}
           <ExecPanel
             onAddPeople={
-              panelDept && panelDept.label !== 'Board of Management'
+              panelDept && panelDept.node_id !== 'dept__board_of_management'
                 ? (dept) => openSelection(dept)
                 : undefined
             }
             deptNode={panelDept}
             executives={panelExecs}
             totalCount={panelTotal}
-            onClose={() => { setPanelDept(null); setPanelExecs(null); setPanelTotal(0) }}
+            error={panelError}
+            onRetry={() => { if (panelDeptRef.current) loadPanelPeople(panelDeptRef.current, false) }}
+            loadAll={loadAllPanelPeople}
+            jobId={activeJobIdRef.current}
+            onClose={closePanel}
             apiBase={API}
             companyName={deptTree?.label ?? ''}
             onShowLinkedIn={
-              panelDept && ['Board of Management', 'Executive Management'].includes(panelDept.label)
+              panelDept && ['dept__board_of_management', 'dept__executive_management'].includes(panelDept.node_id)
                 ? openLinkedInReport
                 : undefined
             }
@@ -1964,6 +2049,7 @@ export default function App() {
     {linkedInReport && (
       <LinkedInTable
         report={linkedInReport === 'loading' ? null : linkedInReport}
+        error={linkedInError}
         companyName={deptTree?.label ?? ''}
         onRefresh={openLinkedInReport}
         onClose={() => setLinkedInReport(null)}

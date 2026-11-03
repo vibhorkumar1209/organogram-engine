@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import type { OrgNode } from '../types'
 import { FeedbackModal } from './FeedbackModal'
 
@@ -16,6 +16,14 @@ interface Props {
   onAddPeople?: (dept: OrgNode) => void
   /** Opens the LinkedIn profile table (Board and Executive Management). */
   onShowLinkedIn?: () => void
+  /** Why the people could not be loaded; shown instead of the empty state. */
+  error?:      string | null
+  /** Re-fetch this department's people after an error. */
+  onRetry?:    () => void
+  /** Every person in the department, for Save when only the first page is loaded. */
+  loadAll?:    () => Promise<OrgNode[]>
+  /** The chart's job id, sent with change reports. */
+  jobId?:      string | null
 }
 
 // Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
@@ -69,7 +77,8 @@ const SECTOR_COLORS: Record<string, string> = {
 }
 
 function nodeColor(node: OrgNode, fallback: string): string {
-  return SECTOR_COLORS[node.sector] ?? node.color ?? fallback
+  // `||`, not `??`: departments made for executives carry sector "" and color "".
+  return SECTOR_COLORS[node.sector] || node.color || fallback
 }
 
 // ── Hierarchy builder ─────────────────────────────────────────────────
@@ -348,6 +357,17 @@ const INFERRED_REPORT_NOTE =
   'Reporting line inferred — no intermediate manager found in the data at the expected seniority level. ' +
   'This person has been connected to the nearest available senior executive.'
 
+// Rows that collapse are operable from the keyboard as well as by click.
+function toggleKeys(enabled: boolean, toggle: () => void) {
+  if (!enabled) return {}
+  return {
+    role: 'button' as const, tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() }
+    },
+  }
+}
+
 const PersonRow: React.FC<{
   node:        ExecTreeNode
   depth:       number
@@ -379,6 +399,8 @@ const PersonRow: React.FC<{
       {isGroup && (
         <div
           onClick={() => hasReports && onToggle(p.node_id)}
+          {...toggleKeys(hasReports, () => onToggle(p.node_id))}
+          aria-expanded={hasReports ? !isCollapsed : undefined}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             paddingLeft: 12 + indent, paddingRight: 14, paddingTop: 7, paddingBottom: 6,
@@ -414,6 +436,8 @@ const PersonRow: React.FC<{
           background: isSkipped ? 'rgba(245,159,11,0.03)' : undefined,
         }}
         onClick={() => hasReports && onToggle(p.node_id)}
+        {...toggleKeys(hasReports, () => onToggle(p.node_id))}
+        aria-expanded={hasReports ? !isCollapsed : undefined}
       >
         {/* ── Tree connector lines ───────────────────────────── */}
         {depth > 0 && (
@@ -470,7 +494,7 @@ const PersonRow: React.FC<{
 
         {/* Text */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
+          <div title={p.label} style={{
             fontSize: 11.5, fontWeight: depth === 0 ? 700 : 600,
             color: depth === 0 ? '#00204d' : '#3d6880',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -478,11 +502,11 @@ const PersonRow: React.FC<{
             {p.label}
           </div>
           {p.metadata?.designation && (
-            <div style={{
+            <div title={String(p.metadata.designation)} style={{
               fontSize: 9.5, color: '#627184', marginTop: 1,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
-              {String(p.metadata.designation).slice(0, 36)}
+              {String(p.metadata.designation)}
             </div>
           )}
           {/* Committee / sub-role badge — shown for board members with a specific role */}
@@ -558,11 +582,14 @@ const PersonRow: React.FC<{
               <LinkedInBadge meta={p.metadata} />
               {(() => {
                 const m = String(p.metadata?.nlp_method ?? '')
+                // "llm_leadership_web" covers the organisation's own pages AND
+                // cited web research, so this says "Web", not "Website".
                 if (m.includes('web'))
                   return (
-                    <span style={{ fontSize: 8, color: '#059669', background: '#ecfdf5',
+                    <span title="Found on the web: the organisation's own pages or cited research"
+                      style={{ fontSize: 8, color: '#059669', background: '#ecfdf5',
                       borderRadius: 3, padding: '1px 5px', border: '1px solid #a7f3d0' }}>
-                      🌐 Website
+                      🌐 Web
                     </span>
                   )
                 if (m.includes('llm_leadership'))
@@ -640,7 +667,7 @@ const PersonRow: React.FC<{
 }
 
 // ── CSV download helper (client-side, no server needed) ──────────────
-function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
+function downloadExecsCSV(deptLabel: string, execs: OrgNode[], isBoard = false) {
   const LAYER_LABELS: Record<number, string> = {
     0: 'Board of Management (G0)', 1: 'C-Suite (G1)', 2: 'Executive VP (G2)',
     3: 'SVP / Managing Director (G3)', 4: 'VP / Head of (G4)',
@@ -648,11 +675,17 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
     7: 'Senior Manager (G7)', 8: 'Manager (G8)',
     9: 'Senior / Lead / Staff (G9)', 10: 'Analyst / Specialist (G10)',
   }
+  // Board layers are a governance scale (Chair / committee chair / director),
+  // not the G-scale: a committee chair is not "C-Suite (G1)".
+  const BOARD_LABELS: Record<number, string> = {
+    0: 'Chair (Board)', 1: 'Lead / Committee Chair (Board)', 2: 'Director (Board)',
+  }
   const rows = execs.map(p => ({
     Name:              p.label,
     Title:             String(p.metadata?.designation ?? ''),
     Department:        deptLabel,
-    'Seniority Level': LAYER_LABELS[p.layer ?? 9] ?? `G${p.layer ?? 9}`,
+    'Seniority Level': (isBoard ? BOARD_LABELS[p.layer ?? 2] : undefined)
+                         ?? LAYER_LABELS[p.layer ?? 9] ?? `G${p.layer ?? 9}`,
     Region:            String(p.metadata?.region   ?? ''),
     Location:          String(p.metadata?.location ?? ''),
     'LinkedIn URL':    String(p.metadata?.linkedin_url ?? ''),
@@ -661,7 +694,7 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
                              .filter(Boolean).map(String).join(' — '),
     'Leads Department': String(p.metadata?.leads_department ?? ''),
     Source:            String(p.metadata?.nlp_method ?? '').includes('web')
-                         ? 'Company Website'
+                         ? 'Web'
                          : String(p.metadata?.nlp_method ?? '').includes('llm_leadership')
                            ? 'AI Knowledge'
                            : 'Uploaded Data',
@@ -681,11 +714,26 @@ function downloadExecsCSV(deptLabel: string, execs: OrgNode[]) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────
-export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 0, onClose, apiBase = '', companyName = '', onAddPeople, onShowLinkedIn }) => {
-  const isOpen = deptNode !== null
-  const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] ?? deptNode.color ?? '#3491E8') : '#3491E8'
+export const ExecPanel: React.FC<Props> = ({
+  deptNode: deptProp, executives: execsProp, totalCount: totalProp = 0, onClose, apiBase = '',
+  companyName = '', onAddPeople, onShowLinkedIn, error: errorProp = null, onRetry, loadAll, jobId = null,
+}) => {
+  const isOpen = deptProp !== null
+
+  // While the drawer slides out (deptNode is already null) keep showing what
+  // it showed, instead of an empty title and "Loading…".
+  const last = useRef<{ dept: OrgNode; execs: OrgNode[] | null; total: number; error: string | null } | null>(null)
+  if (deptProp) last.current = { dept: deptProp, execs: execsProp, total: totalProp, error: errorProp }
+  const deptNode   = deptProp ?? last.current?.dept ?? null
+  const executives = deptProp ? execsProp : (last.current?.execs ?? null)
+  const totalCount = deptProp ? totalProp : (last.current?.total ?? 0)
+  const error      = deptProp ? errorProp : (last.current?.error ?? null)
+
+  // `||`, not `??`: departments made for executives carry sector "" and color "".
+  const color  = deptNode ? (SECTOR_COLORS[deptNode.sector] || deptNode.color || '#3491E8') : '#3491E8'
 
   const [reportPerson, setReportPerson] = useState<OrgNode | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleCollapse = (id: string) =>
@@ -703,6 +751,41 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
       if (next.has(region)) next.delete(region); else next.add(region)
       return next
     })
+
+  // Another department starts fully expanded; the Region/Country choice stays.
+  const openId = deptProp?.node_id ?? null
+  useEffect(() => {
+    if (!openId) return
+    setCollapsed(new Set())
+    setCollapsedRegions(new Set())
+    setReportPerson(null)
+  }, [openId])
+
+  // Escape closes the report dialog first, then the drawer. A capture-phase
+  // listener runs before App's own (bubble-phase) Escape handler, so it can
+  // claim the key while the dialog is open.
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !reportPerson) return
+      e.stopImmediatePropagation()
+      setReportPerson(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [isOpen, reportPerson])
+
+  // Save writes every person in the department, not only the first page.
+  const saveCsv = async () => {
+    if (!executives?.length || saving) return
+    let people = executives
+    if (loadAll && totalCount > executives.length) {
+      setSaving(true)
+      try { people = await loadAll() } catch { /* keep the loaded page */ }
+      finally { setSaving(false) }
+    }
+    downloadExecsCSV(deptNode?.label ?? 'executives', people, isBoard)
+  }
 
   const isBoard = deptNode?.node_id === 'dept__board_of_management'
   const isEM    = deptNode?.node_id === 'dept__executive_management'
@@ -771,7 +854,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
     [/\bunited\s+kingdom\b|\bu\.?k\.?\b|\bbritish\b|\bengland\b/i,   'United Kingdom'],
     [/\bgermany\b|\bgerman\b/i,          'Germany'],
     [/\bfrance\b|\bfrench\b/i,           'France'],
-    [/\bnetherlans?\b|\bdutch\b/i,       'Netherlands'],
+    [/\bnetherlands?\b|\bdutch\b/i,      'Netherlands'],
     [/\bswitzerland\b|\bswiss\b/i,       'Switzerland'],
     [/\bsweden\b|\bswedish\b/i,          'Sweden'],
     [/\bnorway\b|\bnorwegian\b/i,        'Norway'],
@@ -818,10 +901,18 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
     // 2. BOD → always Global HQ
     if (forBoard) return 'Global HQ'
     // 3. Try to extract from location string (e.g. "London, United Kingdom")
+    // "London, UK" used to fall through: two- and three-letter codes were
+    // rejected as too short. Common ones are spelled out instead.
+    const CODES: Record<string, string> = {
+      UK: 'United Kingdom', GB: 'United Kingdom', US: 'United States', USA: 'United States',
+      UAE: 'UAE', KSA: 'Saudi Arabia',
+    }
     const loc = ((person.metadata?.location as string) || '').trim()
     if (loc) {
       const parts = loc.split(',').map(s => s.trim())
       const countryPart = parts[parts.length - 1]
+      const code = CODES[countryPart.replace(/\./g, '').toUpperCase()]
+      if (code) return code
       if (countryPart && countryPart.length > 2) return countryPart
     }
     // 4. Infer from title keywords (country-specific patterns)
@@ -935,19 +1026,20 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
                 borderRadius: 3, padding: '2px 6px', display: 'inline-block',
               }}>
                 Showing top {executives.length.toLocaleString()} of {totalCount.toLocaleString()} by seniority
-                &nbsp;·&nbsp;Export CSV for full list
+                &nbsp;·&nbsp;Save downloads all {totalCount.toLocaleString()}
               </div>
             )}
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
             {executives && executives.length > 0 && (
               <button
-                onClick={() => downloadExecsCSV(deptNode?.label ?? 'executives', executives)}
+                onClick={saveCsv}
+                disabled={saving}
                 title="Download these executives as CSV"
                 style={{
                   background: 'none', border: `1px solid ${color}40`,
                   borderRadius: 5, padding: '3px 8px',
-                  color, fontSize: 9, cursor: 'pointer',
+                  color, fontSize: 9, cursor: saving ? 'wait' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: 4,
                   fontWeight: 600, letterSpacing: 0.3,
                 }}
@@ -957,7 +1049,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
                   <polyline points="7 10 12 15 17 10"/>
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </button>
             )}
             {onShowLinkedIn && executives && executives.length > 0 && (
@@ -1066,8 +1158,31 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
           </div>
         )}
 
+        {/* Could not load — not the same as "nobody here" */}
+        {executives !== null && executives.length === 0 && error && (
+          <div style={{
+            padding: '28px 18px', textAlign: 'center',
+            color: '#627184', fontSize: 12, lineHeight: 1.6,
+          }}>
+            <div style={{ fontSize: 20, marginBottom: 8, color: '#E63946' }}>⚠</div>
+            <div>Couldn't load the people in this department.</div>
+            <div style={{ fontSize: 10, color: '#93a7b4', marginTop: 6, lineHeight: 1.6 }}>{error}</div>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                style={{
+                  marginTop: 12, background: '#E63946', border: 'none', borderRadius: 6,
+                  padding: '5px 14px', color: '#ffffff', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Try again
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Empty */}
-        {executives !== null && executives.length === 0 && (
+        {executives !== null && executives.length === 0 && !error && (
           <div style={{
             padding: '28px 18px', textAlign: 'center',
             color: '#627184', fontSize: 12, lineHeight: 1.6,
@@ -1082,7 +1197,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
         )}
 
         {/* Empty state hint to report new exec */}
-        {executives !== null && executives.length === 0 && apiBase && (
+        {executives !== null && executives.length === 0 && !error && apiBase && (
           <div style={{ padding: '0 18px 16px', textAlign: 'center' }}>
             <button
               onClick={() => setReportPerson({ node_id: '__new__', label: '', type: 'person' } as unknown as OrgNode)}
@@ -1110,6 +1225,8 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
               {/* Region sub-card header */}
               <div
                 onClick={() => toggleRegion(region)}
+                {...toggleKeys(true, () => toggleRegion(region))}
+                aria-expanded={!isRgnCollapsed}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
                   padding: '5px 12px 5px 10px',
@@ -1180,7 +1297,7 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
               color: '#3491E8', fontSize: 9, cursor: 'pointer', fontWeight: 600,
             }}
           >
-            + Report missing executive
+            + Report a missing executive
           </button>
         </div>
       )}
@@ -1190,6 +1307,8 @@ export const ExecPanel: React.FC<Props> = ({ deptNode, executives, totalCount = 
         <FeedbackModal
           person={reportPerson.node_id === '__new__' ? undefined : reportPerson}
           deptName={deptNode?.label ?? ''}
+          deptId={deptNode?.node_id ?? ''}
+          jobId={jobId}
           companyName={companyName}
           apiBase={apiBase}
           onClose={() => setReportPerson(null)}
