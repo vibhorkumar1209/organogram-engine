@@ -214,5 +214,21 @@ for title, dept in [("Senior Vice President, Chief Business Officer, Google", "S
     got = S._exec_department(title, "Google")
     ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
 
+# ── Directors stay off Executive Management (Google, Nov 2026) ─────────────
+for title, board_only in [("Co-Founder, Director", True), ("Director", True),
+                          ("Non-Executive Director", True), ("Lead Independent Director", True),
+                          ("Director, Search", False), ("Executive Director", False),
+                          ("Managing Director", False), ("Director of Engineering", False),
+                          ("Co-Founder", False), ("Chairman", False), ("Founder, Director and CEO", False)]:
+    ok(F._is_board_only_title(title) == board_only, f"board-only title: {title!r} -> {board_only}")
+r = {"board": [{"name": "Larry Page", "title": "Director"}],
+     "executives": [{"name": "Larry Page", "title": "Co-Founder, Director"},
+                    {"name": "Sergey Brin", "title": "Co-Founder, Director"},
+                    {"name": "Sundar Pichai", "title": "Chief Executive Officer"}]}
+F._drop_junior(r)
+ok([p["name"] for p in r["executives"]] == ["Sundar Pichai"]
+   and [p["name"] for p in r["board"]] == ["Larry Page", "Sergey Brin"],
+   "directors leave Executive Management; one missing from the Board is added there, none duplicated")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

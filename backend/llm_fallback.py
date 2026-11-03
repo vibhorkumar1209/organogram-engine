@@ -3479,8 +3479,57 @@ def _is_junior_title(title: str) -> bool:
     return bool(_JUNIOR_TITLE_RE.search(t)) and not _SENIOR_WORD_RE.search(t)
 
 
+# Board-only wording. A title made of nothing else names a director, not an
+# executive: Google's "Co-Founder, Director" (Larry Page, Sergey Brin) was
+# listed in Executive Management as well as on the Board.
+_BOARD_ONLY_WORDS_RE = re.compile(
+    r"\b(?:(?:independent|non[-\s]?executive|lead|presiding|outside)\s+)*director(?:\s+emeritus)?\b"
+    r"|\bboard\s+member\b|\bmember\s+of\s+the\s+board(?:\s+of\s+directors)?\b|\btrustee\b",
+    re.IGNORECASE)
+_FOUNDER_WORDS_RE = re.compile(r"\b(?:co[-\s]?)?founder\b", re.IGNORECASE)
+
+
+def _is_board_only_title(title: str) -> bool:
+    """True for "Director", "Co-Founder, Director", "Independent Director"...
+
+    "Director, Search", "Executive Director", "Managing Director" and any
+    chair title are operating roles and stay.
+    """
+    t = str(title or "")
+    operating = re.sub(r"non[-\s]?executive", " ", t, flags=re.I)   # not "executive director"
+    if not _BOARD_ONLY_WORDS_RE.search(t) or re.search(
+            r"\b(?:executive|managing)\s+director\b|\bdirector\s+(?:of|for)\b", operating, re.I):
+        return False
+    rest = _FOUNDER_WORDS_RE.sub(" ", _BOARD_ONLY_WORDS_RE.sub(" ", t))
+    return not re.sub(r"[\s,;&/()|\-–—]+|\band\b", "", rest, flags=re.I)
+
+
+def _keep_directors_on_board(result: dict) -> None:
+    """Move board-only titles out of Executive Management onto the Board."""
+    execs = result.get("executives") or []
+    if not execs:
+        return
+    board = result.setdefault("board", [])
+    on_board = set()
+    for p in board:
+        on_board |= _name_aliases(p.get("name", ""))
+    kept, moved = [], 0
+    for p in execs:
+        if not _is_board_only_title(p.get("title", "")):
+            kept.append(p)
+            continue
+        moved += 1
+        if not (_name_aliases(p.get("name", "")) & on_board):
+            board.append(p)
+            on_board |= _name_aliases(p.get("name", ""))
+    if moved:
+        logger.info("Kept %d director(s) off Executive Management", moved)
+        result["executives"] = kept
+
+
 def _drop_junior(result: dict) -> None:
     """Keep junior staff out of Executive Management and senior leadership."""
+    _keep_directors_on_board(result)
     for section in ("executives", "senior_leadership"):
         people = result.get(section) or []
         kept = [p for p in people if not _is_junior_title(p.get("title", ""))]
