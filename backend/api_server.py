@@ -1903,7 +1903,7 @@ def selectable_targets(job_id: str = Query(...)):
             continue                      # Executive Management only
         meta = attrs.get("metadata", {}) or {}
         title = meta.get("designation", "")
-        dept = _exec_department(title)
+        dept = _exec_department(title, meta.get("company", ""))
         executives.append({
             "id": nid,
             "label": attrs.get("label", ""),

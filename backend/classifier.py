@@ -822,6 +822,7 @@ _DEPT_SCORE_RULES: list[tuple[str, list[tuple[int, str]]]] = [
     (DEPT_ENG, [
         (100, "cto"), (100, "chief technology officer"),
         (100, "chief technical officer"),
+        (95,  "chief technologist"),
         (90,  "vp engineering"), (90, "vp of engineering"),
         (90,  "head of engineering"), (90, "engineering director"),
         (90,  "director of engineering"),
@@ -912,6 +913,7 @@ _DEPT_SCORE_RULES: list[tuple[str, list[tuple[int, str]]]] = [
     # ── Sales & Business Development ────────────────────────────────────────
     (DEPT_SALES, [
         (100, "chief revenue officer"),
+        (100, "chief business officer"), (100, "chief sales officer"),
         (90,  "vp sales"), (90, "vp of sales"),
         (90,  "sales director"), (90, "head of sales"),
         (90,  "business development director"), (90, "bd director"),

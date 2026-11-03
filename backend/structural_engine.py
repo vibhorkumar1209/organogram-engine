@@ -2602,7 +2602,37 @@ def _titlecase_dept(name: str) -> str:
     return " ".join(out)
 
 
-def _exec_department(title: str) -> str:
+_ORG_SUFFIX_RE = re.compile(
+    r"[\s,]+(?:inc|corp|corporation|co|ltd|limited|plc|llc|lp|ag|sa|nv|se|gmbh)\.?$",
+    re.IGNORECASE)
+
+
+def _strip_org_qualifier(title: str, company: str = "") -> str:
+    """Drop the trailing ", Google" / ", Alphabet and Google" that names the
+    employer, not a department.
+
+    Google's "Senior Vice President, Chief Business Officer, Google" became a
+    department called "Business Officer, Google", and "Chief Technologist,
+    Google" one called "Google". A segment is the employer when it is the
+    company's name, or the company joined to one other short name ("Alphabet
+    and Google", a parent and its subsidiary). "Google DeepMind" is kept: it is
+    a business unit that happens to start with the company's name.
+    """
+    comp = _ORG_SUFFIX_RE.sub("", str(company or "")).strip().lower()
+    if not comp:
+        return title
+    parts = [p_.strip() for p_ in re.split(r"[,;]", title)]
+    kept = [parts[0]]
+    for seg in parts[1:]:
+        names = [_ORG_SUFFIX_RE.sub("", n).strip().lower()
+                 for n in re.split(r"\s+(?:and|&)\s+", seg)]
+        if comp in names and all(0 < len(n.split()) <= 2 for n in names):
+            continue
+        kept.append(seg)
+    return ", ".join(k for k in kept if k)
+
+
+def _exec_department(title: str, company: str = "") -> str:
     """
     The department an executive runs, or "" for the apex (CEO / Chair).
 
@@ -2620,7 +2650,7 @@ def _exec_department(title: str) -> str:
     Abbott's eight business units distinct instead of collapsing them all into
     one Operations department.
     """
-    raw = str(title or "").strip()
+    raw = _strip_org_qualifier(str(title or "").strip(), company)
     if not raw:
         return ""
     if _is_ceo(raw) or _is_board_chairman(raw):
@@ -2711,6 +2741,10 @@ def _business_unit_from_title(title: str) -> str:
     # region. Strip the geography; whatever function remains ("US West Client
     # Services" -> "Client Services") is the department, or nothing is.
     tail = _GEO_WORDS_RE.sub(" ", tail)
+    # "Chief Wellness Officer" leaves "Wellness Officer": a job title, not a
+    # department.
+    if re.search(r"\bofficer\b", tail, re.IGNORECASE):
+        return ""
     tail = re.sub(r"\s+", " ", tail).strip(" ,&-")
     _GENERIC_TAIL = {"staff", "office", "the company", "company", "group",
                      "business", "operations officer", "administration", "and", "&"}
@@ -2788,7 +2822,7 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
         if _person_department(dag, nid) != EXEC_DEPT:
             continue
         meta = attrs.get("metadata", {}) or {}
-        dept_name = _exec_department(meta.get("designation", ""))
+        dept_name = _exec_department(meta.get("designation", ""), meta.get("company", ""))
         if dept_name:
             leads[nid] = dept_name
             head_of.setdefault(

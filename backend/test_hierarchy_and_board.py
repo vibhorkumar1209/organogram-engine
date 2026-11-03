@@ -203,5 +203,14 @@ for title, dept in [("SVP, Head of Delivery", "Delivery"),
     got = S._exec_department(title)
     ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
 
+# ── The employer's name is not a department (Google, Nov 2026) ──────────────
+for title, dept in [("Senior Vice President, Chief Business Officer, Google", "Sales & Business Development"),
+                    ("Chief Technologist, Google", "Engineering"),
+                    ("Senior Vice President, Chief Financial Officer, Alphabet and Google", "Finance & Accounting"),
+                    ("Senior Vice President, Google DeepMind", "Google DeepMind"),
+                    ("Chief Wellness Officer", "")]:
+    got = S._exec_department(title, "Google")
+    ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")
+
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)
