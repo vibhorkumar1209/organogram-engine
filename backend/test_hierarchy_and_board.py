@@ -229,6 +229,13 @@ F._drop_junior(r)
 ok([p["name"] for p in r["executives"]] == ["Sundar Pichai"]
    and [p["name"] for p in r["board"]] == ["Larry Page", "Sergey Brin"],
    "directors leave Executive Management; one missing from the Board is added there, none duplicated")
+r = {"board": [{"name": "Larry Page", "title": "Co-Founder"}, {"name": "Sundar Pichai", "title": "Chief Executive Officer"}],
+     "executives": [{"name": "Larry Page", "title": "Co-Founder"},
+                    {"name": "Chris Malachowsky", "title": "Co-Founder"},
+                    {"name": "Sundar Pichai", "title": "Chief Executive Officer, Alphabet and Google"}]}
+F._drop_junior(r)
+ok([p["name"] for p in r["executives"]] == ["Chris Malachowsky", "Sundar Pichai"],
+   "a bare Co-Founder on the Board leaves Executive Management; one not on the Board stays; the CEO stays")
 
 print("\n%d failed" % len(fails) if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

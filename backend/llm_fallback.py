@@ -3489,15 +3489,18 @@ _BOARD_ONLY_WORDS_RE = re.compile(
 _FOUNDER_WORDS_RE = re.compile(r"\b(?:co[-\s]?)?founder\b", re.IGNORECASE)
 
 
-def _is_board_only_title(title: str) -> bool:
+def _is_board_only_title(title: str, founder_counts: bool = False) -> bool:
     """True for "Director", "Co-Founder, Director", "Independent Director"...
 
+    founder_counts: a bare "Co-Founder" counts too — for someone already on
+    the Board it names no executive job (Google's Larry Page, Sergey Brin).
     "Director, Search", "Executive Director", "Managing Director" and any
     chair title are operating roles and stay.
     """
     t = str(title or "")
     operating = re.sub(r"non[-\s]?executive", " ", t, flags=re.I)   # not "executive director"
-    if not _BOARD_ONLY_WORDS_RE.search(t) or re.search(
+    marked = _BOARD_ONLY_WORDS_RE.search(t) or (founder_counts and _FOUNDER_WORDS_RE.search(t))
+    if not marked or re.search(
             r"\b(?:executive|managing)\s+director\b|\bdirector\s+(?:of|for)\b", operating, re.I):
         return False
     rest = _FOUNDER_WORDS_RE.sub(" ", _BOARD_ONLY_WORDS_RE.sub(" ", t))
@@ -3515,13 +3518,14 @@ def _keep_directors_on_board(result: dict) -> None:
         on_board |= _name_aliases(p.get("name", ""))
     kept, moved = [], 0
     for p in execs:
-        if not _is_board_only_title(p.get("title", "")):
+        aliases = _name_aliases(p.get("name", ""))
+        if not _is_board_only_title(p.get("title", ""), founder_counts=bool(aliases & on_board)):
             kept.append(p)
             continue
         moved += 1
-        if not (_name_aliases(p.get("name", "")) & on_board):
+        if not (aliases & on_board):
             board.append(p)
-            on_board |= _name_aliases(p.get("name", ""))
+            on_board |= aliases
     if moved:
         logger.info("Kept %d director(s) off Executive Management", moved)
         result["executives"] = kept
