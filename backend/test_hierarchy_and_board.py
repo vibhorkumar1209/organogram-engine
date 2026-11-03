@@ -208,6 +208,8 @@ for title, dept in [("Senior Vice President, Chief Business Officer, Google", "S
                     ("Chief Technologist, Google", "Engineering"),
                     ("Senior Vice President, Chief Financial Officer, Alphabet and Google", "Finance & Accounting"),
                     ("Senior Vice President, Google DeepMind", "Google DeepMind"),
+                    ("Senior Vice President, Google DeepMind; Chief AI Architect, Google", "Google DeepMind"),
+                    ("Vice President, AI Acceleration on Android", "AI Acceleration on Android"),
                     ("Chief Wellness Officer", "")]:
     got = S._exec_department(title, "Google")
     ok(got == dept, f"dept: {title!r} -> {dept!r} (got {got!r})")

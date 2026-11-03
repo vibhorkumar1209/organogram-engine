@@ -2579,7 +2579,7 @@ _RANK_PREFIX_RE = re.compile(
 )
 
 
-_SMALL_WORDS = {"and", "of", "the", "for", "in", "to", "a", "an", "&"}
+_SMALL_WORDS = {"and", "of", "the", "for", "in", "on", "at", "with", "to", "a", "an", "&"}
 
 
 def _titlecase_dept(name: str) -> str:
@@ -2621,15 +2621,17 @@ def _strip_org_qualifier(title: str, company: str = "") -> str:
     comp = _ORG_SUFFIX_RE.sub("", str(company or "")).strip().lower()
     if not comp:
         return title
-    parts = [p_.strip() for p_ in re.split(r"[,;]", title)]
-    kept = [parts[0]]
-    for seg in parts[1:]:
+    # Split keeping each separator, so "; Chief AI Architect" still reads as
+    # a second role afterwards.
+    parts = re.split(r"(\s*[,;]\s*)", title)
+    out = parts[0]
+    for sep, seg in zip(parts[1::2], parts[2::2]):
         names = [_ORG_SUFFIX_RE.sub("", n).strip().lower()
-                 for n in re.split(r"\s+(?:and|&)\s+", seg)]
+                 for n in re.split(r"\s+(?:and|&)\s+", seg.strip())]
         if comp in names and all(0 < len(n.split()) <= 2 for n in names):
             continue
-        kept.append(seg)
-    return ", ".join(k for k in kept if k)
+        out += sep + seg
+    return out.strip(" ,;")
 
 
 def _exec_department(title: str, company: str = "") -> str:
@@ -2730,6 +2732,10 @@ def _business_unit_from_title(title: str) -> str:
             tail = m.group(1)
     tail = re.sub(r"\s+and\s+(?:chief|secretary|general counsel).*$", "", tail,
                   flags=re.IGNORECASE).strip(" ,&-")
+    # "Google DeepMind; Chief AI Architect": a ";" or a ", Chief …" starts a
+    # second role, which is not part of the unit's name.
+    tail = re.split(r"\s*;\s*|,\s*(?=(?:chief|head|president|vice\s+president|vp|svp|evp)\b)",
+                    tail, flags=re.IGNORECASE)[0].strip(" ,&-")
     tail = _RANK_PREFIX_RE.sub("", tail).strip(" ,&-")
     # "SVP, Head of Delivery" left "of Delivery" — a department literally
     # called "Of Delivery" appeared on Pyramid Consulting's chart.
