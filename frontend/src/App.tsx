@@ -11,6 +11,9 @@ const API = (import.meta.env.VITE_API_URL || '/api').trim()
 // ── History ────────────────────────────────────────────────────────────
 const HISTORY_KEY  = 'orgchart_history'
 const HISTORY_MAX  = 12
+// Bump when what /executives returns changes, so drawer contents cached in the
+// browser before the change are fetched again. 2: departments list their heads.
+const EXEC_CACHE_VERSION = 2
 
 interface Usage {
   inputTokens:  number
@@ -61,6 +64,7 @@ interface HistoryEntry {
   execCache:   Record<string, OrgNode[]>   // dept_id → executives (for offline restore)
   usage:       Usage | null   // tokens/$ spent generating this chart; null for entries saved before this existed
   jobId:       string | null   // server-assigned id for the backend job that produced this chart; null for entries saved before this existed
+  cacheVersion?: number        // EXEC_CACHE_VERSION the execCache was filled under; absent on older entries
 }
 
 function toUsage(raw: any): Usage | null {
@@ -502,6 +506,7 @@ export default function App() {
       execCache:   {},
       usage,
       jobId,
+      cacheVersion: EXEC_CACHE_VERSION,
     }
     activeEntryIdRef.current = entry.id
     setHistory(prev => {
@@ -516,6 +521,16 @@ export default function App() {
   const restoreSnapshot = useCallback((entry: HistoryEntry) => {
     // Restore visual state from localStorage immediately
     activeEntryIdRef.current = entry.id
+    // Drawer contents cached under an older /executives shape are refetched.
+    if (entry.cacheVersion !== EXEC_CACHE_VERSION) {
+      setHistory(prev => {
+        const next = prev.map(e => e.id === entry.id
+          ? { ...e, execCache: {}, cacheVersion: EXEC_CACHE_VERSION } : e)
+        historyRef.current = next
+        persistHistory(next)
+        return next
+      })
+    }
     setDeptTree(entry.deptTree)
     setStats(entry.stats)
     setIndustry(entry.industry)

@@ -283,7 +283,21 @@ function buildExecTree(people: OrgNode[], isEM: boolean = false, isBOD: boolean 
   // BOD: special flat-under-chairman tree
   if (isBOD) return buildBODTree(sorted)
 
-  if (!isEM) return buildLayerTree(sorted)
+  if (!isEM) {
+    // A department's own head (the executive who runs it, flagged by the
+    // server) leads its team; without one, layers stack as before. Co-heads
+    // stand side by side, and their team is not assigned to either.
+    const heads = sorted.filter(p => Boolean(p.metadata?.is_department_head))
+    if (!heads.length) return buildLayerTree(sorted)
+    const team = buildLayerTree(sorted.filter(p => !p.metadata?.is_department_head))
+    if (heads.length === 1) {
+      team.forEach((n, i) => { n.isLast = i === team.length - 1 })
+      return [{ person: heads[0], reports: team, isLast: true }]
+    }
+    const roots = [...heads.map(p => leaf(p)), ...team]
+    roots.forEach((n, i) => { n.isLast = i === roots.length - 1 })
+    return roots
+  }
 
   // EM: CEO at top, C-Suite peers as direct reports, deeper layers cascade.
   const topLayer = sorted[0]?.layer ?? 99

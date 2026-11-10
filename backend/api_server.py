@@ -2233,7 +2233,21 @@ def get_executives(
 
     collect(dept_id, set())
 
-    people.sort(key=lambda p: (p.get("layer", 99), p.get("label", "")))
+    # The executives who run this department sit in Executive Management, a
+    # separate branch the walk above never reaches — so Finance & Accounting
+    # listed its team but not its CFO. Add them, flagged, ahead of their team.
+    # (A copy: the node itself stays in Executive Management.)
+    if dept_id not in (_dept_node_id(BOARD_DEPT), _dept_node_id(EXEC_DEPT)):
+        have = {p.get("node_id") for p in people}
+        for nid, attrs in dag.G.nodes(data=True):
+            meta = attrs.get("metadata") or {}
+            if (attrs.get("node_type") == "person" and nid not in have
+                    and meta.get("leads_department_id") == dept_id):
+                people.append({**attrs, "node_id": attrs.get("node_id", nid),
+                               "metadata": {**meta, "is_department_head": True}})
+
+    people.sort(key=lambda p: (0 if (p.get("metadata") or {}).get("is_department_head") else 1,
+                               p.get("layer", 99), p.get("label", "")))
     total = len(people)
     page  = people[offset : offset + limit]
     return {

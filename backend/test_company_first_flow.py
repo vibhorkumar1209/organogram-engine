@@ -228,6 +228,21 @@ fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accou
 ok(fin["people"] >= 1,
    f"split: ingested people counted under the department (got {fin['people']})")
 
+# The department's own drawer lists the executive who runs it — first, flagged —
+# then its team. The executive also stays in Executive Management.
+fin_people = client.get("/executives", params={"job_id": em_job, "dept_id": fin_id}).json()
+fin_names = [p["label"] for p in fin_people["executives"]]
+ok(fin_names[:1] == ["Fin Tanaka"]
+   and fin_people["executives"][0]["metadata"].get("is_department_head") is True,
+   f"drawer: the CFO heads Finance & Accounting's list ({fin_names})")
+ok("Pia Lindqvist" in fin_names and fin_people["total"] == len(fin_names),
+   "drawer: the department's own team follows its head, counted in total")
+em_people = client.get("/executives", params={"job_id": em_job,
+                                              "dept_id": S._dept_node_id(S.EXEC_DEPT)}).json()
+em_fin = [p for p in em_people["executives"] if p["label"] == "Fin Tanaka"]
+ok(em_fin and not em_fin[0]["metadata"].get("is_department_head"),
+   "drawer: the CFO is still in Executive Management, unflagged there")
+
 # ── Departments branch from EM even when the search finds almost nobody ─────
 # Executive Management is only created when someone is placed in it. A live
 # NVIDIA run returned 0 directors and 1 executive who landed in a functional
