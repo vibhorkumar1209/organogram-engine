@@ -2354,21 +2354,36 @@ def _enrich_with_llm_leadership(
             sub_role = _board_sub_role(title)
             li = (person.get("linkedin_url", "") or "").strip()
             injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region, li))
+        exec_rows = []
         for person in leadership.get("executives", []):
             title = person["title"]
             em_layer    = _exec_layer(title)
             if _is_regional_exec(title):
                 em_layer = max(em_layer, 2)
-            exec_region = _infer_exec_region(title, region)
+            exec_rows.append((em_layer, person, title))
+        # Only CXOs, heads, EVPs and SVPs (plus legal counsel, and VPs by
+        # exception) sit in Executive Management. The rest are real leaders
+        # too: they join their department as ordinary people, below.
+        in_em = executive_management_members([(lyr, t) for lyr, _p, t in exec_rows])
+        outside_em: list[dict] = []
+        for i, (em_layer, person, title) in enumerate(exec_rows):
             li = (person.get("linkedin_url", "") or "").strip()
+            if i not in in_em:
+                outside_em.append({"FullName": person["name"], "Designation": title,
+                                   "Company": co, "LinkedInURL": li})
+                continue
+            exec_region = _infer_exec_region(title, region)
             injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region, li))
+        if outside_em:
+            logger.info("Kept %d below-SVP leader(s) out of Executive Management for '%s': %s",
+                        len(outside_em), co, [r["FullName"] for r in outside_em])
 
         # Build set of name-keys that appear in BOTH board and executives lists.
         # These "dual-role" individuals (e.g. Executive Chairman who is also CEO)
         # must be injected into both panels, so deduplication is done per
         # (name, dept) pair rather than just per name.
         board_keys = {_name_key(p["name"]) for p in leadership.get("board", [])}
-        exec_keys  = {_name_key(p["name"]) for p in leadership.get("executives", [])}
+        exec_keys  = {_name_key(exec_rows[i][1]["name"]) for i in in_em}
         dual_role_keys = board_keys & exec_keys
 
         from inference_logic import ClassifiedRecord
@@ -2456,6 +2471,17 @@ def _enrich_with_llm_leadership(
                         pmeta["linkedin_site_url"] = site_li
             except Exception as _exc:
                 logger.warning("Failed to inject leadership person %s: %s", name, _exc)
+
+        # Leaders below Executive Management go where a roster would put them:
+        # the classifier picks the department, and anyone already in the chart
+        # (a director, say) is merged rather than duplicated.
+        if outside_em:
+            try:
+                add_records_to_dag(dag, outside_em, co, industry=str(
+                    (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}).get("industry", "")))
+            except Exception as _exc:
+                logger.warning("Could not place leaders outside Executive Management for '%s': %s",
+                               co, _exc)
 
     # ── Guarantee BOD node always exists ─────────────────────────────────
     # BOD is only created when board members are found.  If web + LLM returned
@@ -2998,6 +3024,47 @@ def _exec_layer(title: str) -> int:
     return max(1, min(int(layer), 8))
 
 
+# Who belongs in Executive Management (user rule, Nov 2026): CXOs, heads,
+# EVPs and SVPs. A Vice President only by exception; below that, only legal
+# counsel. Google's chart had listed a Senior Director and several plain VPs.
+_LEGAL_COUNSEL_RE = re.compile(
+    r"\bcounsel\b|\blegal\b|\b(?:company|corporate)\s+secretary\b", re.IGNORECASE)
+_HEAD_ROLE_RE = re.compile(r"\bhead\b|\bchief\b|\bofficer\b", re.IGNORECASE)
+# A leadership team this small keeps its plain VPs: they are its top tier.
+_EM_THIN = 4
+
+
+def em_eligible(title: str, layer: int | None = None, allow_vp: bool = False) -> bool:
+    """Whether a title belongs in Executive Management.
+
+    layer: the executive seniority (`_exec_layer`), computed when not given.
+    allow_vp: the exception — a plain Vice President is kept.
+    """
+    t = str(title or "")
+    if _LEGAL_COUNSEL_RE.search(t):
+        return True                    # legal counsel sits at the top table at any grade
+    if layer is None:
+        layer = _exec_layer(t)
+    if layer <= 3:
+        return True                    # C-suite, EVP, SVP / Managing Director
+    if layer <= 6 and _HEAD_ROLE_RE.search(t):
+        return True                    # "VP, Head of Search", "Principal Accounting Officer"
+    return allow_vp and layer == 4
+
+
+def executive_management_members(rows: list[tuple[int, str]]) -> set[int]:
+    """Indexes of (layer, title) rows that belong in Executive Management.
+
+    Plain Vice Presidents are the exception: kept only when fewer than
+    `_EM_THIN` people would otherwise qualify.
+    """
+    keep = {i for i, (layer, title) in enumerate(rows) if em_eligible(title, layer)}
+    if len(keep) < _EM_THIN:
+        keep |= {i for i, (layer, title) in enumerate(rows)
+                 if em_eligible(title, layer, allow_vp=True)}
+    return keep
+
+
 def mark_apex(dag: "OrganogramDAG") -> str:
     """
     Mark the one person who leads Executive Management, and say so on the panel.
@@ -3133,7 +3200,7 @@ def add_records_to_dag(
             rec.layer = 0 if _is_board_chairman(rec.designation) else 2
             rec.nlp_method = "upload_leadership"
             board_count += 1
-        elif bucket == EXEC_DEPT:
+        elif bucket == EXEC_DEPT and em_eligible(rec.designation):
             rec.dept_primary = EXEC_DEPT
             rec.layer = 2 if _is_regional_exec(rec.designation) else 1
             rec.nlp_method = "upload_leadership"
@@ -3485,7 +3552,15 @@ def promote_uploaded_to_leadership(
                 dept_heads.values(),
                 key=lambda r: (getattr(r, "layer", 99), getattr(r, "full_name", "") or ""),
             )
-            for rec in heads:
+            # A department whose most senior uploaded person is a manager or a
+            # director has no one for Executive Management: only CXOs, heads,
+            # EVPs and SVPs (plus legal counsel, and VPs by exception) sit there.
+            picked = executive_management_members(
+                [(_exec_layer(getattr(r, "designation", "") or ""),
+                  getattr(r, "designation", "") or "") for r in heads])
+            for i, rec in enumerate(heads):
+                if i not in picked:
+                    continue
                 lyr = max(2, min(getattr(rec, "layer", 3), 4))   # clamp to 2-4
                 _inject(rec, "Executive Management", lyr)
 

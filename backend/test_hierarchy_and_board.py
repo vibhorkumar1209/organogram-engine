@@ -98,15 +98,41 @@ ok(em_meta.get("head_name") == "Sanjeev Tirath",
 
 layers = {n: a.get("layer") for n, (_, a) in em.items()}
 ok(layers["Sanjeev Tirath"] == 1, "layers: CEO at 1")
-ok(layers["Brian Church"] == 2 and layers["Anand Kapoor"] == 3 and layers["Sunil Dhar"] == 4
-   and layers["Janelle Polen"] == 6,
-   f"layers: EVP 2, SVP 3, VP 4, Director 6 — not all 1 (got {layers})")
+ok(layers["Brian Church"] == 2 and layers["Anand Kapoor"] == 3,
+   f"layers: EVP 2, SVP 3 — not all 1 (got {layers})")
+
+# Executive Management = CXOs, heads, EVPs, SVPs. A plain VP and a Director are
+# real leaders but not on it: they join a department instead (Nov 2026 rule).
+ok("Sunil Dhar" not in em and "Janelle Polen" not in em,
+   f"em rule: the plain VP and the Director are not in Executive Management ({sorted(em)})")
+placed = {a["label"]: S._person_department(dag, nid) for nid, a in dag.G.nodes(data=True)
+          if a.get("node_type") == "person" and a["label"] in ("Sunil Dhar", "Janelle Polen")}
+ok(set(placed) == {"Sunil Dhar", "Janelle Polen"}
+   and not {S.EXEC_DEPT, S.BOARD_DEPT} & set(placed.values()),
+   f"em rule: they are placed in departments, not dropped ({placed})")
 ok(layers["Ramesh Maturu"] == 1 and layers["Nevin Okay"] == 1,
    "layers: presidents and founders stay in the top tier")
 
 r = client.get("/leadership-ready", params={"job_id": job}).json()
-ok(r["board_count"] == 1 and r["exec_count"] == 8,
-   f"counts: 1 director, 8 executives (got {r['board_count']}, {r['exec_count']})")
+ok(r["board_count"] == 1 and r["exec_count"] == 6,
+   f"counts: 1 director, 6 executives (got {r['board_count']}, {r['exec_count']})")
+
+# The eligibility rule itself.
+for title, layer, inside in [
+        ("Chief Financial Officer", None, True), ("Executive Vice President, Operations", None, True),
+        ("Senior Vice President, Platforms & Devices", None, True), ("Managing Director, Asia", None, True),
+        ("VP, Head of Search", None, True), ("Global Head of Sales", None, True),
+        ("Vice President and Controller; Principal Accounting Officer", None, True),
+        ("Vice President, Google Labs", None, False), ("Senior Director, Products for All", None, False),
+        ("Director of Business Development", None, False), ("Senior Manager, FP&A", None, False),
+        ("Manager, Legal", None, True), ("Legal Counsel", None, True),
+        ("Associate General Counsel", None, True), ("Company Secretary", None, True)]:
+    ok(S.em_eligible(title, layer) == inside, f"em rule: {title!r} -> {'in' if inside else 'out'}")
+ok(S.executive_management_members([(1, "CEO"), (4, "Vice President, Sales"), (4, "Vice President, Ops")])
+   == {0, 1, 2}, "em rule: a team this small keeps its plain VPs (the exception)")
+ok(S.executive_management_members([(1, "CEO"), (1, "CFO"), (2, "EVP Sales"), (3, "SVP Ops"),
+                                   (4, "Vice President, Marketing"), (6, "Director, Brand")])
+   == {0, 1, 2, 3}, "em rule: with enough senior leaders, plain VPs and directors stay out")
 
 # Only one apex, whatever the order or how many CEO-ish titles there are.
 for title_set, expected in [
