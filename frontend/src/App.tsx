@@ -995,6 +995,13 @@ export default function App() {
           const pr = await apiFetch('/leadership-ready')
           if (!pr.ok) { clearInterval(pollTimer); return }
           const pd = await pr.json()
+          // The server lost this build (it restarted mid-way). Waiting out the
+          // 15-minute timeout used to be the only sign; say so now instead.
+          if (pd.lost) {
+            clearInterval(pollTimer)
+            setLeadershipNote('⚠ The server restarted while building this chart — please create it again.')
+            return
+          }
           // Update industry if background task refined it
           if (pd.industry && pd.industry !== industry) {
             setIndustry(pd.industry)

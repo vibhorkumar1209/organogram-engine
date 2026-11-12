@@ -48,7 +48,7 @@ def _make_session(name="Acme", n=5):
     dag, db, classified, _domain, _industry = build_from_records(
         _records(n), company_name=name, db_path=tempfile.mktemp(suffix=".db"))
     return A.JobSession(dag=dag, db=db, classified_records=classified,
-                        enrichment_done=True, last_accessed_at=time.time(),
+                        enrichment_done=True, linkedin_done=True, last_accessed_at=time.time(),
                         db_path="", company_name=name)
 
 
@@ -126,6 +126,69 @@ try:
     ok(len(A._JOBS) == 1, "watchdog: keeps the most recent job usable")
 finally:
     A._rss_mb = _orig_rss
+    A._JOBS.clear()
+    A._JOBS.update(_saved)
+
+# ── A chart still being built is never evicted (WestRock x3, 2026-11-11) ────
+_saved = dict(A._JOBS)
+A._JOBS.clear()
+_orig_rss = A._rss_mb
+try:
+    for name in ("old-a", "old-b"):
+        A._JOBS[name] = _make_session()
+        A._JOBS[name].last_accessed_at = time.time() - 100
+    A._JOBS["building"] = _make_session()
+    A._JOBS["building"].enrichment_done = False            # leadership search running
+    A._JOBS["building"].last_accessed_at = time.time() - 200  # and the oldest
+    A._JOBS["linkedin"] = _make_session()
+    A._JOBS["linkedin"].linkedin_done = False               # profiles still running
+    A._JOBS["linkedin"].last_accessed_at = time.time() - 150
+    A._JOBS["newest"] = _make_session()
+    A._rss_mb = lambda: A._RSS_SOFT_LIMIT_MB + 50
+    A._shed_memory_if_needed()
+    ok({"building", "linkedin"} <= set(A._JOBS) and not {"old-a", "old-b"} & set(A._JOBS),
+       f"watchdog: finished charts go, charts still building stay ({sorted(A._JOBS)})")
+    A._JOBS["building"].db.conn.execute("SELECT 1")          # its database is still open
+    ok(True, "watchdog: a building chart keeps its database open")
+
+    # The resident cap skips them too.
+    _cap = A._MAX_RESIDENT_JOBS
+    A._MAX_RESIDENT_JOBS = 1
+    A._enforce_job_capacity()
+    ok({"building", "linkedin"} <= set(A._JOBS), "cap: charts still building are not evicted")
+    A._MAX_RESIDENT_JOBS = _cap
+
+    # A build stuck for longer than the give-up time is evictable again.
+    A._JOBS["building"].created_at = time.time() - A._BUILD_GIVE_UP_SECONDS - 1
+    ok(not A._is_building(A._JOBS["building"]), "watchdog: a stuck build is not held forever")
+finally:
+    A._rss_mb = _orig_rss
+    A._JOBS.clear()
+    A._JOBS.update(_saved)
+
+# ── A lost build says so, instead of "not ready" forever ────────────────────
+from fastapi.testclient import TestClient
+_client = TestClient(A.app)
+lost = _client.get("/leadership-ready", params={"job_id": "11111111-2222-3333-4444-555555555555"}).json()
+ok(lost.get("lost") is True and lost.get("loaded") is False and lost.get("enrichment_done") is False,
+   f"lost: an unknown or lost build is reported as lost ({lost})")
+
+# ── The same chart asked for again mid-build reuses that build ──────────────
+_saved = dict(A._JOBS)
+try:
+    sess = _make_session(name="Dollar General")
+    sess.enrichment_done = False
+    meta = dict(sess.dag.G.nodes["root_global"].get("metadata", {}))
+    meta["domain"] = "dollargeneral.com"
+    sess.dag.G.nodes["root_global"]["metadata"] = meta
+    A._JOBS["dg-building"] = sess
+    again = _client.post("/company-chart", json={"company_name": "dollar general",
+                                                 "domain": "https://www.dollargeneral.com",
+                                                 "hq_location": "Goodlettsville, TN"}).json()
+    ok(again.get("job_id") == "dg-building" and again.get("reused") is True,
+       f"reuse: a repeat request mid-build returns that build ({again.get('job_id')})")
+    ok(len(A._JOBS) == len(_saved) + 1, "reuse: no second build was started")
+finally:
     A._JOBS.clear()
     A._JOBS.update(_saved)
 

@@ -10,6 +10,7 @@ import logging
 import re
 import httpx
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -588,6 +589,11 @@ def ping():
         "commit": commit[:7] if commit else "local",
         "started_at": _PROCESS_STARTED_AT,
         "uptime_s": round(time.time() - _PROCESS_STARTED_AT, 1),
+        # Memory on a 512 MB instance: what decides whether the next build
+        # survives. Charts held and builds running alongside it.
+        "rss_mb": round(_rss_mb()),
+        "jobs_resident": len(_JOBS),
+        "jobs_building": sum(1 for s in list(_JOBS.values()) if _is_building(s)),
     }
 
 # ─── Per-org in-memory state ──────────────────
@@ -613,9 +619,57 @@ class JobSession:
     db_path: str = ""
     company_name: str = ""
     usage_tracker: UsageTracker = field(default_factory=UsageTracker)
+    created_at: float = field(default_factory=time.time)
 
 
 _JOBS: dict[str, "JobSession"] = {}
+
+# A chart still being built lives only in memory until its background work
+# saves it. Evicting it then lost it for good: the work finished against a
+# closed database ("Cannot operate on a closed database"), the session was
+# gone so it was never marked done, and History kept it hidden as
+# "processing" — WestRock x3 on 2026-11-11 and runs on 11-10 and 11-12.
+_BUILD_GIVE_UP_SECONDS = int(os.environ.get("ORGANOGRAM_BUILD_GIVE_UP_MINUTES", "30")) * 60
+
+
+_BUILD_SLOTS = threading.BoundedSemaphore(
+    max(1, int(os.environ.get("ORGANOGRAM_MAX_CONCURRENT_BUILDS", "2"))))
+
+
+def _is_building(session: "JobSession") -> bool:
+    """Background work (leadership search, then LinkedIn) still running."""
+    if session.enrichment_done and session.linkedin_done:
+        return False
+    # A build this old is stuck; holding it forever would leak its memory.
+    return (time.time() - session.created_at) < _BUILD_GIVE_UP_SECONDS
+
+
+def _release_memory() -> None:
+    """Hand freed heap back to the OS. CPython rarely does so on its own, so
+    RSS stayed near Render's 512 MB ceiling after jobs were evicted (the
+    watchdog logged the same RSS before and after) until the instance was
+    killed. glibc only; a no-op elsewhere."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+def _limit_malloc_arenas() -> None:
+    """Cap glibc malloc arenas. Each worker thread (research, LinkedIn: up to
+    16) otherwise gets its own arena, which holds memory long after the thread
+    is done. M_ARENA_MAX = -8."""
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").mallopt(-8, int(os.environ.get("ORGANOGRAM_MALLOC_ARENAS", "2")))
+    except Exception:
+        pass
+
+
+_limit_malloc_arenas()
 
 
 _EMPTY_GRAPH = {"loaded": False, "nodes": [], "edges": [],
@@ -634,11 +688,13 @@ def _evict_job(job_id: str) -> None:
             session.db.conn.close()
         except Exception:
             pass
+        _release_memory()
 
 
 def _evict_if_stale(job_id: str) -> None:
     session = _JOBS.get(job_id)
-    if session is not None and (time.time() - session.last_accessed_at) > _TTL_SECONDS:
+    if (session is not None and not _is_building(session)
+            and (time.time() - session.last_accessed_at) > _TTL_SECONDS):
         _evict_job(job_id)
 
 
@@ -706,9 +762,11 @@ def _shed_memory_if_needed() -> int:
         return 0
     evicted = 0
     by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
-    for jid, _ in by_age:
+    for jid, sess in by_age:
         if len(_JOBS) <= 1:
             break   # always keep the most recent job usable
+        if _is_building(sess):
+            continue   # not saved yet: evicting it loses the chart
         _evict_job(jid)
         evicted += 1
         if _rss_mb() < _RSS_SOFT_LIMIT_MB:
@@ -729,8 +787,9 @@ def _enforce_job_capacity() -> None:
     and rehydrate on next access, so this costs a reload, never data.
     """
     if len(_JOBS) > _MAX_RESIDENT_JOBS:
-        by_age = sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
-        for jid, _ in by_age[: len(_JOBS) - _MAX_RESIDENT_JOBS]:
+        idle = [(jid, s) for jid, s in sorted(_JOBS.items(), key=lambda kv: kv[1].last_accessed_at)
+                if not _is_building(s)]
+        for jid, _ in idle[: len(_JOBS) - _MAX_RESIDENT_JOBS]:
             _evict_job(jid)
         logger.info("Job capacity: evicted down to %d resident job(s)", len(_JOBS))
     _shed_memory_if_needed()
@@ -1152,12 +1211,22 @@ async def _ingest_records(records: list[dict],
         finally:
             if _session is not None:
                 _session.linkedin_done = True
+            # The search threads and their buffers are done with; give the
+            # memory back before the next chart starts.
+            _release_memory()
+
+    def _run_in_slot(*args):
+        # Each build runs a research pool and up to 16 LinkedIn threads; three
+        # at once (WestRock x3 within 9 s) pushed the 512 MB instance over.
+        # Extra builds wait their turn; their polls just read "not ready".
+        with _BUILD_SLOTS:
+            _run_enrichment(*args)
 
     if background_tasks is not None:
-        background_tasks.add_task(_run_enrichment, job_id, dag, classified, company_name, domain, db)
+        background_tasks.add_task(_run_in_slot, job_id, dag, classified, company_name, domain, db)
     else:
         # Fallback: run synchronously if no background task context available
-        _run_enrichment(job_id, dag, classified, company_name, domain, db)
+        _run_in_slot(job_id, dag, classified, company_name, domain, db)
 
     # ── Field coverage check (group-aware) ──────────────────────────────────
     # Vendors use many equivalent column names.  We check coverage by semantic
@@ -1209,10 +1278,16 @@ async def leadership_ready(job_id: str = Query(...)):
     Frontend polls every 10s; re-fetches /tree when counts > 0 or industry changed.
     """
     _validate_job_id(job_id)
-    session = _JOBS.get(job_id)   # hot poll path — in-memory only, no disk reload
+    session = _JOBS.get(job_id)   # hot poll path — memory first
+    if session is None and _dag_loaded(job_id):
+        session = _JOBS.get(job_id)   # a finished chart, reloaded from storage
     if session is None:
-        return {"ready": False, "board_count": 0, "exec_count": 0, "industry": "",
-                "usage": UsageTracker().summary()}
+        # Not in memory and never saved: the server restarted (or the job was
+        # never created) while it was being built. Say so, so a client stops
+        # polling instead of waiting out its timeout on "ready": false.
+        return {"loaded": False, "lost": True, "ready": False, "board_count": 0,
+                "exec_count": 0, "industry": "", "enrichment_done": False,
+                "linkedin_done": False, "usage": UsageTracker().summary()}
     dag = session.dag
     board_count = 0
     exec_count  = 0
@@ -1849,6 +1924,20 @@ async def company_chart(payload: CompanyChartRequest,
     domain = _clean_domain(payload.domain)
     site_url = _site_url(payload.domain)
     hq = str(payload.hq_location or "").strip()
+
+    # The same chart asked for again while it is still being built gets that
+    # build, not a second one: each costs ~$0.20 and ~100 MB, and retries in
+    # quick succession were what pushed the server over its memory limit.
+    for jid, sess in list(_JOBS.items()):
+        root_meta = (sess.dag.G.nodes.get("root_global", {}).get("metadata", {}) or {})
+        if (_is_building(sess) and sess.company_name.strip().lower() == company_name.lower()
+                and str(root_meta.get("domain", "") or "") == domain):
+            sess.last_accessed_at = time.time()
+            return {"status": "ok", "job_id": jid, "reused": True, "records_ingested": 0,
+                    "canonical_missing": [], "industry": str(root_meta.get("industry", "") or ""),
+                    "stats": sess.dag.stats(), "usage": sess.usage_tracker.summary(),
+                    "hq_location": hq or str(root_meta.get("hq_location", "") or ""),
+                    "domain": domain}
 
     result = await _ingest_records([], [], [], company_name, domain, background_tasks)
 
