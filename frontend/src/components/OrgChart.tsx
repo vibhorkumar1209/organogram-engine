@@ -7,6 +7,8 @@ interface Props {
   tree: OrgNode | null
   highlightId: string | null
   onNodeClick: (node: OrgNode) => void
+  /** "+" on a department, sub-department or sub-team card: add people to it. */
+  onAddPeople?: (node: OrgNode) => void
   /** After expanding this node ID, auto-pan to show its new children */
   focusNodeId?: string | null
   /**
@@ -61,7 +63,7 @@ function accentColor(d: d3.HierarchyNode<OrgNode>): string {
   return SECTOR_COLORS[d.data.sector] ?? d.data.color ?? '#64748B'
 }
 
-export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focusNodeId, fitGeneration }) => {
+export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, onAddPeople, focusNodeId, fitGeneration }) => {
   const svgRef             = useRef<SVGSVGElement>(null)
   const containerRef       = useRef<HTMLDivElement>(null)
   const zoomRef            = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null)
@@ -352,7 +354,27 @@ export const OrgChart: React.FC<Props> = ({ tree, highlightId, onNodeClick, focu
       .attr('fill', d => accentColor(d) + '88')
       .text(d => `${d.data.metadata.people_count} people`)
 
-  }, [tree, highlightId, dims, onNodeClick, focusNodeId])
+    // ── "+" on every department, sub-department and sub-team ──────────
+    // Adds people to that unit; the engine sorts them into its sub-departments,
+    // sub-teams and levels. Not on the Board: directors are not a roster.
+    if (onAddPeople) {
+      const plus = nodeGroups.filter(d =>
+        ['dept_primary', 'dept_secondary', 'dept_tertiary'].includes(d.data.node_type) &&
+        d.data.node_id !== 'dept__board_of_management')
+        .append('g')
+        .attr('class', 'add-people')
+        .attr('transform', `translate(${NODE_W / 2 - 15}, ${NODE_H / 2 - 13})`)
+        .style('cursor', 'pointer')
+        .on('click', (e, d) => { e.stopPropagation(); onAddPeople(d.data) })
+      plus.append('title').text(d => `Add people to ${d.data.label}`)
+      plus.append('circle').attr('r', 8).attr('fill', '#E63946')
+      plus.append('text')
+        .attr('y', 4).attr('text-anchor', 'middle')
+        .attr('font-size', 13).attr('font-weight', 700).attr('fill', '#ffffff')
+        .text('+')
+    }
+
+  }, [tree, highlightId, dims, onNodeClick, onAddPeople, focusNodeId])
 
   // ── Zoom controls ──────────────────────────────────────────────────
   const handleZoom = (factor: number) => {

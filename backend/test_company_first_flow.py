@@ -223,6 +223,14 @@ r = client.post("/ingest-json", params={"job_id": em_job, "scope": fin_id}, json
     {"full_name": "Sam Oduya", "job_title": "Senior Accountant", "company": "Acme Corp"},
 ])
 ok(r.status_code == 200, "split: roster ingested against a derived department")
+# Each expansion is a new version with its own id, derived from the original.
+_orig_em_job, em_job = em_job, r.json()["job_id"]
+ok(em_job == f"{_orig_em_job}-e1" and r.json().get("root_job_id") == _orig_em_job
+   and r.json().get("parent_job_id") == _orig_em_job and r.json().get("revision") == 1,
+   f"version: the expansion gets its own id, linked to the original ({em_job})")
+_orig_fin = client.get("/executives", params={"job_id": _orig_em_job, "dept_id": fin_id}).json()
+ok("Pia Lindqvist" not in [p["label"] for p in _orig_fin["executives"]],
+   "version: the original chart is left as it was")
 after_sel = client.get("/selectable", params={"job_id": em_job}).json()
 fin = next(d for d in after_sel["departments"] if d["label"] == "Finance & Accounting")
 ok(fin["people"] >= 1,
@@ -445,6 +453,7 @@ roster = [
 r = client.post("/ingest-json", params={"job_id": job}, json=roster)
 ok(r.status_code == 200, f"ingest-json: accepted (got {r.status_code})")
 ok(r.json()["ingested"]["added"] == 6, "ingest-json: all six people added")
+_root_job, job = job, r.json()["job_id"]
 
 people = _people(job)
 ok(people.get("Ana Silva") == S.BOARD_DEPT,
@@ -468,6 +477,13 @@ again = [
 ]
 r = client.post("/ingest-json", params={"job_id": job}, json=again)
 counts = r.json()["ingested"]
+_prev, job = job, r.json()["job_id"]
+ok(job == f"{_root_job}-e2" and r.json()["parent_job_id"] == _prev
+   and r.json()["root_job_id"] == _root_job and r.json()["revision"] == 2,
+   f"version: a second expansion is -e2 of the same original, parented on -e1 ({job})")
+_e1 = client.get("/stats", params={"job_id": f"{_root_job}-e1"}).json()
+ok(_e1.get("loaded") is True and _e1.get("people_nodes", 0) > 0,
+   "version: the earlier version still opens under its own id")
 ok(counts["merged"] == 2, f"dedup: two known people merged, not re-added (got {counts['merged']})")
 ok(counts["added"] == 1, "dedup: only the genuinely new person is added")
 after = _people(job)
@@ -500,6 +516,7 @@ r = client.post("/ingest", params={"job_id": job},
                 files={"file": ("team.csv", csv, "text/csv")})
 ok(r.status_code == 200, "ingest: CSV file accepted")
 ok(r.json()["ingested"]["merged"] == 1, "ingest: the already-known chair merged from CSV")
+job = r.json()["job_id"]
 ok(_people(job).get("Li Wei") == S.EXEC_DEPT, "ingest: new CTO routed to Executive Management")
 
 r = client.post("/ingest", params={"job_id": job},
@@ -530,6 +547,7 @@ r = client.post("/ingest-json", params={"job_id": job, "scope": scope_ids},
                        "company": "Acme Corp"}])
 ok(r.status_code == 200, "scope: ingest accepts selected node ids")
 ok(r.json()["scope"] == scope_ids.split(","), "scope: selection echoed back")
+job = r.json()["job_id"]
 ok(_people(job).get("Noor Haddad") not in ("", None),
    "scope: the classifier still placed the person (selection is a hint)")
 

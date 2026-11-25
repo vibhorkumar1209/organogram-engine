@@ -2355,8 +2355,13 @@ def _enrich_with_llm_leadership(
             li = (person.get("linkedin_url", "") or "").strip()
             injections.append((bod_layer, person["name"], title, "Board of Management", sub_role, region, li))
         exec_rows = []
+        external = []
         for person in leadership.get("executives", []):
             title = person["title"]
+            # A director's day job elsewhere is not an executive role here.
+            if _is_external_role(title, co):
+                external.append(person["name"])
+                continue
             em_layer    = _exec_layer(title)
             if _is_regional_exec(title):
                 em_layer = max(em_layer, 2)
@@ -2374,6 +2379,9 @@ def _enrich_with_llm_leadership(
                 continue
             exec_region = _infer_exec_region(title, region)
             injections.append((em_layer, person["name"], title, "Executive Management", "", exec_region, li))
+        if external:
+            logger.info("Dropped %d executive(s) whose title is a role at another "
+                        "organisation for '%s': %s", len(external), co, external)
         if outside_em:
             logger.info("Kept %d below-SVP leader(s) out of Executive Management for '%s': %s",
                         len(outside_em), co, [r["FullName"] for r in outside_em])
@@ -2660,6 +2668,72 @@ def _strip_org_qualifier(title: str, company: str = "") -> str:
     return out.strip(" ,;")
 
 
+# A past job, or another company / university by its legal or academic name.
+# Narrow on purpose: "Global Partners", "Capital Markets", "School of
+# Management" (at a business school) are real units of the organisation.
+_OTHER_ORG_RE = re.compile(
+    r"\b(?:former|formerly|retired|inc|llc|llp|lp|ltd|plc|gmbh|corp|corporation"
+    r"|university|college)\b",
+    re.IGNORECASE)
+_EDU_RE = re.compile(r"\b(?:university|college|school|institute|academy)\b", re.IGNORECASE)
+
+
+def _is_external_role(title: str, company: str = "") -> bool:
+    """A title that describes a job somewhere else, or a past one.
+
+    Directors are listed by their day job; when the research also returned
+    them as executives, Amazon's Executive Management held seven of them
+    ("Former Chair and CEO of PepsiCo, Inc.", "President of Marshall
+    University"). A title naming the company itself is never external.
+    """
+    t = str(title or "")
+    hit = _OTHER_ORG_RE.search(t)
+    if not hit:
+        return False
+    if (hit.group(0).lower() in ("university", "college") and _EDU_RE.search(str(company or ""))
+            and not re.search(r"\b(?:former|formerly|retired)\b", t, re.IGNORECASE)):
+        return False                     # a university's own deans and provosts
+    comp = re.sub(r"[,.]?\s*(?:inc|corp|corporation|co|ltd|plc|llc|lp|group|company)\.?$", "",
+                  str(company or "").strip(), flags=re.IGNORECASE).strip()
+    first = comp.split()[0] if comp else ""
+    if first and len(first) > 2 and re.search(rf"\b{re.escape(first)}\b", t, re.IGNORECASE):
+        return False
+    return True
+
+
+def _exec_department_path(title: str, company: str = "") -> tuple[str, str]:
+    """(department, sub-department) an executive runs; ("", "") for the apex.
+
+    Executive Management branches into main departments only. An executive
+    whose title names a part of one — "SVP, Customer Marketing", "EVP, Store
+    Operations", "SVP, Advertising & Promotion" — runs a sub-department inside
+    it, not a department of its own beside Marketing. A business unit that
+    belongs to no function ("President, Creativity & Productivity Business")
+    stays a department in its own right.
+    """
+    primary = _exec_department(title, company)
+    if not primary:
+        return "", ""
+    raw = _strip_org_qualifier(str(title or "").strip(), company)
+    sub = ""
+    try:
+        from classifier import classify as _classify_title
+        r = _classify_title(job_title=raw)
+        if r.dept_primary == primary and r.dept_secondary:
+            sub = r.dept_secondary
+        if not sub:
+            unit = _business_unit_from_title(raw)
+            if (unit and "," not in unit and len(unit.split()) <= 4
+                    and unit.lower() != primary.lower()
+                    and not set(unit.lower().split()) <= set(primary.lower().split())):
+                ur = _classify_title(job_title=unit)
+                if ur.dept_primary == primary and ur.method != "job_function_fallback":
+                    sub = ur.dept_secondary or unit
+    except Exception:
+        pass
+    return primary, sub
+
+
 def _exec_department(title: str, company: str = "") -> str:
     """
     The department an executive runs, or "" for the apex (CEO / Chair).
@@ -2778,6 +2852,12 @@ def _business_unit_from_title(title: str) -> str:
     if re.search(r"\bofficer\b", tail, re.IGNORECASE):
         return ""
     tail = re.sub(r"\s+", " ", tail).strip(" ,&-")
+    # Another organisation is not a department: Amazon's directors arrived as
+    # "President of Marshall University" and "Co-Founder of Medley Living,
+    # Inc. and Former EVP of Goldman Sachs Group, Inc." — both became
+    # departments under Executive Management.
+    if _OTHER_ORG_RE.search(tail):
+        return ""
     _GENERIC_TAIL = {"staff", "office", "the company", "company", "group",
                      "business", "operations officer", "administration", "and", "&"}
     if tail and 2 < len(tail) <= 60 and tail.lower() not in _GENERIC_TAIL:
@@ -2847,6 +2927,7 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
     # Which department each executive runs, so a head can be attached below.
     head_of: dict[str, tuple[str, str, str]] = {}   # dept -> (node_id, name, title)
     leads: dict[str, str] = {}                        # executive node -> dept
+    leads_sub: dict[str, str] = {}                    # executive node -> sub-department
     for nid in list(dag.G.nodes):
         attrs = dag.G.nodes[nid]
         if attrs.get("node_type") != "person":
@@ -2854,11 +2935,17 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
         if _person_department(dag, nid) != EXEC_DEPT:
             continue
         meta = attrs.get("metadata", {}) or {}
-        dept_name = _exec_department(meta.get("designation", ""), meta.get("company", ""))
+        dept_name, sub_name = _exec_department_path(meta.get("designation", ""),
+                                                    meta.get("company", ""))
         if dept_name:
             leads[nid] = dept_name
-            head_of.setdefault(
-                dept_name, (nid, attrs.get("label", ""), meta.get("designation", "")))
+            if sub_name:
+                # Runs a part of the department: heads the sub-department,
+                # and the department keeps its own head (the CMO, say).
+                leads_sub[nid] = sub_name
+            else:
+                head_of.setdefault(
+                    dept_name, (nid, attrs.get("label", ""), meta.get("designation", "")))
 
     # The core set always appears; anything an executive runs that is not in it
     # (a business unit such as Core Diagnostics) is appended.
@@ -2905,9 +2992,22 @@ def split_executive_departments(dag: "OrganogramDAG") -> int:
     # department (a CFO and a Treasurer both land in Finance).
     for nid, dept_name in leads.items():
         dept_id = _dept_node_id(dept_name)
-        if nid in dag.G and dept_id in dag.G:
+        if nid in dag.G and (dept_id in dag.G or leads_sub.get(nid)):
             meta = dict(dag.G.nodes[nid].get("metadata", {}) or {})
-            meta["leads_department"], meta["leads_department_id"] = dept_name, dept_id
+            sub_name = leads_sub.get(nid, "")
+            if sub_name:
+                attrs = dag.G.nodes[nid]
+                sub_id = dag.ensure_department(meta.get("region", "") or "Global HQ",
+                                               attrs.get("sector", "") or "", dept_name, sub_name, "")
+                smeta = dict(dag.G.nodes[sub_id].get("metadata", {}) or {})
+                if not smeta.get("head_node_id"):
+                    smeta["head_node_id"], smeta["head_name"], smeta["head_title"] = (
+                        nid, attrs.get("label", ""), meta.get("designation", ""))
+                    dag.G.nodes[sub_id]["metadata"] = smeta
+                meta["leads_department"] = f"{dept_name} \u203a {sub_name}"
+                meta["leads_department_id"] = sub_id
+            else:
+                meta["leads_department"], meta["leads_department_id"] = dept_name, dept_id
             dag.G.nodes[nid]["metadata"] = meta
     mark_apex(dag)
     if created:
@@ -3165,11 +3265,116 @@ def _person_department(dag: "OrganogramDAG", node_id: str) -> str:
     return ""
 
 
+def _dept_path(dag: "OrganogramDAG", dept_id: str) -> list[str]:
+    """Labels from the main department down to *dept_id*:
+    ["Marketing", "Performance & Digital Marketing", "SEO"]."""
+    stop = {"root_global", _dept_node_id(BOARD_DEPT), _dept_node_id(EXEC_DEPT)}
+    path, nid, seen = [], dept_id, set()
+    while nid and nid not in stop and nid in dag.G and nid not in seen:
+        seen.add(nid)
+        a = dag.G.nodes[nid]
+        if not str(a.get("node_type", "")).startswith("dept"):
+            break
+        path.append(str(a.get("label", "")))
+        parents = [p for p in dag.G.predecessors(nid)
+                   if str(dag.G.nodes[p].get("node_type", "")).startswith("dept") or p == "root_global"]
+        nid = parents[0] if parents else ""
+    return list(reversed(path))
+
+
+def _scope_targets(dag: "OrganogramDAG", scope: list[str] | None) -> list[tuple[str, list[str]]]:
+    """(dept id, path) for each selected department, or the department a
+    selected executive runs. The Board and Executive Management are not
+    targets: a roster belongs to a department."""
+    out: list[tuple[str, list[str]]] = []
+    for sid in scope or []:
+        sid = str(sid or "").strip()
+        if sid not in dag.G:
+            continue
+        attrs = dag.G.nodes[sid]
+        if attrs.get("node_type") == "person":
+            sid = str((attrs.get("metadata") or {}).get("leads_department_id") or "")
+            if sid not in dag.G:
+                continue
+            attrs = dag.G.nodes[sid]
+        if not str(attrs.get("node_type", "")).startswith("dept"):
+            continue
+        if sid in (_dept_node_id(BOARD_DEPT), _dept_node_id(EXEC_DEPT)):
+            continue
+        path = _dept_path(dag, sid)
+        if path and all(t[0] != sid for t in out):
+            out.append((sid, path))
+    return out
+
+
+def _functional_primaries() -> set[str]:
+    try:
+        import classifier as _c
+        return {v.lower() for k, v in vars(_c).items()
+                if k.startswith("DEPT_") and isinstance(v, str)}
+    except Exception:
+        return set()
+
+
+def _place_in_scope(rec, targets: list[tuple[str, list[str]]]) -> str:
+    """Decide where one classified person goes, given the departments the
+    roster was added to. Returns "in_scope", "elsewhere" or "uncertain";
+    rec.dept_* are updated in place.
+
+    - Confidently another department → that department only.
+    - Confidently this department → here, in the sub-department / sub-team
+      their title names (or the one selected, when they name none).
+    - Not confident → the selected department, flagged for review.
+    A business unit (not a function) keeps its whole roster, organised by
+    function inside it.
+    """
+    try:
+        from classifier import CONFIDENT
+    except Exception:
+        CONFIDENT = 0.6
+    certain = (float(getattr(rec, "nlp_confidence", 0) or 0) >= CONFIDENT
+               and getattr(rec, "nlp_method", "") not in ("job_function_fallback", "no_input"))
+    if not targets:
+        return "in_scope" if certain else "uncertain"
+
+    functional = _functional_primaries()
+    for _tid, path in targets:
+        if path[0].lower() not in functional:            # a business unit
+            fn, sub = rec.dept_primary, rec.dept_secondary
+            rec.dept_primary = path[0]
+            if len(path) >= 2:
+                rec.dept_secondary, rec.dept_tertiary = path[1], (path[2] if len(path) > 2 else "")
+            else:
+                rec.dept_secondary, rec.dept_tertiary = (fn if certain else ""), (sub if certain else "")
+            return "in_scope" if certain else "uncertain"
+
+    match = next((t for t in targets if t[1][0].lower() == (rec.dept_primary or "").lower()), None)
+    if certain:
+        if match is None:
+            return "elsewhere"
+        path = match[1]
+        if len(path) >= 2:
+            if rec.dept_secondary and rec.dept_secondary.lower() != path[1].lower():
+                return "elsewhere"                         # a different sub-department
+            rec.dept_secondary = path[1]
+            if len(path) >= 3 and (not rec.dept_tertiary
+                                   or rec.dept_tertiary.lower() == path[2].lower()):
+                rec.dept_tertiary = path[2]
+        return "in_scope"
+
+    path = targets[0][1]
+    rec.dept_primary = path[0]
+    rec.dept_secondary = path[1] if len(path) > 1 else ""
+    rec.dept_tertiary = path[2] if len(path) > 2 else ""
+    return "uncertain"
+
+
 def add_records_to_dag(
     dag: "OrganogramDAG",
     records: list[dict],
     company_name: str,
     industry: str = "",
+    scope: list[str] | None = None,
 ) -> dict:
     """
     Classify *records* and add them to an EXISTING chart.
@@ -3180,12 +3385,15 @@ def add_records_to_dag(
     upload carries that the web did not (LinkedIn URL, location), so the final
     chart holds one node per person regardless of how many sources named them.
 
-    Returns counts: {"added", "merged", "board", "executives"}.
+    Returns counts: {"added", "merged", "board", "executives", "in_scope",
+    "elsewhere", "uncertain"} — the last three say where newly added people
+    went relative to *scope* (the departments the roster was added to).
     """
     from inference_logic import InferenceEngine
 
     if not records:
-        return {"added": 0, "merged": 0, "board": 0, "executives": 0}
+        return {"added": 0, "merged": 0, "board": 0, "executives": 0,
+                "in_scope": 0, "elsewhere": 0, "uncertain": 0}
 
     engine = InferenceEngine(industry=industry)
     classified = engine.classify_all(records)
@@ -3193,6 +3401,8 @@ def add_records_to_dag(
     # Route leadership titles to the BOD / EM panels; everyone else keeps
     # whatever department the classifier inferred.
     board_count = exec_count = 0
+    targets = _scope_targets(dag, scope)
+    placement: dict[str, tuple[str, str]] = {}   # rec.id -> (outcome, best guess)
     for rec in classified:
         bucket = _leadership_bucket(getattr(rec, "designation", ""))
         if bucket == BOARD_DEPT:
@@ -3205,6 +3415,10 @@ def add_records_to_dag(
             rec.layer = 2 if _is_regional_exec(rec.designation) else 1
             rec.nlp_method = "upload_leadership"
             exec_count += 1
+        else:
+            guess = " \u203a ".join(x for x in (rec.dept_primary, rec.dept_secondary,
+                                                rec.dept_tertiary) if x)
+            placement[rec.id] = (_place_in_scope(rec, targets), guess)
 
     index = _existing_person_index(dag)
     fresh, merged = [], 0
@@ -3227,10 +3441,23 @@ def add_records_to_dag(
 
     # Senior first, so ghost chains can route through real people.
     fresh.sort(key=lambda r: r.layer)
+    outcomes = {"in_scope": 0, "elsewhere": 0, "uncertain": 0}
     for rec in fresh:
         dag.insert_person(rec)
         for key in _person_alias_keys(rec.full_name):
             index.setdefault(key, rec.id)
+        outcome, guess = placement.get(rec.id, ("", ""))
+        if outcome:
+            outcomes[outcome] += 1
+        if outcome == "uncertain" and rec.id in dag.G:
+            # Shown at the bottom of the department's card, highlighted, for
+            # someone to confirm or move.
+            meta = dag.G.nodes[rec.id].setdefault("metadata", {})
+            meta["placement_uncertain"] = True
+            meta["placement_note"] = (
+                f"Not sure where \u201c{rec.designation or rec.full_name}\u201d belongs"
+                + (f" \u2014 best guess: {guess}" if guess else "")
+                + ". Placed here for review.")
 
     dag.repair_governance_edges()
     logger.info(
@@ -3239,7 +3466,7 @@ def add_records_to_dag(
         company_name, len(fresh), merged, board_count, exec_count,
     )
     return {"added": len(fresh), "merged": merged,
-            "board": board_count, "executives": exec_count}
+            "board": board_count, "executives": exec_count, **outcomes}
 
 
 def _enrich_existing_node(dag: "OrganogramDAG", node_id: str, rec) -> None:

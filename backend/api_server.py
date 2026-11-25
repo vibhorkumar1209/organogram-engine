@@ -77,8 +77,7 @@ COLUMN_ALIASES: dict[str, str] = {
     # JOB_TITLE is the primary vendor title column
     "job_title": "Designation", "job title": "Designation", "jobtitle": "Designation",
     "designation": "Designation", "title": "Designation",
-    "position": "Designation", "role": "Designation",
-    "job role": "Designation", "current title": "Designation",
+    "position": "Designation", "current title": "Designation",
     "currenttitle": "Designation", "current position": "Designation",
 
     # ── Company ──────────────────────────────────────────────────────────
@@ -1399,8 +1398,27 @@ def debug_classified(job_id: str = Query(...)):
 #              9=Senior IC/Lead, 10=Analyst/Specialist  ← excluded
 _EXPORT_MAX_LAYER: int = 8
 
+# The board's display name. The engine keys it internally as BOARD_DEPT
+# ("Board of Management", id dept__board_of_management) and finds people by
+# that label, so only what is shown changes.
+BOARD_DISPLAY = "Board of Directors"
+
+
+def _display_dept(name: str) -> str:
+    return BOARD_DISPLAY if str(name or "").strip().lower() == BOARD_DEPT.lower() else (name or "")
+
+
+def _relabel_board(node: dict) -> dict:
+    """The board node shows as "Board of Directors" wherever it appears in a tree."""
+    if node.get("node_id") == _dept_node_id(BOARD_DEPT):
+        node["label"] = BOARD_DISPLAY
+    for child in node.get("children") or []:
+        _relabel_board(child)
+    return node
+
+
 _SENIORITY_LABELS: dict[int, str] = {
-    0:  "Board of Management (G0)",
+    0:  "Board of Directors (G0)",
     1:  "C-Suite (G1)",
     2:  "Executive VP (G2)",
     3:  "SVP / Managing Director (G3)",
@@ -1474,7 +1492,7 @@ def export_org_chart(
             "Name":             attrs.get("label", ""),
             "Title":            str(meta.get("designation", "") or ""),
             "Category":         category,
-            "Department":       dept,
+            "Department":       _display_dept(dept),
             "Seniority Level":  _SENIORITY_LABELS.get(layer, f"G{layer}"),
             "Region":           str(meta.get("region", "") or ""),
             "Location":         str(meta.get("location", "") or ""),
@@ -1716,7 +1734,7 @@ def export_pptx(
     depts: list[dict] = []
     for dept_id in dept_nodes:
         attrs  = dag.G.nodes.get(dept_id, {})
-        label  = attrs.get("label", dept_id)
+        label  = _display_dept(attrs.get("label", dept_id))
         color  = attrs.get("color", "#3491E8")
         head, columns, hc = _build_columns_for_dept(dept_id)
         if hc == 0:
@@ -1788,7 +1806,7 @@ def get_tree(
     tree = dag.get_subtree(root, max_depth=max_depth, dept_only=dept_only)
     if not tree:
         raise HTTPException(status_code=404, detail=f"Node '{root}' not found.")
-    return tree
+    return _relabel_board(tree)
 
 
 @app.get("/subtree")
@@ -2094,26 +2112,162 @@ def _records_from_payload(payload) -> list[dict]:
     return records
 
 
+def _persist_job(job_id: str, extra: dict | None = None) -> None:
+    """Save a finished chart's current state to shared storage.
+
+    Charts were saved only when their build finished, so people added later
+    (and departments added by hand) lived on the server's disk alone — lost
+    on the next restart, since Render's disk does not survive one. A chart
+    still building is saved when its build ends.
+    """
+    session = _JOBS.get(job_id)
+    if session is None or _is_building(session):
+        return
+    root_meta = session.dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}
+    lineage = extra or {k: root_meta[k] for k in ("root_job_id", "parent_job_id", "revision")
+                        if root_meta.get(k)}
+    history_store.record_job_completed(job_id, session.dag, root_meta.get("industry", ""),
+                                       session.usage_tracker.summary(), extra=lineage or None)
+
+
+class DepartmentRequest(BaseModel):
+    name: str
+    parent_id: Optional[str] = None     # none / Executive Management → a department
+
+
+@app.post("/departments")
+def add_department(payload: DepartmentRequest, job_id: str = Query(...)):
+    """Add a department, sub-department or sub-team the chart did not produce.
+
+    No parent (or Executive Management) → a department under Executive
+    Management; a department → a sub-department in it; a sub-department → a
+    sub-team in it. Sub-teams are the deepest level. People are then added to
+    it like any other. A hand-made department is a unit of its own, like a
+    business unit: its roster stays in it, organised by function. A hand-made
+    sub-department or sub-team follows its department's rules.
+    """
+    from structural_engine import _dept_path
+    name = re.sub(r"\s+", " ", str(payload.name or "")).strip()
+    if not 2 <= len(name) <= 60:
+        raise HTTPException(status_code=422, detail="Give the department a name of 2 to 60 characters.")
+    if name.lower() in (BOARD_DEPT.lower(), EXEC_DEPT.lower(), BOARD_DISPLAY.lower(), "board of directors"):
+        raise HTTPException(status_code=422, detail=f"\u201c{name}\u201d is already part of every chart.")
+    if not _dag_loaded(job_id):
+        raise HTTPException(status_code=400, detail="This chart is no longer on the server \u2014 create it again.")
+    dag, db = _require_dag(job_id)
+
+    parent = (payload.parent_id or "").strip()
+    em_id, bod_id = _dept_node_id(EXEC_DEPT), _dept_node_id(BOARD_DEPT)
+    if parent in ("", em_id):
+        path, level = [name], "department"
+    else:
+        if parent not in dag.G or not str(dag.G.nodes[parent].get("node_type", "")).startswith("dept"):
+            raise HTTPException(status_code=404, detail="That parent department is not in the chart.")
+        if parent == bod_id:
+            raise HTTPException(status_code=422, detail="The Board of Directors has no departments.")
+        ppath = _dept_path(dag, parent)
+        if len(ppath) >= 3:
+            raise HTTPException(status_code=422,
+                                detail="Sub-teams are the deepest level; add it to the sub-department instead.")
+        path = ppath + [name]
+        level = "sub-department" if len(path) == 2 else "sub-team"
+
+    existing = {str(a.get("label", "")).lower(): nid for nid, a in dag.G.nodes(data=True)
+                if str(a.get("node_type", "")).startswith("dept")
+                and _dept_path(dag, nid)[:-1] == path[:-1]}
+    if name.lower() in existing:
+        raise HTTPException(status_code=409, detail=f"\u201c{name}\u201d already exists there.")
+
+    root_meta = dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}
+    new_id = dag.ensure_department(root_meta.get("hq_location", "") or "Global HQ", "",
+                                   path[0], path[1] if len(path) > 1 else "",
+                                   path[2] if len(path) > 2 else "")
+    meta = dict(dag.G.nodes[new_id].get("metadata", {}) or {})
+    meta["custom"] = True               # added by a person, not found by the engine
+    dag.G.nodes[new_id]["metadata"] = meta
+    db.upsert_dag(dag)
+    _persist_job(job_id)
+    return {"node_id": new_id, "label": name, "level": level, "path": path,
+            "parent_id": parent or em_id, "stats": dag.stats()}
+
+
+def _fork_job(job_id: str) -> tuple[str, dict]:
+    """Copy a chart under a new job id derived from the original's.
+
+    Every expansion (people added to a department) is its own version with
+    its own id, so each can be identified, opened and compared later:
+    "<original id>-e1", "-e2", … — the original keeps its id and contents.
+    Returns (new id, lineage {root_job_id, parent_job_id, revision}).
+    """
+    dag, _db = _require_dag(job_id)
+    session = _JOBS[job_id]
+    root_meta = dict(dag.G.nodes.get("root_global", {}).get("metadata", {}) or {})
+    root_id = str(root_meta.get("root_job_id") or job_id)
+    rev = int(root_meta.get("revision") or 0)
+    while True:
+        rev += 1
+        new_id = f"{root_id}-e{rev}"[:64]
+        if (new_id not in _JOBS and not os.path.exists(_job_db_path(new_id))
+                and not history_store.job_exists(new_id)):
+            break
+    lineage = {"root_job_id": root_id, "parent_job_id": job_id, "revision": rev}
+
+    import copy as _copy
+    # Deep copy: merging an added person into an existing one edits that
+    # node's metadata, which must not reach back into the original chart.
+    clone = _dag_from_snapshot({
+        "company_name": session.company_name or getattr(dag, "company_name", ""),
+        "nodes": [_copy.deepcopy({**attrs, "node_id": nid}) for nid, attrs in dag.G.nodes(data=True)],
+        "edges": dag.get_edges(),
+    })
+    if clone is None:
+        raise HTTPException(status_code=500, detail="Could not copy the chart for this expansion.")
+    clone.company_name = session.company_name or getattr(dag, "company_name", "")
+    if "root_global" in clone.G:
+        clone.G.nodes["root_global"]["metadata"] = {**root_meta, **lineage}
+    path = _job_db_path(new_id)
+    db = OrganogramDB(db_path=path)
+    db.upsert_dag(clone)
+    _JOBS[new_id] = JobSession(dag=clone, db=db, classified_records=[], enrichment_done=True,
+                               linkedin_done=True, last_accessed_at=time.time(), db_path=path,
+                               company_name=clone.company_name)
+    history_store.record_job_created(new_id, clone.company_name, "upload")
+    return new_id, lineage
+
+
 def _apply_ingest(job_id: str, records: list[dict], scope: list[str]) -> dict:
-    """Shared tail for every ingest source: classify, dedupe, persist."""
+    """Shared tail for every ingest source: classify, dedupe, persist.
+
+    The people go into a new version of the chart with its own job id
+    (`_fork_job`); the chart they were added to is left as it was.
+    """
     if not records:
         raise HTTPException(status_code=422, detail="No records to ingest.")
     if len(records) > _MAX_ROWS:
         records = records[:_MAX_ROWS]
 
-    dag, db = _require_dag(job_id)
-    session = _JOBS[job_id]
+    _require_dag(job_id)
+    new_id, lineage = _fork_job(job_id)
+    dag, db = _require_dag(new_id)
+    session = _JOBS[new_id]
     industry = (dag.G.nodes.get("root_global", {}).get("metadata", {}) or {}).get("industry", "")
 
-    counts = add_records_to_dag(dag, records, session.company_name or dag.company_name,
-                                industry=industry)
+    try:
+        counts = add_records_to_dag(dag, records, session.company_name or dag.company_name,
+                                    industry=industry, scope=scope)
+    except Exception:
+        _evict_job(new_id)                 # a failed expansion leaves no half-made version
+        history_store.delete_job(new_id)
+        raise
     db.upsert_dag(dag)
     session.last_accessed_at = time.time()
+    _persist_job(new_id, lineage)
     _shed_memory_if_needed()
 
     stats = dag.stats() if hasattr(dag, "stats") else {}
     return {
-        "job_id": job_id,
+        "job_id": new_id,
+        **lineage,
         "ingested": counts,
         "scope": scope,
         "stats": stats,
@@ -2326,14 +2480,28 @@ def get_executives(
     # separate branch the walk above never reaches — so Finance & Accounting
     # listed its team but not its CFO. Add them, flagged, ahead of their team.
     # (A copy: the node itself stays in Executive Management.)
+    # Executives who run one of its sub-departments ("SVP, Customer
+    # Marketing" inside Marketing) belong to its team too, unflagged.
     if dept_id not in (_dept_node_id(BOARD_DEPT), _dept_node_id(EXEC_DEPT)):
         have = {p.get("node_id") for p in people}
+        below: set = set()
+        stack = [dept_id]
+        while stack:
+            for kid in dag.G.successors(stack.pop()):
+                if str(dag.G.nodes[kid].get("node_type", "")).startswith("dept") and kid not in below:
+                    below.add(kid)
+                    stack.append(kid)
         for nid, attrs in dag.G.nodes(data=True):
             meta = attrs.get("metadata") or {}
-            if (attrs.get("node_type") == "person" and nid not in have
-                    and meta.get("leads_department_id") == dept_id):
+            led = meta.get("leads_department_id")
+            if attrs.get("node_type") != "person" or nid in have or not led:
+                continue
+            if led == dept_id:
                 people.append({**attrs, "node_id": attrs.get("node_id", nid),
                                "metadata": {**meta, "is_department_head": True}})
+            elif led in below:
+                people.append({**attrs, "node_id": attrs.get("node_id", nid),
+                               "metadata": {**meta, "leads_sub_department": True}})
 
     people.sort(key=lambda p: (0 if (p.get("metadata") or {}).get("is_department_head") else 1,
                                p.get("layer", 99), p.get("label", "")))

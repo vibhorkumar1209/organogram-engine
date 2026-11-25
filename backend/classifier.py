@@ -81,6 +81,11 @@ class TitleClassification:
     layer:          int
     confidence:     float   # 0.0–1.0
     method:         str     # evidence trail
+    dept_tertiary:  str = ""   # sub-team inside the sub-department, when the text names one
+
+
+# Below this, a placement is a guess: shown for review, not trusted.
+CONFIDENT = 0.6
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -887,6 +892,11 @@ _DEPT_SCORE_RULES: list[tuple[str, list[tuple[int, str]]]] = [
     # ── Marketing ────────────────────────────────────────────────────────────
     (DEPT_MKT, [
         (100, "cmo"), (100, "chief marketing officer"),
+        # Functions marketing owns that were read as nothing at all, so an
+        # "SVP, Advertising & Promotion" became its own top-level department.
+        (85,  "customer marketing"), (80, "advertising"), (75, "promotion"),
+        (75,  "promotions"), (70, "loyalty"), (70, "media buying"),
+        (65,  "sponsorship"), (65, "lifecycle marketing"), (65, "crm marketing"),
         (90,  "marketing director"), (90, "head of marketing"),
         (90,  "vp marketing"), (90, "vp of marketing"),
         (90,  "brand director"), (90, "head of brand"),
@@ -913,6 +923,10 @@ _DEPT_SCORE_RULES: list[tuple[str, list[tuple[int, str]]]] = [
     # ── Sales & Business Development ────────────────────────────────────────
     (DEPT_SALES, [
         (100, "chief revenue officer"),
+        # Commercial channels and retail buying ("SVP, E-commerce",
+        # "SVP, Global Merchandising") had no keyword either.
+        (80,  "e-commerce"), (80, "ecommerce"), (75, "digital commerce"),
+        (75,  "online sales"), (75, "merchandising"), (70, "merchant"),
         (100, "chief business officer"), (100, "chief sales officer"),
         (90,  "vp sales"), (90, "vp of sales"),
         (90,  "sales director"), (90, "head of sales"),
@@ -1211,12 +1225,16 @@ _SUB_DEPT_KEYWORDS: dict[str, list[tuple[str, list[str]]]] = {
         ("Performance & Digital Marketing",["performance marketing", "digital marketing", "seo", "sem", "paid media", "social media", "email marketing"]),
         ("Product Marketing",             ["product marketing", "gtm", "go-to-market", "market research", "competitive"]),
         ("Field & Event Marketing",       ["events", "field marketing", "trade marketing"]),
+        ("Customer Marketing",            ["customer marketing", "loyalty", "lifecycle marketing", "crm marketing", "customer engagement"]),
+        ("Advertising & Promotion",       ["advertising", "promotion", "promotions", "media buying", "sponsorship"]),
     ],
 
     DEPT_SALES: [
         ("Direct Sales",                  ["account executive", "account manager", "enterprise sales", "field sales", "regional sales", "territory"]),
         ("Sales Operations",              ["sales operations", "revenue operations", "revops", "crm", "sales enablement"]),
         ("Partnerships & Alliances",      ["partnerships", "alliances", "channel", "partner manager", "business development"]),
+        ("E-commerce & Digital Sales",    ["e-commerce", "ecommerce", "digital commerce", "online sales", "marketplace"]),
+        ("Merchandising",                 ["merchandising", "merchant"]),
     ],
 
     DEPT_CS: [
@@ -1351,6 +1369,7 @@ def _classify_dept(
     headline: str,
     job_function: str,
     industry: str = "",
+    profile: str = "",
 ) -> tuple[str, float, str]:
     """
     Score every department against the combined text of title + headline.
@@ -1381,6 +1400,22 @@ def _classify_dept(
     top_dept,  top_score   = ranked[0]
     sec_dept,  sec_score   = ranked[1] if len(ranked) > 1 else ("", 0)
 
+    # The title (and headline, role) decide when they are clear. When they are
+    # not, the person's "about" and responsibilities break the tie, at half
+    # weight: long free text names other functions in passing ("partnered
+    # with Sales"), so it never outweighs a clear title.
+    if profile and (top_score == 0 or top_score - sec_score < 30):
+        prof = _norm_for_match(profile)
+        for dept, rules in _DEPT_SCORE_RULES:
+            scores[dept] = scores.get(dept, 0) + _score(prof, rules) // 2
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        p_top, p_score = ranked[0]
+        p_sec_score = ranked[1][1] if len(ranked) > 1 else 0
+        if p_score > 0:
+            p_gap = p_score - p_sec_score
+            conf = 0.75 if p_gap >= 60 else 0.65 if p_gap >= 30 else 0.5 if p_gap >= 10 else 0.4
+            return p_top, conf, "title+profile"
+
     if top_score == 0:
         hint = _FUNCTION_HINT_MAP.get((job_function or "").strip().lower())
         return (hint or DEPT_OPS, 0.3, "job_function_fallback")
@@ -1403,6 +1438,48 @@ def _classify_dept(
             conf, method = 0.55, "title_keyword_weak"
 
     return top_dept, conf, method
+
+
+# Keywords that name a person's job, not a team ("recruiter", "copywriter"):
+# never used as a sub-team name.
+_ROLE_NOUN_RE = re.compile(
+    r"(?:er|or|ist|ant|manager|executive|director|owner|partner|analyst|officer|designer|head|lead)$")
+# Display forms for keywords that are acronyms or need their own spelling.
+_SUB_TEAM_LABEL = {"seo": "SEO", "sem": "SEM", "ux": "UX", "ui": "UI", "pr": "PR", "bi": "BI",
+                   "crm": "CRM", "gtm": "Go-to-Market", "go-to-market": "Go-to-Market",
+                   "ios": "iOS", "aws": "AWS", "gcp": "GCP", "sap": "SAP", "erp": "ERP",
+                   "kyc": "KYC", "aml": "AML", "gdpr": "GDPR", "ehs": "EHS", "hse": "HSE",
+                   "qa": "QA", "l&d": "L&D", "dei": "DE&I", "hris": "HRIS", "iam": "IAM",
+                   "soc": "SOC", "sre": "SRE", "m&a": "M&A", "fp&a": "FP&A", "cx": "CX",
+                   "e-commerce": "E-commerce", "ecommerce": "E-commerce"}
+
+
+def _classify_sub_team(dept_primary: str, dept_secondary: str, text: str) -> str:
+    """A sub-team inside the sub-department, named by the specific function the
+    text names: Performance & Digital Marketing → "SEO", "Social Media";
+    Talent Acquisition → "Recruitment". "" when the match is a job noun
+    ("recruiter") or just restates the sub-department."""
+    if not dept_secondary:
+        return ""
+    combined = _norm_for_match(text)
+    for sub, keywords in _SUB_DEPT_KEYWORDS.get(dept_primary, []):
+        if sub != dept_secondary:
+            continue
+        for kw in keywords:
+            if _KW_PADDED.get(kw, _norm_for_match(kw)) not in combined:
+                continue
+            if _ROLE_NOUN_RE.search(kw):
+                continue
+            label = _SUB_TEAM_LABEL.get(kw) or " ".join(
+                w if w.isupper() else w.capitalize() for w in kw.split())
+            # "Brand" inside Brand & Creative, "Digital Marketing" inside
+            # Performance & Digital Marketing: a restatement, not a team.
+            words = set(_norm_for_match(label).split())
+            if words <= set(_norm_for_match(dept_secondary).split()) | set(
+                    _norm_for_match(dept_primary).split()):
+                continue
+            return label
+    return ""
 
 
 def _classify_sub_dept(dept_primary: str, title: str, headline: str) -> str:
@@ -1428,6 +1505,9 @@ def classify(
     job_function:      str = "",
     job_level:         str = "",
     industry:          str = "",
+    role:              str = "",
+    about:             str = "",
+    responsibilities:  str = "",
 ) -> TitleClassification:
     """
     Classify a person record into a canonical department + layer.
@@ -1447,10 +1527,23 @@ def classify(
 
     Returns
     -------
-    TitleClassification with dept_primary, dept_secondary, layer, confidence.
+    role, about, responsibilities
+                      Further signals, used in that order of trust: the role
+                      reads like a second headline; "about" and the listed
+                      responsibilities only settle what the title leaves open
+                      (department, sub-department, sub-team), never seniority.
+
+    TitleClassification with dept_primary, dept_secondary, dept_tertiary,
+    layer, confidence. confidence < CONFIDENT means the placement is a guess.
     """
     title    = (job_title        or "").strip()
+    role_txt = (role or "").strip()
+    profile  = " ".join(x.strip() for x in (about or "", responsibilities or "") if x and x.strip())
+    if not title and role_txt:
+        title, role_txt = role_txt, ""
     headline = (linkedin_headline or "").strip()
+    if role_txt and role_txt.lower() != title.lower():
+        headline = f"{headline} {role_txt}".strip()
     jf       = (job_function     or "").strip()
     jl       = (job_level        or "").strip()
     ind      = (industry         or "").strip()
@@ -1483,8 +1576,13 @@ def classify(
         )
 
     # ── Department classification (industry-aware) ───────────────────────
-    dept, conf, method = _classify_dept(effective_title, headline, jf, ind)
+    dept, conf, method = _classify_dept(effective_title, headline, jf, ind, profile)
     sub  = _classify_sub_dept(dept, effective_title, headline)
+    if not sub and profile:
+        sub = _classify_sub_dept(dept, profile, "")
+    team = _classify_sub_team(dept, sub, f"{effective_title} {headline}")
+    if not team and profile:
+        team = _classify_sub_team(dept, sub, profile)
 
     return TitleClassification(
         dept_primary=dept,
@@ -1492,4 +1590,5 @@ def classify(
         layer=layer,
         confidence=conf,
         method=method,
+        dept_tertiary=team,
     )

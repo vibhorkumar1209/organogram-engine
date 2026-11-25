@@ -41,6 +41,10 @@ interface HistoryRun {
   output_tokens: number
   cost_usd:      number
   gemini_pricing_is_estimate: boolean
+  // Set on a version made by adding people: "<root_job_id>-e<revision>".
+  root_job_id?:   string
+  parent_job_id?: string
+  revision?:      number
 }
 
 interface SelectableDept {
@@ -104,7 +108,15 @@ function flattenTree(node: OrgNode, out: OrgNode[] = []): OrgNode[] {
   return out
 }
 
+// The engine's internal name for the board is "Board of Management"; it is
+// shown as "Board of Directors". Relabelling here also fixes charts cached in
+// the browser before the server started sending the new name.
+const BOARD_ID = 'dept__board_of_management'
+
 function filterToDeptNodes(node: OrgNode): OrgNode {
+  if (node.node_id === BOARD_ID && node.label !== 'Board of Directors') {
+    node = { ...node, label: 'Board of Directors' }
+  }
   const allChildren = node.children ?? []
   const deptChildren = allChildren.filter(c => DEPT_TYPES.has(c.node_type))
   const hasPeopleBelow = allChildren.some(c => !DEPT_TYPES.has(c.node_type))
@@ -177,7 +189,7 @@ function toPersonNode(p: Record<string, any>, fallbackColor: string): OrgNode {
 
 function HistoryPageView({
   runs, loading, error, sourceFilter, onSourceFilterChange,
-  search, onSearchChange, onRefresh, onView,
+  search, onSearchChange, onRefresh, onView, onDelete,
 }: {
   runs: HistoryRun[]
   loading: boolean
@@ -188,6 +200,7 @@ function HistoryPageView({
   onSearchChange: (s: string) => void
   onRefresh: () => void
   onView: (run: HistoryRun) => void
+  onDelete: (run: HistoryRun) => void
 }) {
   const filtered = runs.filter(r => {
     if (sourceFilter !== 'all' && r.source !== sourceFilter) return false
@@ -283,9 +296,24 @@ function HistoryPageView({
                 >
                   <td style={{ padding: '10px', color: '#e0eaf4', fontWeight: 600 }}>
                     {r.company_name}
+                    {r.revision ? (
+                      <span
+                        title={`Version ${r.revision + 1}: people added to the chart ${r.parent_job_id ?? ''}. Original chart: ${r.root_job_id ?? ''}`}
+                        style={{
+                          marginLeft: 6, fontSize: 9.5, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
+                          background: 'rgba(82,208,140,0.14)', border: '1px solid rgba(82,208,140,0.35)',
+                          color: '#52d08c',
+                        }}>
+                        +people · v{r.revision + 1}
+                      </span>
+                    ) : null}
                     {r.industry && (
                       <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>{r.industry}</div>
                     )}
+                    <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.3)', fontWeight: 400,
+                                  fontFamily: "'SF Mono', monospace" }}>
+                      {r.job_id}
+                    </div>
                   </td>
                   <td style={{ padding: '10px' }}>
                     <span style={{
@@ -318,8 +346,20 @@ function HistoryPageView({
                   <td style={{ padding: '10px', color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>
                     {r.created_at ? relativeTime(new Date(r.created_at).getTime()) : '—'}
                   </td>
-                  <td style={{ padding: '10px', textAlign: 'right' }}>
+                  <td style={{ padding: '10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <span style={{ color: '#3491E8', fontSize: 11, fontWeight: 600 }}>View →</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); onDelete(r) }}
+                      title={`Delete this ${r.company_name} chart from history`}
+                      aria-label={`Delete ${r.company_name} chart`}
+                      style={{
+                        marginLeft: 12, background: 'none', border: '1px solid rgba(230,57,70,0.35)',
+                        borderRadius: 5, padding: '2px 8px', color: '#f08a8f', fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -398,6 +438,7 @@ export default function App() {
   const [ingestBusy, setIngestBusy]     = useState(false)
   const [ingestNote, setIngestNote]     = useState('')
   const [ingestTarget, setIngestTarget] = useState('')
+  const [ingestTargetId, setIngestTargetId] = useState('')
 
   // ── History state ──────────────────────────────────────────────────
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
@@ -758,6 +799,26 @@ export default function App() {
 
   // "View" a past run: point the existing job-addressing machinery at it —
   // no separate rendering path, just the same /tree flow every other chart uses.
+  // Delete a run from the shared history (and from the server). Permanent and
+  // seen by everyone, so it asks first.
+  const deleteHistoryRun = async (run: HistoryRun) => {
+    const what = run.revision ? `${run.company_name} (version ${run.revision + 1})` : run.company_name
+    if (!window.confirm(`Delete the ${what} chart from Org History?\n\nThis removes it for everyone and cannot be undone.`)) return
+    try {
+      const res = await apiCreate(`/reset?job_id=${encodeURIComponent(run.job_id)}`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      setHistoryRuns(prev => prev.filter(r => r.job_id !== run.job_id))
+      if (activeJobIdRef.current === run.job_id) {
+        // The chart on screen was just deleted: clear it rather than leave a dead chart.
+        activeJobIdRef.current = null
+        setDeptTree(null); setViewTree(null); setStats(null)
+        setPanelDept(null); setPanelExecs(null); setStatus('idle')
+      }
+    } catch (e: any) {
+      setHistoryError(`Could not delete ${run.company_name}: ${e?.message ?? 'unknown error'}`)
+    }
+  }
+
   const viewHistoryRun = async (run: HistoryRun) => {
     activeJobIdRef.current = run.job_id
     setView('chart')
@@ -862,12 +923,14 @@ export default function App() {
 
   // Escape closes the topmost layer: Paste-JSON, LinkedIn table, add-people,
   // then the drawer. (The drawer's own report dialog claims Escape first.)
-  const escState = useRef({ jsonDialog: false, linkedIn: false, selectOpen: false, ingestBusy: false })
+  const escState = useRef({ jsonDialog: false, linkedIn: false, selectOpen: false, ingestBusy: false,
+                            deptDialog: false })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       const st = escState.current
-      if (st.jsonDialog) setJsonDialog(false)
+      if (st.deptDialog) setDeptDialog(false)
+      else if (st.jsonDialog) setJsonDialog(false)
       else if (st.linkedIn) setLinkedInReport(null)
       else if (st.selectOpen) { if (!st.ingestBusy) setSelectOpen(false) }
       else if (panelDeptRef.current) closePanel()
@@ -1097,11 +1160,78 @@ export default function App() {
     setSelectedIds(preselect?.node_id && preselect.node_id !== 'dept__executive_management'
       ? [preselect.node_id] : [])
     setIngestTarget(preselect?.label ?? '')
+    setIngestTargetId(preselect?.node_id && preselect.node_id !== 'dept__executive_management'
+      ? preselect.node_id : '')
     try {
       const res = await apiFetch('/selectable')
       if (res.ok) setSelectable(await res.json())
     } catch {
       setSelectable(null)
+    }
+  }
+
+  // The chart's "+" buttons. Stable identity: the D3 chart redraws whenever
+  // its callbacks change, so this must not be a new function every render.
+  const openSelectionRef = useRef(openSelection)
+  openSelectionRef.current = openSelection
+  const onChartAddPeople = useCallback((node: OrgNode) => { openSelectionRef.current(node) }, [])
+
+  // ── Add a department / sub-department / sub-team by hand ──────────────
+  type DeptLevel = 'department' | 'sub-department' | 'sub-team'
+  const [deptDialog, setDeptDialog]   = useState(false)
+  const [deptName, setDeptName]       = useState('')
+  const [deptLevel, setDeptLevel]     = useState<DeptLevel>('department')
+  const [deptParent, setDeptParent]   = useState('')
+  const [deptOptions, setDeptOptions] = useState<{ id: string; label: string; level: 1 | 2 }[]>([])
+  const [deptBusy, setDeptBusy]       = useState(false)
+  const [deptError, setDeptError]     = useState('')
+
+  const openDeptDialog = async () => {
+    setDeptDialog(true); setDeptName(''); setDeptLevel('department'); setDeptParent(''); setDeptError('')
+    try {
+      // The whole department tree, not just what the chart has expanded.
+      const r = await apiFetch('/tree?root=root_global&max_depth=8&dept_only=true')
+      const t: OrgNode = await r.json()
+      const opts: { id: string; label: string; level: 1 | 2 }[] = []
+      const walk = (n: OrgNode, trail: string[]) => {
+        const skip = n.node_id === 'root_global' || n.node_id === 'dept__board_of_management'
+          || n.node_id === 'dept__executive_management'
+        const here = skip ? trail : [...trail, n.label]
+        if (!skip && n.node_type === 'dept_primary') opts.push({ id: n.node_id, label: here.join(' › '), level: 1 })
+        if (!skip && n.node_type === 'dept_secondary') opts.push({ id: n.node_id, label: here.join(' › '), level: 2 })
+        ;(n.children ?? []).forEach(c => walk(c, here))
+      }
+      walk(t, [])
+      opts.sort((a, b) => a.label.localeCompare(b.label))
+      setDeptOptions(opts)
+    } catch { setDeptOptions([]) }
+  }
+
+  const submitDept = async () => {
+    const name = deptName.trim()
+    if (name.length < 2) { setDeptError('Give it a name of at least 2 characters.'); return }
+    if (deptLevel !== 'department' && !deptParent) {
+      setDeptError(`Choose the ${deptLevel === 'sub-department' ? 'department' : 'sub-department'} it belongs to.`)
+      return
+    }
+    setDeptBusy(true); setDeptError('')
+    try {
+      const res = await apiFetch('/departments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, parent_id: deptLevel === 'department' ? null : deptParent }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.detail || `Server error ${res.status}`)
+      setDeptDialog(false)
+      setLeadershipNote(`✅ Added ${data.level} “${data.label}”` +
+        (data.path?.length > 1 ? ` in ${data.path.slice(0, -1).join(' › ')}` : ' under Executive Management') +
+        ' — use its + to add people.')
+      if (data.stats) setStats(data.stats)
+      await loadDeptStructure(data.stats, industry, 'upload', null, activeJobIdRef.current)
+    } catch (e: any) {
+      setDeptError(e?.message ?? 'Could not add it.')
+    } finally {
+      setDeptBusy(false)
     }
   }
 
@@ -1129,17 +1259,27 @@ export default function App() {
       }
       const data = await res.json()
       const c = data.ingested ?? {}
-      setIngestNote(
-        `Added ${c.added ?? 0}` +
-        (c.merged ? `, merged ${c.merged} already in the chart` : '') +
-        '.')
+      // Adding people makes a new version of the chart with its own job id
+      // ("<original>-e<n>"); from here on every call addresses that version.
+      const newJob: string = data.job_id ?? jobId
+      activeJobIdRef.current = newJob
+      const parts = [
+        c.in_scope ? `${c.in_scope} placed in ${ingestTarget || 'the selection'}` : '',
+        c.elsewhere ? `${c.elsewhere} moved to the department that fits them` : '',
+        c.uncertain ? `${c.uncertain} need review (highlighted at the bottom of the card)` : '',
+        c.merged ? `${c.merged} already in the chart, merged` : '',
+      ].filter(Boolean)
+      setIngestNote('')
+      setLeadershipNote(
+        `✅ Added ${c.added ?? 0}${parts.length ? ` — ${parts.join(' · ')}` : ''}` +
+        (data.revision ? ` · saved as version ${data.revision + 1}, job ${newJob}` : ''))
       setSelectOpen(false)
       setSelectedIds([])
       // Refresh the sidebar counts too — without this the People/Departments
       // figures kept showing the pre-ingest numbers even though the chart had
       // grown, which reads as "nothing happened".
       if (data.stats) setStats(data.stats)
-      await loadDeptStructure(data.stats, industry, 'upload', toUsage(data.usage), jobId)
+      await loadDeptStructure(data.stats, industry, 'upload', toUsage(data.usage), newJob)
       // The open drawer listed the department before these people arrived.
       refreshOpenPanel()
     } catch (e: any) {
@@ -1171,7 +1311,7 @@ export default function App() {
   const [jsonText,   setJsonText]   = useState('')
   const [jsonError,  setJsonError]  = useState('')
   // What the Escape handler (registered once) needs to know about open layers.
-  escState.current = { jsonDialog, linkedIn: !!linkedInReport, selectOpen, ingestBusy }
+  escState.current = { jsonDialog, linkedIn: !!linkedInReport, selectOpen, ingestBusy, deptDialog }
 
   const handlePasteJson = () => {
     const text = jsonText.trim()
@@ -1320,7 +1460,7 @@ export default function App() {
       children: [
         {
           node_id: 'dept__board_of_management', node_type: 'dept_primary',
-          label: 'Board of Management', layer: 1, sector: 'All', color: '#3491E8',
+          label: 'Board of Directors', layer: 1, sector: 'All', color: '#3491E8',
           is_ghost: false, expanded: true, has_more: false, metadata: {},
           children: [
             {
@@ -1552,6 +1692,7 @@ export default function App() {
           onSearchChange={setHistorySearch}
           onRefresh={loadHistoryRuns}
           onView={viewHistoryRun}
+          onDelete={deleteHistoryRun}
         />
       ) : (
       <>
@@ -1864,9 +2005,95 @@ export default function App() {
               tree={viewTree}
               highlightId={highlight}
               onNodeClick={handleNodeClick}
+              onAddPeople={status === 'ready' ? onChartAddPeople : undefined}
               focusNodeId={focusNodeId}
               fitGeneration={fitGeneration}
             />
+          )}
+
+          {/* Add a department, sub-department or sub-team the output lacks —
+              outside the chart, so it is there whatever is expanded. */}
+          {status === 'ready' && viewTree && activeJobIdRef.current && (
+            <button
+              onClick={openDeptDialog}
+              title="Add a department, sub-department or sub-team that is not in the chart"
+              style={{
+                position: 'absolute', top: 12, left: 12, zIndex: 30,
+                background: '#ffffff', border: '1px solid #E63946', borderRadius: 7,
+                padding: '6px 12px', color: '#E63946', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', boxShadow: '0 2px 8px rgba(12,54,73,0.08)',
+              }}
+            >
+              + Add department / sub-department / team
+            </button>
+          )}
+
+          {deptDialog && (
+            <div
+              style={{ position: 'absolute', inset: 0, background: 'rgba(0,32,77,0.35)', zIndex: 300,
+                       display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => { if (!deptBusy) setDeptDialog(false) }}
+            >
+              <div onClick={e => e.stopPropagation()} style={{
+                width: 460, background: '#ffffff', borderRadius: 10, padding: 20,
+                boxShadow: '0 12px 40px rgba(0,32,77,0.25)', display: 'flex', flexDirection: 'column', gap: 12,
+              }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#00204d' }}>Add to the chart</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['department', 'sub-department', 'sub-team'] as DeptLevel[]).map(l => (
+                    <button key={l} onClick={() => { setDeptLevel(l); setDeptParent('') }} style={{
+                      flex: 1, padding: '6px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                      border: `1px solid ${deptLevel === l ? '#E63946' : '#dde8ed'}`,
+                      background: deptLevel === l ? '#fff5f5' : '#ffffff',
+                      color: deptLevel === l ? '#E63946' : '#00204d', fontWeight: deptLevel === l ? 600 : 400,
+                      textTransform: 'capitalize',
+                    }}>{l.replace('-', ' ')}</button>
+                  ))}
+                </div>
+                <label style={{ fontSize: 11, color: '#627184' }}>
+                  Name
+                  <input autoFocus value={deptName} onChange={e => setDeptName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') submitDept() }}
+                    placeholder={deptLevel === 'department' ? 'e.g. Digital Transformation Office'
+                      : deptLevel === 'sub-department' ? 'e.g. Influencer Marketing' : 'e.g. TikTok'}
+                    style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 10px',
+                             border: '1px solid #dde8ed', borderRadius: 6, fontSize: 12, color: '#00204d' }} />
+                </label>
+                {deptLevel !== 'department' && (
+                  <label style={{ fontSize: 11, color: '#627184' }}>
+                    Inside
+                    <select value={deptParent} onChange={e => setDeptParent(e.target.value)}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 8px',
+                               border: '1px solid #dde8ed', borderRadius: 6, fontSize: 12, color: '#00204d' }}>
+                      <option value="">
+                        {deptLevel === 'sub-department' ? 'Choose a department…' : 'Choose a sub-department…'}
+                      </option>
+                      {deptOptions.filter(o => o.level === (deptLevel === 'sub-department' ? 1 : 2)).map(o => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <div style={{ fontSize: 11, color: '#93a7b4' }}>
+                  {deptLevel === 'department'
+                    ? 'Added under Executive Management.'
+                    : deptLevel === 'sub-department' ? 'Added inside the department you choose.'
+                    : 'Added inside the sub-department you choose. Sub-teams are the deepest level.'}
+                  {' '}Use its + afterwards to add people.
+                </div>
+                {deptError && <div style={{ fontSize: 12, color: '#E63946' }}>{deptError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button disabled={deptBusy} onClick={() => setDeptDialog(false)} style={{
+                    background: 'transparent', border: '1px solid #dde8ed', borderRadius: 6,
+                    padding: '6px 14px', color: '#627184', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                  <button disabled={deptBusy} onClick={submitDept} style={{
+                    background: '#E63946', border: 'none', borderRadius: 6, padding: '6px 16px',
+                    color: '#ffffff', fontSize: 12, fontWeight: 600, cursor: deptBusy ? 'wait' : 'pointer' }}>
+                    {deptBusy ? 'Adding…' : 'Add'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Hint bar */}
@@ -1910,6 +2137,32 @@ export default function App() {
 
                 {selectable === null && (
                   <div style={{ fontSize: 12, color: '#93a7b4' }}>Loading targets…</div>
+                )}
+
+                {/* A sub-department or sub-team picked with its "+" is not in
+                    the lists below, which hold Executive Management and its
+                    departments; show it as the target here. */}
+                {ingestTargetId && selectable &&
+                  !selectable.departments.some(d => d.id === ingestTargetId) &&
+                  !selectable.executives.some(e => e.id === ingestTargetId) && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6,
+                                  color: '#93a7b4', marginBottom: 6 }}>
+                      Adding to
+                    </div>
+                    <label style={{
+                      display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 6px',
+                      borderRadius: 5, cursor: 'pointer',
+                      background: selectedIds.includes(ingestTargetId) ? '#eef6fa' : 'transparent',
+                    }}>
+                      <input type="checkbox" checked={selectedIds.includes(ingestTargetId)}
+                             onChange={() => toggleSelected(ingestTargetId)} />
+                      <span style={{ fontSize: 12, color: '#00204d', fontWeight: 500 }}>{ingestTarget}</span>
+                      <span style={{ fontSize: 11, color: '#93a7b4', flex: 1 }}>
+                        people are sorted into its sub-teams and levels
+                      </span>
+                    </label>
+                  </div>
                 )}
 
                 {selectable && selectable.executives.length > 0 && (

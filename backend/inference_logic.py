@@ -407,7 +407,22 @@ _FIELD_ALIASES: dict[str, str] = {
     # job_title (new primary signal)
     "job_title": "Designation", "job title": "Designation", "jobtitle": "Designation",
     "designation": "Designation", "title": "Designation",
-    "position": "Designation", "role": "Designation",
+    "position": "Designation",
+    # role / about / responsibilities: further classification signals. A
+    # "role" column is the title only when there is no title column.
+    "role": "Role", "job role": "Role", "role title": "Role",
+    "about": "About", "summary": "About", "bio": "About", "biography": "About",
+    "profile summary": "About", "linkedin_summary": "About", "linkedin summary": "About",
+    "summary headline": "linkedin_headline", "summary_headline": "linkedin_headline",
+    "responsibilities": "Responsibilities", "key responsibilities": "Responsibilities",
+    "responsibility": "Responsibilities", "job description": "Responsibilities",
+    "job_description": "Responsibilities", "role description": "Responsibilities",
+    "duties": "Responsibilities",
+    # camelCase JSON keys, lower-cased
+    "roletitle": "Role", "jobrole": "Role", "linkedinsummary": "About",
+    "profilesummary": "About", "summaryheadline": "linkedin_headline",
+    "keyresponsibilities": "Responsibilities", "jobdescription": "Responsibilities",
+    "roledescription": "Responsibilities",
     "current title": "Designation", "currenttitle": "Designation",
     "current position": "Designation",
     # linkedin_headline (secondary NLP signal)
@@ -523,8 +538,11 @@ class InferenceEngine:
 
     def classify_record(self, record: dict) -> ClassifiedRecord:
         # ── Extract primary NLP signals ───────────────────────────────────
-        job_title  = _get(record, "Designation") or ""
+        role       = _get(record, "Role") or ""
+        job_title  = _get(record, "Designation") or role
         headline   = _get(record, "linkedin_headline") or ""
+        about      = _get(record, "About") or ""
+        responsibilities = _get(record, "Responsibilities") or ""
         job_function = _get(record, "job_function") or ""
         job_level  = _get(record, "job_level") or ""
 
@@ -565,11 +583,14 @@ class InferenceEngine:
             job_function=job_function,
             job_level=job_level,
             industry=self.industry,
+            role=role if role != job_title else "",
+            about=about,
+            responsibilities=responsibilities,
         )
 
         dept_primary   = result.dept_primary
         dept_secondary = result.dept_secondary
-        dept_tertiary  = ""
+        dept_tertiary  = result.dept_tertiary
         layer          = result.layer
 
         # ── Bare dept name safety net ─────────────────────────────────────

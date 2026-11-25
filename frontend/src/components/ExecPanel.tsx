@@ -28,7 +28,7 @@ interface Props {
 
 // Grade labels per Global_Designation_Hierarchy.xlsx (G0–G10)
 const LAYER_LABELS: Record<number, string> = {
-  0:  'Board of Management',     // G0 — Non-Executive / Supervisory
+  0:  'Board of Directors',      // G0 — Non-Executive / Supervisory
   1:  'C-Suite',                 // G1 — CEO, CFO, COO, CTO, CMO, CHRO …
   2:  'Executive VP',            // G2 — EVP / Executive Director
   3:  'SVP / Managing Director', // G3 — SVP, MD, Group President
@@ -683,7 +683,7 @@ const PersonRow: React.FC<{
 // ── CSV download helper (client-side, no server needed) ──────────────
 function downloadExecsCSV(deptLabel: string, execs: OrgNode[], isBoard = false) {
   const LAYER_LABELS: Record<number, string> = {
-    0: 'Board of Management (G0)', 1: 'C-Suite (G1)', 2: 'Executive VP (G2)',
+    0: 'Board of Directors (G0)', 1: 'C-Suite (G1)', 2: 'Executive VP (G2)',
     3: 'SVP / Managing Director (G3)', 4: 'VP / Head of (G4)',
     5: 'Senior Director / AVP (G5)', 6: 'Director (G6)',
     7: 'Senior Manager (G7)', 8: 'Manager (G8)',
@@ -941,19 +941,28 @@ export const ExecPanel: React.FC<Props> = ({
   // ── Geographic grouping ──────────────────────────────────────────────
   // Grouped by region (default) or country (when toggled).
   // Primary group = group of the apex (lowest layer) person.
+  // People the engine could not place with confidence stay out of the
+  // hierarchy and sit at the bottom of the card, highlighted, for review.
+  const needsReview = useMemo(
+    () => (executives ?? []).filter(p => Boolean(p.metadata?.placement_uncertain)),
+    [executives])
+  const placed = useMemo(
+    () => (executives ?? []).filter(p => !p.metadata?.placement_uncertain),
+    [executives])
+
   const regionGroups = useMemo<[string, OrgNode[]][]>(() => {
-    if (!executives || executives.length === 0) return []
+    if (placed.length === 0) return []
     const keyFn = groupMode === 'country'
       ? (p: OrgNode) => inferCountry(p, isBoard)
       : (p: OrgNode) => inferRegion(p, isBoard)
     const map = new Map<string, OrgNode[]>()
-    for (const p of executives) {
+    for (const p of placed) {
       const r = keyFn(p)
       if (!map.has(r)) map.set(r, [])
       map.get(r)!.push(p)
     }
     // Primary = group of the most-senior person
-    const apex    = [...executives].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
+    const apex    = [...placed].sort((a, b) => (a.layer ?? 99) - (b.layer ?? 99))[0]
     const primary = keyFn(apex)
     // Sort: primary first, then by headcount descending
     return [...map.entries()].sort(([ra, a], [rb, b]) => {
@@ -962,7 +971,7 @@ export const ExecPanel: React.FC<Props> = ({
       return b.length - a.length
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executives, isBoard, groupMode])
+  }, [placed, isBoard, groupMode])
 
   // Layer distribution summary (header)
   const byLayer: Record<number, number> = {}
@@ -1018,7 +1027,7 @@ export const ExecPanel: React.FC<Props> = ({
               fontSize: 9, color: '#627184', letterSpacing: 1.2,
               textTransform: 'uppercase', marginBottom: 4,
             }}>
-              {isBoard ? 'Board of Directors' : 'Executives'}
+              {isBoard ? 'Governance' : 'Executives'}
             </div>
             <div style={{
               fontSize: 14, fontWeight: 700, color,
@@ -1293,6 +1302,62 @@ export const ExecPanel: React.FC<Props> = ({
             </div>
           )
         })}
+
+        {/* ── Needs review: placement uncertain ────────────────── */}
+        {needsReview.length > 0 && (
+          <div style={{ borderTop: '2px solid #f59e0b' }}>
+            <div
+              title="The engine could not tell where these people belong from their title, headline, role, about or responsibilities. They were placed in this department for you to confirm or move."
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px 6px 10px',
+                background: '#fef3c7', borderLeft: '3px solid #f59e0b', cursor: 'help',
+              }}>
+              <span style={{ fontSize: 10 }}>⚠</span>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+                             color: '#92400e', flex: 1 }}>
+                Needs review · placement uncertain
+              </span>
+              <span style={{ fontSize: 8, color: '#92400e', background: '#fde68a', borderRadius: 3,
+                             padding: '1px 6px' }}>{needsReview.length}</span>
+            </div>
+            {needsReview.map(p => (
+              <div key={p.node_id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 14px 8px 12px',
+                background: '#fffbeb', borderLeft: '3px solid #f59e0b', borderBottom: '1px solid #fde68a',
+              }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                  background: '#fde68a', border: '1px solid #f59e0b',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700, color: '#92400e',
+                }}>{p.label.charAt(0).toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div title={p.label} style={{ fontSize: 11.5, fontWeight: 600, color: '#00204d',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.label}</div>
+                  {p.metadata?.designation && (
+                    <div title={String(p.metadata.designation)} style={{ fontSize: 9.5, color: '#627184',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {String(p.metadata.designation)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 9, color: '#92400e', marginTop: 3, lineHeight: 1.4 }}>
+                    {String(p.metadata?.placement_note ?? 'Placement uncertain — confirm or move.')}
+                  </div>
+                </div>
+                <div style={{ flexShrink: 0, fontSize: 8, color: '#92400e', background: '#fde68a',
+                              borderRadius: 3, padding: '2px 5px' }}>L{p.layer ?? '?'}</div>
+                {apiBase && (
+                  <button
+                    onClick={() => setReportPerson(p)}
+                    title="Report the right department for this person"
+                    style={{ flexShrink: 0, background: 'none', border: 'none', color: '#b45309',
+                             fontSize: 11, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+                  >⚑</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Footer: report new exec ───────────────────────────── */}

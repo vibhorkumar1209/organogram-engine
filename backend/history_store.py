@@ -153,7 +153,8 @@ def _counts(dag) -> dict:
             "board_count": board, "exec_count": execs}
 
 
-def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict) -> None:
+def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict,
+                         extra: dict | None = None) -> None:
     """dag: OrganogramDAG. usage_summary: the dict UsageTracker.summary() returns.
 
     Called again when LinkedIn profiles arrive after the chart, so it updates
@@ -177,6 +178,8 @@ def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict) -
             "cost_usd": float(usage_summary.get("cost_usd", 0) or 0),
             "gemini_pricing_is_estimate": bool(usage_summary.get("gemini_pricing_is_estimate")),
         })
+        if extra:
+            row.update(extra)     # e.g. parent_job_id / root_job_id / revision of an expansion
         # Build node entries from (node_id, attrs) pairs rather than
         # dag.get_flat_nodes() — governance nodes don't embed their own
         # node_id inside attrs, only the networkx key carries it.
@@ -188,6 +191,16 @@ def record_job_completed(job_id: str, dag, industry: str, usage_summary: dict) -
     except Exception as exc:
         logger.warning("history_store: record_job_completed failed for '%s': %s", job_id, exc)
         _note_error("record_job_completed", exc)
+
+
+def job_exists(job_id: str) -> bool:
+    """Whether a run with this id is recorded (False when the store is unset)."""
+    if not _configured():
+        return False
+    try:
+        return bool(_cmd("EXISTS", f"{_PREFIX}run:{job_id}"))
+    except Exception:
+        return False
 
 
 def delete_job(job_id: str) -> None:
