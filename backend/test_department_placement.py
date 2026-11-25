@@ -239,6 +239,14 @@ path, _ = placed("Ivy Influence")
 ok(path[:2] == ["Marketing", "Influencer Marketing"],
    f"add: people added to a hand-made sub-department land in it ({path})")
 
+# ── A company's industry alone is not a confident placement ─────────────────
+# On production, "Associate" at an e-commerce company was placed in Sales as if
+# certain (the industry boost was its only signal).
+from classifier import classify, CONFIDENT
+ok(classify(job_title="Associate", industry="Ecommerce").confidence < CONFIDENT
+   and classify(job_title="Sales Associate", industry="Ecommerce").confidence >= CONFIDENT,
+   "industry: a title with no function is a guess; one that names it is not")
+
 # ── The board is shown as "Board of Directors" ──────────────────────────────
 ok((find(t, S._dept_node_id(S.BOARD_DEPT)) or {}).get("label") == "Board of Directors",
    "label: the board shows as Board of Directors")

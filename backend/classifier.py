@@ -1390,8 +1390,12 @@ def _classify_dept(
     # title-based score > 0, OR (b) no clear title winner yet (max < 30).
     # This prevents, e.g., Financial Markets +60 IB boost from overriding
     # a clear HR or Compliance title signal.
+    # Whether the words themselves name a function. The industry boost below
+    # can lift a department with no keyword at all, which made "Associate" or
+    # "Team Member" at an e-commerce company read as a confident Sales hire.
+    raw_max = max(scores.values(), default=0)
     if industry:
-        _title_max = max(scores.values(), default=0)
+        _title_max = raw_max
         for boost, dept in _INDUSTRY_DEPT_BOOSTS.get(industry, []):
             if dept in scores and (scores[dept] > 0 or _title_max < 30):
                 scores[dept] = scores[dept] + boost
@@ -1419,6 +1423,9 @@ def _classify_dept(
     if top_score == 0:
         hint = _FUNCTION_HINT_MAP.get((job_function or "").strip().lower())
         return (hint or DEPT_OPS, 0.3, "job_function_fallback")
+    if raw_max == 0:
+        # Only the company's industry pointed anywhere: a guess, not a match.
+        return top_dept, 0.45, "industry_prior"
 
     gap = top_score - sec_score
     if gap >= 60:
